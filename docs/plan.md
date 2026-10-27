@@ -235,6 +235,13 @@ M0–M1 可以直接复用现有代码：内核的对账语料（来自 tmux 阶
 | Linux 客户端等于第二份 UI | 双倍 UI 工作 | 协议先行（`docs/protocol.md` 字段级）；Shared/Daemon 从第一天就 Linux 可编译，CI 双平台；交互规格 `docs/ui.md` 对齐两边行为 |
 | Swift 生态在 Linux 上的坑（GUI 绑定、字体、输入法） | Linux 版体验差 | M5 前只保证后台进程/协议在 Linux 可跑；客户端选型留到 M5（GTK 绑定 vs 换语言） |
 
+## 9.5 许可证
+
+**GPL-3.0-or-later**（`LICENSE`）。影响两条设计决策：
+1. 依赖只能选 GPLv3 兼容的：SwiftTerm（MIT）、`alacritty_terminal`/`vte`（MIT/Apache-2.0）、libghostty-vt（MIT）、
+   GTK（LGPL，动态链接）都可用；不要静态链接 GPL 不兼容的第三方代码。
+2. 参考项目只借“思路与规格”，逐行复制需要同许可证并标注来源；`docs/tmux-integration.md` 里的 tmux 行为记录属于规格事实，不受影响。
+
 ## 10. 现有资产（可直接搬）
 
 | 资产 | 位置 | 用途 |

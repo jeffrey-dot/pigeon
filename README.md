@@ -15,3 +15,8 @@
 
 两份历史资料描述的是上一个项目（gmux：fork Kitty + tmux）。pigeon 不再依赖 tmux，也不 fork Kitty，
 它们留在这里只作为证据与反面教材。
+
+## License
+
+GPL-3.0-or-later（见 [LICENSE](LICENSE)）。派生作品（包括修改后的客户端与内核）必须同样以 GPLv3 开源。
+依赖必须与 GPLv3 兼容（MIT / Apache-2.0 / BSD / LGPL 动态链接可用）。
