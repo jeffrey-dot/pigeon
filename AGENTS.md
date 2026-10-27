@@ -50,14 +50,14 @@ pigeon/
 ├── docs/                         # plan.md, ui.md, 历史资料
 ├── tools/vt-parity/              # 对账脚本与 golden 文件（不含产品代码）
 ├── include/pigeon_core.h         # 对外的 C 契约（字段带 version/size）
-├── Sources/PigeonCore/           # 内核（Swift，平台无关，可编到 Linux）
+├── core/                         # Rust 内核（crate，平台无关）
 │   ├── Term/                     # VT：SwiftTerm 的 Terminal 包装 + 快照/脏行/滚动
 │   ├── Layout/                   # 布局树：嵌套 vsplit/hsplit、比例、最小尺寸
 │   ├── Status/                   # OSC 7501 记录与生命周期
 │   ├── Session/                  # session/window/pane 模型
 │   └── CAPI.swift                # @_cdecl 导出上方 C 契约（唯一对外的 ABI 面）
 ├── Sources/
-│   ├── PigeonCore/               # Swift 侧的 C 头封装（薄，只做类型映射）
+│   ├── PigeonCore/               # Swift 侧的 C 头封装（薄，只做类型映射，不实现语义）
 │   ├── PigeonApp/                # 客户端：只做 UI 与输入
 │   │   ├── PigeonApp.swift       # @main，装配依赖
 │   │   ├── Window/               # 窗口、标题栏、红绿灯、窗口级快捷键
@@ -154,7 +154,7 @@ pigeon/
 **加一条通信消息**：`Message.swift` 加 case（带 version）→ `Codec` 自动覆盖 → `ProtocolHandler` 加分支 →
 `Tests/ProtocolTests` 加编解码往返 → 客户端订阅处处理。
 
-**换 VT 引擎**：只替换 `Sources/PigeonCore/Term/` 的实现（`Term` 协议的实现），C ABI、客户端、协议都不动。
+**换 VT 引擎**：只替换 `core/src/term/` 的实现（`Term` trait），C ABI、客户端、协议都不动。
 
 **加一个侧栏字段（如“最后活动时间”）**：`Shared/Model` 加字段 → `PigeonHost` 填 → 协议带过去 → `SidebarModel` 用 → 测试。
 

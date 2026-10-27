@@ -60,8 +60,8 @@
 
 | 路线 | 内核 | 客户端 | 优点 | 代价 |
 |---|---|---|---|---|
-| **A（推荐，成本最低）Swift 内核 + C ABI 导出** | SwiftTerm 的 `Terminal`（headless，支持 Linux），包在自家 `Term` 协议后 | macOS：AppKit / Linux：GTK4（详见 `docs/gui.md`） | 少一门语言、少一套构建、少一层 FFI；M0 最快；`@_cdecl` 可导出 C ABI 给别的语言客户端 | 性能调优空间比 C/Rust 小；被第三方重度复用时生态弱 |
-| B Rust 内核（`alacritty_terminal`） | Rust | 任意 | 生态最全、最省心的长久选择；C ABI 天然 | **多一门语言 + 多一套构建 + FFI 胶水**；M0 变慢 |
+| **A（已选）Rust 内核 + C ABI** | `alacritty_terminal` / `vte` 起步，包在自家 `Term` trait 后 | macOS：AppKit / Linux：GTK4（详见 `docs/gui.md`） | 内核只写一次、所有平台与语言共用；C ABI 稳定；内存安全 + 性能上限高；已装 Rust（minimal 工具链） | 多一门语言 + 多一套构建 + FFI 胶水；M0 稍慢 |
+| B Swift 内核 + C ABI 导出（备选） | SwiftTerm 的 `Terminal`（headless，支持 Linux） | 同 A | 零 FFI、零新工具链，M0 最快 | 性能上限低；被第三方复用时生态弱 |
 | C libghostty-vt 内核 | Ghostty 的 VT 核心 | 自建 | 内核现成 | 依赖上游演进；仍需自建布局/会话层 |
 
 **结论：走 A —— 内核先用 Swift（SwiftTerm headless），导出 C ABI，客户端按平台薄薄一层（前端路线见 `docs/gui.md`）。** 详细设计见 **`docs/core.md`**
