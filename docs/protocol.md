@@ -1,93 +1,157 @@
 # pigeon 协议（客户端 ⇄ 会话宿主）
 
-> 这份是**字段级契约**：`pigeon-host`（本机/远端）与任何客户端都照它实现。
-> 另有一张同源的 C ABI（`include/pigeon_core.h`）用于“把内核编进客户端”的嵌入模式，两者共用同一份内核。
+> 这是**字段级契约**：`pigeon-host`（本机/远端）与任何客户端都照它实现。
+> 另一条同源的边界是 C ABI（`include/pigeon_core.h`，由 `core/src/ffi.rs` 生成），
+> 用于“把内核编进客户端”的嵌入模式；两者共用同一份内核，字段语义必须一致（见 §9）。
 
 ## 1. 传输与分帧
 
 | 项 | 规定 |
 |---|---|
-| 传输 | 本机 unix socket（`/tmp/pigeon-<uid>.sock`，权限 0700）；远端为同一协议的 stdio（`ssh host pigeon-host --proxy`） |
-| 分帧 | **长度前缀**：`u32` 小端长度 + payload（不含自身）；payload 为 CBOR（二进制，字段名短）。不用换行分隔 |
-| 上限 | 单帧 ≤ 8 MiB；超限即断开并记录（防止恶意/异常客户端） |
-| 心跳 | `ping` / `pong`，15s；45s 无响应视为断线 |
-| 版本 | 握手期协商；**大版本不同即拒绝**，小版本向下兼容（未知字段忽略、未知消息忽略并回 `unsupported`） |
+| 传输 | 本机 unix socket（`/tmp/pigeon-<uid>.sock`，`0700`）；远端为同一协议的 stdio（`ssh host pigeon-host --proxy`） |
+| 帧 | `u32` 小端长度 `L` + 恰好 `L` 字节 payload。`L` **不含自身**；payload 为单个 CBOR map。不用换行分隔 |
+| 上限 | 单帧 ≤ 8 MiB（8388608）。超限即断开并回 `error{code:"frame_too_large"}`，payload 不进解析器 |
+| 半包 | 读端必须能处理“长度够但 payload 不足”的中间态，累积到 `L` 字节再解 |
+| 心跳 | 任一方 15s 无出站帧则发 `ping`；45s 无任何入站帧视为断线 |
+| 版本 | 握手期协商；**大版本不同即拒绝**，小版本向下兼容 |
+| 压缩 | 只有双方 `features` 都含 `zstd` 时启用。启用后 payload 首字节是 tag：`0x00` = 原文，`0x01` = 其后为 zstd 帧。tag 计入 `L` |
 
-## 2. 消息
+## 2. 编码规则（CBOR，RFC 8949）
 
-所有消息为 `{t: <type>, ...}`。`id` 只在需要应答的请求里出现（客户端生成，单调递增）。
+1. 每个 payload 是**定长 map**（`0xA_` 开头）。map 里必须有一个 `t: str`，值是消息名——各表「消息」列的字面量（如 `"snapshot"`）；其余 key 就是表里的字段名。
+2. 请求标识用 `id: u32`（客户端生成，本连接内单调递增），**只有**表中列了 `id` 的消息带它。`id` 的唯一用途是**关联**：`created.id` 回显 `new_session.id`；任何请求失败时 `error.id` 回显该请求的 `id`。除 `created` 外，成功路径不带 `id`——靠消息语义表达（`attach` → `snapshot`；`close_pane`/`split_pane`/`resize_split`/`zoom_pane` → `layout` 广播）。
+3. 整数一律用最短编码；只有标注 `i32` 的字段可以为负。`u32`/`u16`/`u8` 超范围即协议错误。
+4. 浮点只有 `ratio`，用 float32（`0xFA`）。不传 float64。
+5. 文本是 UTF-8 text string；唯一的 byte string 是 `keys.bytes`（`0x5_`）。
+6. **不发 null**：字段缺失就是“没有”。收到 null 视为协议错误。
+7. 未知 key 忽略；未知 `t` 回 `unsupported`（`t_of` = 那个 `t` 值；没有 `t` 或不是 str 时用空串），不断开。
+8. 不要求确定性编码，接收方不得按字节比较两个等价 map。
+9. 数组顺序有语义：`rows` 升序、`cells` 按列升序。
 
-### 2.1 握手
+下文各表用 `name: type` 记字段，后缀 `?` 表示可选（可整个省略，但不可为 null）。
 
-| 方向 | 消息 | 字段 |
+## 3. 消息
+
+### 3.1 握手
+
+| 方向 | 消息 | 必选字段 | 可选字段 | 说明 |
+|---|---|---|---|---|
+| c→s | `hello` | `proto: u16`, `client: str`, `features: [str]` | — | 必须是第一帧；5s 内未收到则断开 |
+| s→c | `hello_ack` | `proto: u16`, `server: str`, `features: [str]`, `host_id: str`, `client_id: u32` | — | `client_id` 由宿主分配，本连接内唯一 |
+| s→c | `hello_error` | `reason: "version"\|"busy"\|"unauthorized"`, `detail: str` | — | 发完即关闭连接 |
+
+- `proto = (major << 8) | minor`。当前 **major = 1，minor = 0**，即线上的 `0x0100`。
+- 大版本不同 → `hello_error{reason:"version"}`；小版本以较小者为准，双方只能用 `features` 交集里的能力。
+
+### 3.2 会话与 pane
+
+| 方向 | 消息 | 必选字段 | 可选字段 | 说明 |
+|---|---|---|---|---|
+| s→c | `sessions` | `items: [{session_id: u32, title: str, cwd: str, panes: [u32]}]` | — | 连接建立后的首次全量列表；之后由 `created`/`layout` 增量维护 |
+| c→s | `new_session` | `id: u32` | `cwd: str`, `shell: str`, `env: {str: str}` | `env` 与宿主环境合并，同名覆盖 |
+| s→c | `created` | `id: u32`, `session_id: u32`, `pane_id: u32` | — | `id` 回显请求的 `id` |
+| c→s | `close_pane` | `id: u32`, `pane_id: u32` | — | 关闭 pane 及其进程组（SIGHUP → SIGKILL） |
+| c→s | `split_pane` | `id: u32`, `pane_id: u32`, `axis: "v"\|"h"`, `ratio: f32` | — | `v` = 左右并排，`h` = 上下堆叠；`ratio` ∈ (0,1)，被夹到最小尺寸内 |
+| c→s | `resize_pane` | `pane_id: u32`, `cols: u16`, `rows: u16` | — | 是**请求**：是否生效由尺寸策略决定（§6），结果以 `size_state` 广播 |
+| c→s | `focus` | `pane_id: u32` | — | 客户端自己的焦点；宿主只用于 `latest` 尺寸策略 |
+| c→s | `resize_split` | `id: u32`, `split_id: u32`, `ratio: f32` | — | 拖动分隔线；`split_id` 来自上一帧 `layout`；`ratio` 被夹到最小尺寸内 |
+| c→s | `zoom_pane` | `id: u32`, `pane_id: u32` | — | 放大单个 pane（对应 `layout.zoom`） |
+| c→s | `unzoom` | `id: u32`, `pane_id: u32` | — | 取消放大 |
+| s→c | `layout` | `session_id: u32`, `tree: node` | `zoom: u32` | `node = {leaf: pane_id} \| {split: {id: u32, axis: "v"\|"h", ratio: f32, a: node, b: node}}`；`zoom` 是当前放大的 `pane_id` |
+| s→c | `size_state` | `pane_id: u32`, `cols: u16`, `rows: u16`, `source: str`, `clients: u8` | — | `source` ∈ `latest`/`smallest`/`locked`；客户端据此在侧栏标注当前尺寸来源 |
+| s→c | `pane_exited` | `pane_id: u32`, `code: i32` | — | 进程退出；pane 记录保留到 `close_pane` |
+
+### 3.3 屏幕
+
+| 方向 | 消息 | 必选字段 | 可选字段 | 说明 |
+|---|---|---|---|---|
+| c→s | `attach` | `id: u32`, `pane_id: u32` | `size_policy: str` | `size_policy` ∈ `latest`(默认)/`smallest`/`locked` |
+| s→c | `snapshot` | `pane_id: u32`, `seq: u32`, `cols: u16`, `rows: u16`, `alt: bool`, `cursor: {x: u16, y: u16, visible: bool, shape: u8}`, `scroll: {top: u16, bottom: u16}`, `screen: [[cell]]` | `history: [[cell]]`, `links: [{id: u32, uri: str}]` | 全量；`screen` 必须恰好 `rows` 行 × `cols` 列；`history` 仅在 `scrollback` 能力协商成功时出现；`links` 仅在至少一个 `cell.link` 非 0 时出现 |
+| s→c | `delta` | `pane_id: u32`, `seq: u32`, `rows: [{y: u16, cells: [cell]}]` | `cursor: {x: u16, y: u16, visible: bool, shape: u8}`, `scroll: {top: u16, bottom: u16}`, `links: [{id: u32, uri: str}]` | 只含脏行；`cells` 长度必须等于 `cols`；`cursor`/`scroll` 的字段与 `snapshot` 同名同型 |
+| c→s | `scroll` | `pane_id: u32`, `offset: i32` | — | 负 = 往历史看（`-1` = 上滚一行）；`0` 回到底部 |
+
+- `seq` 每个 pane 单调递增，从 1 开始。客户端收到 `seq != last + 1` → 丢掉增量、重新 `attach`。
+- `cursor.shape`：`0` 方块、`1` 下划线、`2` 竖线。
+- `cell = [codepoint: u32, attrs: u8, fg: u32, bg: u32, link?: u32]`。
+  - 宽字符由 `codepoint` 的 `wcwidth` 推导；宽字符占两格，第二格是空 continuation，客户端按宽度跳过绘制。
+  - `attrs` 位：`1` 粗体、`2` 斜体、`4` 下划线、`8` 反色、`16` 删除线、`32` 暗色。一旦发布只加位、不改语义。
+  - 颜色：`0x01000000 | idx` 表示调色板索引；否则按 `0xRRGGBB`。
+  - `link` 缺省 = 无超链接；非 0 时指向同一帧 `links` 表里的 `id`（`links` 随该帧的 `snapshot`/`delta` 下发）。
+- 同一 `pane_id` 的 `snapshot` 会把该客户端的 `seq` 基准重置。
+
+### 3.4 输入与状态
+
+| 方向 | 消息 | 必选字段 | 可选字段 | 说明 |
+|---|---|---|---|---|
+| c→s | `keys` | `pane_id: u32`, `bytes: bstr` | — | 已编码好的终端字节（kitty protocol 或 legacy 由客户端决定） |
+| c→s | `mouse` | `pane_id: u32`, `kind: "down"\|"up"\|"move"\|"wheel"`, `x: u16`, `y: u16`, `button: u8`, `mods: u8` | — | `mods` 位：`1` shift、`2` alt、`4` ctrl |
+| c→s | `paste` | `pane_id: u32`, `text: str` | — | 宿主负责括号粘贴包装 |
+| s→c | `status` | `pane_id: u32`, `state: "idle"\|"working"\|"blocked"\|"done"\|"error"`, `seq: u32` | `kind: "permission"\|"question"\|"auth"`, `msg: str` | 来自 OSC 7501；`msg` 只当纯文本 |
+
+- `status` 的生命周期由内核负责：进程退出或 OSC 133A 提示符 → 丢弃 `working`/`blocked`；
+  `done`/`error` 保留到客户端 `ack_status`。
+- `msg` 含控制字符或解不出 UTF-8 → 整条丢弃（不带 `msg` 也不改写），见 `AGENTS.md` §7 不变量 3。
+
+### 3.5 控制
+
+| 方向 | 消息 | 必选字段 | 可选字段 | 说明 |
+|---|---|---|---|---|
+| c→s | `ack_status` | `pane_id: u32`, `seq: u32` | — | 用户已看过该条状态，可被淘汰 |
+| c→s | `ping` | `ts: u64` | — | `ts` = 发送方单调时钟（毫秒），只用于回显 |
+| s→c | `pong` | `ts: u64` | — | 原样回显 `ping.ts` |
+| s→c | `unsupported` | `t_of: str` | — | 收到不认识的消息；不断开 |
+| s→c | `error` | `code: str`, `detail: str` | `id: u32` | `id` 回显出错请求 |
+
+## 4. 错误码
+
+| `code` | 含义 | 发完是否断开 |
 |---|---|---|
-| c→s | `hello` | `proto: u16`, `client: str`, `features: [str]` |
-| s→c | `hello_ack` | `proto: u16`, `server: str`, `features: [str]`, `host_id: str` |
-| s→c | `hello_error` | `reason: "version" \| "busy" \| "unauthorized"`, `detail: str` |
+| `version` | 大版本不兼容 | 是 |
+| `busy` | 宿主已达会话/连接上限 | 是 |
+| `unauthorized` | 非同一用户 / socket 权限不符 | 是 |
+| `protocol` | 畸形帧、CBOR 解不出、字段类型不符、出现 null | 是 |
+| `frame_too_large` | 单帧超 8 MiB | 是 |
+| `shutdown` | 宿主正常退出 | 是 |
+| `no_such_pane` | `pane_id` 不存在 | 否 |
+| `bad_request` | 字段组合非法（如 `ratio` 越界且无法夹取） | 否 |
+| `backpressure` | 客户端读得太慢，宿主丢弃了 `delta` | 否（客户端应重新 `attach`） |
+| `internal` | 宿主内部错误，已写日志 | 否 |
 
-`features` 示例：`delta`, `scrollback`, `zstd`, `osc7501`。客户端只能用双方都有的能力。
+## 5. 能力（`features`）
 
-### 2.2 会话与 pane
+| 名称 | 方向 | 语义 | 未协商时的行为 |
+|---|---|---|---|
+| `delta` | s→c | 快照之后发 `delta` | 只发 `snapshot`；客户端按需重新 `attach` |
+| `scrollback` | s→c | `snapshot.history` 与 `scroll` 可用 | 不下发历史，客户端隐藏滚动条 |
+| `zstd` | 双向 | 帧 payload 带 1 字节 tag，`0x01` 为 zstd | payload 必须是不带 tag 的裸 CBOR |
+| `osc7501` | s→c | 发 `status` | 不发 `status`，侧栏不显示 agent 状态 |
 
-| 方向 | 消息 | 字段 |
-|---|---|---|
-| s→c | `sessions` | `items: [{session_id, title, cwd, panes: [pane_id]}]` |
-| c→s | `new_session` | `id`, `cwd?, shell?, env?` |
-| s→c | `created` | `id`, `session_id`, `pane_id` |
-| c→s | `close_pane` | `id`, `pane_id` |
-| c→s | `split_pane` | `id`, `pane_id`, `axis: "v" \| "h"`, `ratio: f32` |
-| c→s | `resize_pane` | `pane_id`, `cols: u16`, `rows: u16` |
-| c→s | `focus` | `pane_id` |
-| s→c | `layout` | `session_id`, `tree: {leaf: pane_id} \| {split: {axis, ratio, a, b}}`, `zoom?: pane_id` |
+新增能力只是往表里加一行；客户端必须忽略不认识的名称。
 
-### 2.3 屏幕
+## 6. 多客户端尺寸策略
 
-| 方向 | 消息 | 字段 |
-|---|---|---|
-| c→s | `attach` | `id`, `pane_id` |
-| s→c | `snapshot` | `pane_id`, `seq`, `cols`, `rows`, `alt: bool`, `cursor: {x,y,visible,shape}`, `scroll: {top,bottom}`, `rows: [[cell]]` ※ |
-| s→c | `delta` | `pane_id`, `seq`, `rows: [{y, cells: [cell]}], cursor?, scroll?` |
-| c→s | `scroll` | `pane_id`, `offset: i32`（负=往历史看） |
+- 策略是**pane 级**的，由第一个 `attach` 的客户端决定，后续 `attach` 只做确认；改策略要重新 `attach`。
+- `latest`（默认）：最近一次发 `focus`/`keys`/`mouse` 的客户端说了算。
+- `smallest`：取所有已 attach 客户端中 `cols`/`rows` 的最小值（tmux 的保守做法）。
+- `locked`：只有 `size_policy` 首次设定时的客户端能改，其它客户端的 `resize_pane` 被忽略。
+- 每次尺寸变化都广播 `size_state`，`source` 告诉客户端“现在是谁说了算”，`clients` 是观察者数量。
+- 客户端必须在侧栏显示 `source`（`AGENTS.md` §7 不变量 6）。
 
-※ `cell = [codepoint: u32, flags: u8, fg: u32, bg: u32]`；`flags` 位：1 宽字符延续，2 粗体，4 斜体，8 下划线，16 反色，32 删除线。颜色：`0x01000000 | idx` 表示调色板索引，否则为 `0xRRGGBB`。
+## 7. 断开与重连
 
-`seq` 单调递增；客户端发现 `seq` 跳号（丢了 delta）→ 重新发 `attach` 拿快照。
-
-### 2.4 输入与状态
-
-| 方向 | 消息 | 字段 |
-|---|---|---|
-| c→s | `keys` | `pane_id`, `bytes:bstr` |
-| c→s | `mouse` | `pane_id`, `kind: "down"\|"up"\|"move"\|"wheel"`, `x`, `y`, `button`, `mods` |
-| c→s | `paste` | `pane_id`, `text: str` |
-| s→c | `status` | `pane_id`, `state: idle\|working\|blocked\|done\|error`, `kind?: permission\|question\|auth`, `msg?: str`, `seq` |
-| s→c | `pane_exited` | `pane_id`, `code: i32` |
-
-`status` 来自 OSC 7501；内核负责记录的生命周期（进程退出/OSC 133A → 丢弃 `working`/`blocked`；`done`/`error` 保留到客户端 `ack_status`）。`msg` 只当纯文本，含控制字符的整条丢弃。
-
-### 2.5 控制
-
-| 方向 | 消息 | 字段 |
-|---|---|---|
-| c→s | `ack_status` | `pane_id`, `seq`（表示用户已看过） |
-| c→s | `ping` / s→c | `pong` | `ts: u64` |
-| s→c | `unsupported` | `t_of: str`（客户端能力不支持该消息） |
-| s→c | `error` | `id?`, `code: str`, `detail: str` |
-
-## 3. 错误与断开
-
-- 协议错误（畸形帧、超限、未知大版本）→ `error` 后断开，写日志。
 - 客户端断开不影响宿主；重连走一次新的 `hello + attach`。
 - 宿主退出 → 所有连接收到 `error{code:"shutdown"}` 后关闭。
+- 客户端发现 `seq` 跳号 / 收到 `backpressure` → 重新 `attach` 拿快照，不要尝试补齐。
 
-## 4. 兼容规则
+## 8. 兼容规则
 
 1. 新增字段：必须可选，旧接收方忽略；不要复用已有字段名。
 2. 新增消息：接收方不认识时回 `unsupported`，不回错误、不断开。
-3. `cell` 的 `flags` 与颜色编码一旦发布不改语义，只加位。
-4. 快照的 `rows` 必须填满 `cols × rows`（缺失单元格由客户端按默认色填充）。
+3. `cell` 的 `attrs` 与颜色编码一旦发布不改语义，只加位。
+4. 快照的 `screen` 必须填满 `cols × rows`（缺失单元格由客户端按默认色填充）。
+5. 只有追加字段才允许小版本内变更；改字段含义或类型必须 bump 大版本。
 
-## 5. 与 C ABI 的关系
+## 9. 与 C ABI 的关系
 
 | | 嵌入模式（C ABI） | 进程模式（本协议） |
 |---|---|---|
@@ -95,4 +159,26 @@
 | 数据形态 | 直接调用函数，返回快照指针 | 同一份快照，序列化成帧 |
 | 适用 | 本机、追求最低延迟 | 持久化、远端、多客户端 |
 
+字段映射（`include/pigeon_core.h` ↔ 本协议）：
+
+| C ABI | 协议 |
+|---|---|
+| `PgSnapshot.screen`（行数组） | `snapshot.screen`（`rows` × `cols` 二维数组） |
+| `PgSnapshot.cols` / `PgSnapshot.rows` | `snapshot.cols` / `snapshot.rows`（都是行/列**数**） |
+| `PgSnapshot.alt_screen` | `snapshot.alt` |
+| `PgSnapshot.scroll_region` | `snapshot.scroll` |
+| `PgSnapshot.history` + `history_count` | `snapshot.history` |
+| `PgCell.codepoint/attrs/fg/bg` | `cell[0..3]`（必定存在） |
+| `PgCell.hyperlink_id` | `cell[4]`（可选；缺省 = 无链接） |
+| `PgCell.width` | 由 `codepoint` 推导，不上线 |
+| `PgStatus.state/kind/msg/seq` | `status.state/kind/msg/seq` |
+| `PgRect` | `layout.tree` 的展开结果，不上线 |
+| `pg_pane_dirty_rows` | `delta.rows[].y` |
+
 **语义必须一模一样**：`docs/core.md` 的 `Term` 接口是本协议字段的唯一实现来源，不允许两边各写一套。
+
+## 10. 版本历史
+
+| 版本 | 变更 |
+|---|---|
+| 1.0 | 初版：握手、会话/pane、快照与增量、输入、状态、尺寸策略 |

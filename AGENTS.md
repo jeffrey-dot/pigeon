@@ -1,7 +1,8 @@
 # AGENTS.md
 
-给编码 agent 的工作说明。人看的部分在 `README.md`，产品/架构在设计文档里（见 §12）。
-**当前状态：只有文档，还没有代码。**本文件里的目录结构是**约定**，M0 落地时按它建。
+给编码 agent 的工作说明。人看的部分在 `README.md`，产品/架构在设计文档里（见 §11）。
+**当前状态：M0 已落地**——`core/`（VT / OSC 7501 / 协议 / C ABI）、`pigeon-host`、AppKit 单 pane 客户端；
+侧栏/分屏/远端仍在后续里程碑。
 
 ## 1. 项目是什么
 
@@ -11,152 +12,162 @@ pigeon 是一个**跨平台**终端（macOS 首发，Linux 跟进），自带隐
 
 硬性边界：
 
-- **跨平台分层**：`PigeonShared` 与 `PigeonHost` 必须能在 macOS 和 Linux 上编译运行；只有 `PigeonApp` 是平台专属。
+- **跨平台分层**：`core/`（Rust）必须能在 macOS 和 Linux 上编译运行；`PigeonApp`（Swift/AppKit）是平台专属，只有 macOS。
 - **不依赖 tmux**，也不 shell out 到 tmux。
-- **不 fork 其它终端**；VT 内核用 SwiftTerm（MIT），藏在 `TerminalBackend` 协议后面。
+- **不 fork 其它终端**；VT 内核用 Rust 的 `alacritty_terminal` / `vte`（MIT / Apache-2.0），藏在自家 `Term` trait 后，只通过 C ABI（`include/pigeon_core.h`）暴露。
 - **不修改用户的 shell/tmux 配置**，不安装任何东西到用户目录之外。
 - 状态只来自 **OSC 7501**，不做屏幕/标题启发式识别。
 
 ## 2. 环境与命令
 
-macOS + Xcode 命令行工具即可（`swift --version` ≥ 6）。
+macOS + Xcode 命令行工具（`swift --version` ≥ 6）与 Rust（见 `rust-toolchain.toml`）。
 
 ```sh
-swift build                     # 同一个二进制的窗口+后台两个角色（两平台都要能过）
-swift test                      # 单元测试（CI 双平台：macOS + Ubuntu）
-swift run pigeon-host           # 会话宿主（本机自动拉起；远端按需推送；手动跑用于调试）
-swift run pigeon                # 客户端（M0 起可用）
+cargo build --manifest-path core/Cargo.toml    # 内核 + pigeon-host（两平台都要能过）
+cargo test  --manifest-path core/Cargo.toml    # 内核单测（status / proto / layout / vt-parity）
+cargo run   --manifest-path core/Cargo.toml --bin pigeon-host   # 会话宿主（本机自动拉起；远端按需推送；手动跑用于调试）
+cargo build                     # 先建核心：客户端链接 core/target/*/libpigeon_core.a
+swift build                     # 客户端（macOS only）
+swift test                      # 客户端纯逻辑单测（SidebarModel / Grouping / KeyEncoder）
 tools/vt-parity/run.sh          # VT 对账：同一段字节流喂我们与参考实现，逐屏比较
 ```
 
-这些命令在对应模块落地前会失败——**先建模块，再加功能**，不要为了跑通而把逻辑塞进 `main.swift`。
+这些命令在对应模块落地前会失败——**先建模块，再加功能**，不要为了跑通而把逻辑塞进 `main.rs` 或 `PigeonApp.swift`。
+`swift test` 需要完整 Xcode（`xcode-select` 指向 CommandLineTools 时用 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`）。
 
 ## 3. 模块划分（强制）
 
-依赖方向只有一条：`App → Shared ← Daemon`。`App` 与 `Daemon` **互相不可见**。
+依赖方向只有一条：`App → PigeonCore（C ABI） → core`。`App` 不认识 `core` 的内部类型，`core` 不知道 UI 存在。
+`pigeon-host` 在 `core/` 里（同一个 crate 的 bin），所以宿主与嵌入模式跑的是同一份语义，不存在第二套实现。
 
 可移植性标记：
 
-- `core/`（Rust）—— **portable**：不许依赖任何平台 API；`unsafe` 只允许出现在 `lib.rs` 的 FFI 边界。
-- `Sources/PigeonShared/`、`Sources/PigeonHost/` —— **portable**：只许 Foundation + POSIX，必须能在 Linux 编译并通过测试。
-- `Sources/PigeonApp/` —— **macOS only**：AppKit/SwiftTerm 视图都在这里；不要往下泄漏。
-- 将来的 Linux 客户端是**另一个 target**（例如 `PigeonAppLinux`），只依赖 `PigeonShared` 的协议与模型，
-  不 import `PigeonApp`，也不 import `PigeonHost`。
+- `core/`（Rust）—— **portable**：只许 std + POSIX 绑定（`libc`/`nix`/`rustix`）+ VT/序列化依赖；
+  `unsafe` 只允许出现在 `core/src/ffi/`（FFI 边界）。
+- `include/pigeon_core.h` —— **生成物**：由 `cbindgen` 从 `core/src/ffi/mod.rs` 生成，**手改无效**（CI 会比对新旧输出）。
+- `Sources/PigeonCore/` —— **macOS only**：C 头的 module map + 类型映射，薄到没有语义。
+- `Sources/PigeonApp/` —— **macOS only**：AppKit 视图与 CoreText 渲染都在这里；不要往下泄漏。
+- 将来的 Linux 客户端是**另一个 target**（例如 `Sources/PigeonAppLinux`，GTK4），只依赖 C ABI 与
+  `docs/protocol.md`，不 import `PigeonApp`。
 
 ```
 pigeon/
 ├── AGENTS.md
-├── Package.swift                 # targets: PigeonApp / PigeonHost / PigeonCore / PigeonShared / PigeonTests
-├── docs/                         # plan.md, ui.md, 历史资料
+├── Package.swift                 # targets: PigeonApp / PigeonCore / PigeonAppTests（macOS only）
+├── docs/                         # plan.md, protocol.md, ui.md, 历史资料
 ├── tools/vt-parity/              # 对账脚本与 golden 文件（不含产品代码）
-├── include/pigeon_core.h         # 对外的 C 契约（字段带 version/size）
-├── core/                         # Rust 内核（crate，平台无关）
-│   ├── Term/                     # VT：SwiftTerm 的 Terminal 包装 + 快照/脏行/滚动
-│   ├── Layout/                   # 布局树：嵌套 vsplit/hsplit、比例、最小尺寸
-│   ├── Status/                   # OSC 7501 记录与生命周期
-│   ├── Session/                  # session/window/pane 模型
-│   └── CAPI.swift                # @_cdecl 导出上方 C 契约（唯一对外的 ABI 面）
-├── Sources/
-│   ├── PigeonCore/               # Swift 侧的 C 头封装（薄，只做类型映射，不实现语义）
-│   ├── PigeonApp/                # 客户端：只做 UI 与输入
-│   │   ├── PigeonApp.swift       # @main，装配依赖
-│   │   ├── Window/               # 窗口、标题栏、红绿灯、窗口级快捷键
-│   │   ├── Sidebar/
-│   │   │   ├── SidebarModel.swift      # 分组/排序/未读/计数（纯逻辑，可单测）
-│   │   │   ├── SidebarViewController.swift
-│   │   │   ├── SidebarRowView.swift    # 一行：名称 + 相对时间 + 状态图标
-│   │   │   └── Grouping.swift          # 项目分组规则（git 根 / cwd 末级目录）
-│   │   ├── Terminal/
-│   │   │   ├── PaneView.swift          # 终端视图容器（焦点、IME、鼠标）
-│   │   │   ├── TerminalBackend.swift   # 协议：feed / snapshot / resize / respond
-│   │   │   ├── SwiftTermBackend.swift  # 唯一 import SwiftTerm 的文件
-│   │   │   └── KeyEncoder.swift        # 按键 → 字节（kitty protocol / legacy）
-│   │   └── Layout/
-│   │       ├── LayoutTree.swift        # 嵌套 vsplit/hsplit、比例、最小尺寸（纯逻辑）
-│   │       ├── SplitView.swift         # 把 LayoutTree 画成 AppKit 视图
-│   │       └── Focus.swift             # 焦点与选择
-│   ├── PigeonShared/             # 窗口与后台进程共用；**不许 import AppKit**
-│   │   ├── Protocol/
-│   │   │   ├── Message.swift           # 所有消息的 enum（Codable，带 version）
-│   │   │   ├── Codec.swift             # 编解码
-│   │   │   └── Framing.swift           # 分帧（长度前缀），不许用换行分隔
-│   │   ├── Model/                      # Session / Pane / Project / Status 纯数据
-│   │   ├── Status/
-│   │   │   ├── OSC7501.swift           # 单条报告的解析与校验（对照规范逐条实现）
-│   │   │   └── StatusStore.swift       # 记录生命周期：替换/clear/上限/淘汰
-│   │   └── Util/                       # 小工具（相对时间、路径缩写、git 根）
-│   └── PigeonHost/               # 会话宿主 pigeon-host（本机+远端同一二进制，3–8MB 硬指标）；**不许 import AppKit**
-│       ├── main.swift            # 参数解析与启动
-│       ├── Server.swift          # unix socket、多客户端、权限（0700）
-│       ├── SessionManager.swift  # 会话/窗口/pane 的创建与生命周期
-│       ├── Pane.swift            # 一个 pane：PTY + backend + 状态记录
-│       ├── PTY.swift             # forkpty / 读写 / SIGWINCH / 退出码
-│       └── ProtocolHandler.swift # Message → SessionManager 的映射
-└── Tests/
-    ├── StatusTests/              # OSC 7501：规范里的例子 + 畸形/超长/分包/clear
-    ├── ProtocolTests/            # 编解码往返、版本兼容、半包
-    ├── LayoutTests/              # 布局树：比例、最小尺寸、嵌套、删除后归并
-    └── VTParityTests/            # 与参考实现逐屏对账（golden 文件）
+├── include/pigeon_core.h         # 生成物：cbindgen 从 core/src/ffi.rs 输出，不许手改
+├── core/                         # Rust 内核 + 会话宿主（crate + bin，平台无关）
+│   ├── Cargo.toml
+│   ├── cbindgen.toml             # 头文件生成配置（名字/前缀/文档注释）
+│   ├── src/
+│   │   ├── lib.rs                # 模块声明；unsafe 只允许出现在 ffi.rs
+│   │   ├── ffi/                  # extern "C" 导出（头文件的唯一来源）
+│   │   │   ├── mod.rs            # 生命周期 / pane / 快照 / 状态 / 布局
+│   │   │   └── msg.rs            # pg_msg_* 消息编解码
+│   │   ├── term/                 # VT：alacritty_terminal 包装 + 快照/脏行/滚动
+│   │   ├── layout/               # 布局树：嵌套 vsplit/hsplit、比例、最小尺寸
+│   │   ├── status/               # OSC 7501 解析与记录生命周期
+│   │   ├── session/              # session/window/pane 模型
+│   │   └── proto/                # 分帧 + CBOR 编解码（协议的唯一实现）
+│   ├── src/bin/pigeon-host.rs    # 会话宿主：PTY / unix socket / 多客户端（3–8MB 硬指标）
+│   └── tests/                    # status / proto / layout / vt-parity
+└── Sources/
+    ├── PigeonCore/               # C 头封装（module map + 类型映射，不实现语义）
+    └── PigeonApp/                # macOS 客户端：只做 UI 与输入
+        ├── PigeonApp.swift       # @main，装配依赖
+        ├── Window/               # 窗口、标题栏、红绿灯、窗口级快捷键（M3 侧栏做完再拆）
+        ├── Sidebar/
+        │   ├── SidebarModel.swift      # 分组/排序/未读/计数（纯逻辑，可单测）
+        │   ├── SidebarViewController.swift   # M3
+        │   ├── SidebarRowView.swift    # 一行：名称 + 相对时间 + 状态图标（M3）
+        │   └── Grouping.swift          # 项目分组规则（git 根 / cwd 末级目录）
+        ├── Terminal/
+        │   ├── PaneView.swift          # 终端视图容器（焦点、IME、鼠标）
+        │   ├── GridRenderer.swift      # 协议：把 PgSnapshot 画成像素（M0 直接调 CoreTextRenderer）
+        │   ├── CoreTextRenderer.swift  # 唯一 import CoreText 的文件
+        │   └── KeyEncoder.swift        # 按键 → 字节（kitty protocol / legacy）
+        └── Layout/               # M1 分屏
+            ├── SplitView.swift         # 把 PgRect 画成 AppKit 视图
+            └── Focus.swift             # 焦点与选择
 ```
+
+`Window/`、`Layout/`、`SidebarViewController.swift`、`SidebarRowView.swift`、`GridRenderer.swift`
+是后续里程碑（M1/M3）的落点；M0 只建了 `Terminal/{PaneView,CoreTextRenderer,KeyEncoder}.swift`、
+`Net/{HostClient,Wire}.swift`、`Sidebar/{SidebarModel,Grouping}.swift`。
+
+后两个之前存在的 Swift 模块（`PigeonShared` / `PigeonHost`）已取消：协议与宿主现在只存在于 `core/src/proto/`
+与 `core/src/bin/pigeon-host.rs`。理由：宿主必须是 3–8MB 静态单文件（`docs/remote.md`），Swift 运行时做不到；
+而协议只留一处实现，客户端通过 C ABI 编解码（见 `docs/protocol.md` §9）。
 
 ### 新增代码放哪里（判定表）
 
 | 你要加的东西 | 放这里 |
 |---|---|
-| 一种新的 OSC/控制序列的处理 | `Shared/Status/`（若是状态）或 `Shared/Protocol/`（若是通信）；VT 渲染相关的放 `TerminalBackend` 实现 |
-| 窗口与后台进程都要知道的数据 | `Shared/Model/` |
-| 只在 UI 里用的派生状态（排序、分组、文案） | `App/Sidebar/SidebarModel.swift`（保持纯函数，方便单测） |
-| 新的通信消息 | `Shared/Protocol/Message.swift` + `ProtocolHandler.swift` 的分支 + 测试 |
-| 终端内核能力（换 SwiftTerm / 接别的内核） | 只新增一个 `TerminalBackend` 实现，不动 UI |
-| 一次性脚本 / 对账工具 | `tools/`，不放进 `Sources/` |
+| 一种新的 OSC/控制序列的处理 | `core/src/term/`（渲染相关）或 `core/src/status/`（状态记录）；协议字段只有需要上线时才动 `core/src/proto/` |
+| 窗口与后台进程都要知道的数据 | `core/src/session/` + `core/src/proto/` + 重新生成头文件 |
+| 只在 UI 里用的派生状态（排序、分组、文案） | `Sources/PigeonApp/Sidebar/SidebarModel.swift`（保持纯函数，方便单测） |
+| 新的通信消息 | `core/src/proto/` 的 message enum + `pigeon-host` 的处理分支 + `core/tests/proto` 往返 |
+| 终端内核能力（换引擎 / 接别的内核） | `core/src/term/`（`Term` trait），C ABI、客户端、协议都不动 |
+| 渲染、字体、输入法 | `Sources/PigeonApp/Terminal/`，不往下漏 |
+| 一次性脚本 / 对账工具 | `tools/`，不放进 `Sources/` 或 `core/src/` |
 
-### 可移植性硬规则（CI 会拦）
+### 可移植性硬规则（M0 起进 CI；当前无代码，见 `docs/plan.md` §11）
 
-- `PigeonShared` / `PigeonHost` 里**不许**出现：`import AppKit`、`import Cocoa`、`NSTask`、`NSWindow`、
-  `CoreGraphics`、`CoreText`、`#if os(macOS)`（平台分支只能出现在 `PigeonApp` 与 `TerminalBackend` 的
-  实现里）。
-- PTY 一律 `openpty`/`forkpty` + `FileHandle`，不要用 `NSTask`/`Process` 之外的 Apple 专属机制。
+- `core/` 里**不许**出现：平台专属 crate（`core-foundation`、`objc2`…）、`cfg(target_os = …)` 分支
+ （PTY 与信号可以有一处，且必须两边都有实现）、直接操作窗口/字体/图形 API。
+- `core/src/` 里**不许**出现 `unsafe`（唯一例外：`ffi.rs` 的 `extern "C"` 边界）。
+- Swift 侧：`PigeonCore` 不许 `import AppKit`；`PigeonApp` 可以，但 `import CoreText` 只允许在
+ `CoreTextRenderer.swift`。
+- PTY 一律 `openpty`/`forkpty` + 原始 fd 读写，不用 `NSTask`/`Process` 之外的 Apple 专属机制。
 - 路径用 `FileManager`/POSIX；配置放 `~/.config/pigeon`（macOS 与 Linux 一致），不要用 `~/Library/...`。
-- 信号（`SIGWINCH`/`SIGCHLD`）用 `DispatchSourceSignal` 或 `signal()`，不依赖 macOS runloop 特性。
-- 字体/渲染/输入法只在客户端层处理；后台进程只搬字节与状态。
+- 信号（`SIGWINCH`/`SIGCHLD`）用 `signal()` 或 `SelfPipe`/`signalfd` 的思路，不依赖 macOS runloop 特性。
+- 字体/渲染/输入法只在客户端层处理；`core/` 只搬字节与状态。
 
 ### 模块内的硬规则
 
 - **一个文件一个主要类型**，文件名 = 类型名；单文件 > 400 行就拆。
-- `SwiftTermBackend.swift` 是**唯一**允许 `import SwiftTerm` 的地方；其余代码只用 `TerminalBackend` 协议。
-- `SidebarModel` / `LayoutTree` / `StatusStore` / `OSC7501` 必须是**纯逻辑**（无 AppKit、无 IO），可直接单测。
-- `PigeonHost` 里不能出现 `NSWindow` / `NSView` / 任何 UI 概念；客户端里不能出现 PTY 操作。
-- 任何跨模块行为都通过 `Shared/Protocol/Message.swift` 的显式消息表达；不要用共享全局状态。
+- `core/src/term/` 是**唯一**实现 VT 语义的地方（包括 `alacritty_terminal` 的包装）；Swift 侧不得出现任何字节流解析。
+- `core/src/status/` 是**唯一**实现 OSC 7501 解析与记录生命周期的地方。
+- `core/src/proto/` 是**唯一**实现分帧与 CBOR 编解码的地方；客户端通过 C ABI 编解，不自己实现一份。
+- `include/pigeon_core.h` 是**生成物**：改 ABI 就去改 `core/src/ffi/mod.rs`，然后跑 `cbindgen`，不要手改头文件。
+- `SidebarModel` / `Grouping` / `KeyEncoder` 必须是**纯逻辑**（无 AppKit、无 IO），可直接单测。
+- `pigeon-host` 里不能出现任何 UI 概念；`PigeonApp` 里不能出现 PTY 操作。
+- 任何跨进程行为都通过 `core/src/proto/` 的显式消息表达；不要用共享全局状态。
 - **终端语义只能在内核里实现**：VT 解析、快照/增量、布局计算、OSC 7501 记录都不许在客户端重复实现；
-  客户端只做绘制与输入映射。
+ 客户端只做绘制与输入映射。
 
 ## 4. 代码风格
 
-- Swift 6，4 空格缩进；公开 API 写显式类型；`guard` 早返回，避免深嵌套。
+- Swift 6 / Rust 2021 edition，4 空格缩进；公开 API 写显式类型；`guard`/`if let` 早返回，避免深嵌套。
+- Rust：提交前 `cargo fmt` + `cargo clippy -- -D warnings`；`unwrap()`/`expect()` 只允许在测试里，
+  生产路径返回 `Result<T, PgError>`；不允许 `panic!` 越过 FFI 边界。
 - **后台进程里禁止 `!` 强解包 / `try!`**；所有失败返回 `Result` 或 `throws` 的自定义 error enum。
-- 并发：`PigeonHost` 用 actor 串行化会话状态；`App` 的 UI 状态只在主线程改。
-- 命名：类型 UpperCamelCase，函数/变量 lowerCamelCase；协议名用名词（`TerminalBackend`）而不是 `-able` 广告。
+- 并发：`core/` 不用可变全局；每个 pane 的状态由宿主串行驱（一个 task/线程一处所有权）；`App` 的 UI 状态只在主线程改。
+- 命名：类型 UpperCamelCase，函数/变量 lowerCamelCase；协议名用名词（`Term`、`GridRenderer`）而不是 `-able` 广告。
 - 注释只写“为什么”，不写“做了什么”；对外部协议的实现要在文件头注明依据（例如 OSC 7501 revision）。
 - 语言约定：**代码与注释英文；`docs/` 中文；UI 文案英文**（与参考图一致，如 `Working · 1m`）。
 
 ## 5. 测试要求
 
-- 新增解析规则（OSC 7501、按键编码、协议消息）→ **必须**带一个正例 + 一个畸形输入的反例。
+- 新增解析规则（OSC 7501、按键编码、协议消息）→ **必须**带一个正例 + 一个畸形输入的反例（Rust 放 `core/tests/`，
+  Swift 放 `Tests/`）。
 - 修 bug → 先写能复现的测试，再修。
 - VT 兼容性改动 → 跑 `tools/vt-parity/run.sh`；golden 文件变更要在 PR 里说明原因。
-- 提交前必须全绿：`swift build && swift test`（macOS 与 Ubuntu 两个 job）。
+- 提交前必须全绿：`cargo test`（macOS + Ubuntu）+ `swift build && swift test`（macOS）。
 - 测试不要依赖网络、不要依赖用户自己的 tmux/shell 配置；需要环境时自己在 `TMPDIR` 里造。
 
 ## 6. 常见任务的做法
 
-**加一种状态显示**：`StatusStore` 已有记录 → 只改 `SidebarModel` 的排序/图标映射 + `SidebarRowView`，不动协议。
+**加一种状态显示**：`core/src/status/` 已有记录 → 只改 `SidebarModel` 的排序/图标映射 + `SidebarRowView`，不动协议。
 
-**加一条通信消息**：`Message.swift` 加 case（带 version）→ `Codec` 自动覆盖 → `ProtocolHandler` 加分支 →
-`Tests/ProtocolTests` 加编解码往返 → 客户端订阅处处理。
+**加一条通信消息**：`core/src/proto/` 的 message enum 加 case（带 version）→ 分帧/编解码自动覆盖 →
+`pigeon-host` 加处理分支 → `core/tests/proto` 加编解码往返 → 重新生成 `include/pigeon_core.h` → 客户端订阅处处理。
 
 **换 VT 引擎**：只替换 `core/src/term/` 的实现（`Term` trait），C ABI、客户端、协议都不动。
 
-**加一个侧栏字段（如“最后活动时间”）**：`Shared/Model` 加字段 → `PigeonHost` 填 → 协议带过去 → `SidebarModel` 用 → 测试。
+**加一个侧栏字段（如“最后活动时间”）**：`core/src/session/` 加字段 → `core/src/proto/` 带过去 →
+重新生成头文件 → `SidebarModel` 用 → 测试。
 
 ## 7. 不变量（谁都不许破）
 
@@ -166,7 +177,7 @@ pigeon/
 4. `done` / `error` 记录在用户看过之前不能被静默清掉；`working` / `blocked` 在进程退出或 OSC 133A 提示符时必须清掉。
 5. 不可信输入（程序写的 OSC 文本、链接、剪贴板）不得进入 UI 的富文本渲染路径；永远当纯文本处理。
 6. 多客户端同看一个会话时，尺寸策略必须显式且可见（默认跟随最近活跃客户端，并在侧栏标出）。
-7. `PigeonShared` / `PigeonHost` 不得引入 Apple-only 依赖；Linux CI 红了就等于功能没做完。
+7. `core/` 不得引入 Apple-only 依赖；`cargo test` 在 Ubuntu 红了就等于功能没做完。
 
 ## 8. 安全
 
@@ -188,10 +199,15 @@ pigeon/
 - 提交信息：`<模块>: <一句话>`，例如 `sidebar: 把 blocked 会话排到组内最前`。
 - 一个提交只做一件事；重构与功能分开。
 - PR 描述包含：动机、改动面（哪些模块）、验证方式（命令 + 结果）、已知缺口。
-- 合并前：`swift build && swift test` 全绿；涉及 VT 的改动附对账结果。
+- 合并前：`cargo test && swift build && swift test` 全绿；涉及 VT 的改动附对账结果。
 
 ## 11. 设计文档在哪
 
-- `docs/plan.md` —— 架构、选型、里程碑、验收、风险（**先读这个**）
+- `docs/plan.md` —— 架构、选型、里程碑、验收、风险、已知缺口（**先读这个**）
+- `docs/core.md` —— 内核边界、C ABI 说明、快照/增量、语言选型、测试策略
+- `docs/protocol.md` —— 客户端 ⇄ 宿主的字段级契约（消息表、错误码、能力、尺寸策略）
+- `include/pigeon_core.h` —— C ABI 的生成产物（唯一对外 ABI 面）
+- `docs/remote.md` —— SSH 方案：远端宿主、三种对接、安装与安全
+- `docs/gui.md` —— 前端路线：为何 AppKit/GTK、渲染与 IME 的归属
 - `docs/ui.md` —— 侧栏与窗口的可见规格（含参考图，`docs/images/`）
 - `docs/tmux-integration.md`、`docs/kitty-fork-status.md` —— 上一版（gmux）的实测记录，当反面教材读

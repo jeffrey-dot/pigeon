@@ -1,11 +1,12 @@
+---
 name: ci
-on: [push, pull_request]
+"on": [push, pull_request]
 
 jobs:
   docs:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: 文档链接检查（相对链接必须存在）
         run: |
           python3 - <<'PY'
@@ -14,7 +15,8 @@ jobs:
           for md in pathlib.Path('.').rglob('*.md'):
               if '.agents' in str(md) or 'node_modules' in str(md):
                   continue
-              for m in re.finditer(r'\]\(([^)#]+\.md)\)', md.read_text()):
+              pat = r'\]\(([^)#]+\.md)\)'
+              for m in re.finditer(pat, md.read_text()):
                   target = (md.parent / m.group(1)).resolve()
                   if not target.exists():
                       bad.append(f'{md}: {m.group(1)}')
@@ -22,31 +24,73 @@ jobs:
           sys.exit(1 if bad else 0)
           PY
 
+  # Core + host are Rust and portable: both platforms must stay green.
+  # Guards live on steps (after checkout): a job-level `if:` is evaluated
+  # before the repo exists, so hashFiles() would skip the job forever.
   rust:
-    if: ${{ hashFiles('core/Cargo.toml') != '' }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - run: cargo fmt --manifest-path core/Cargo.toml --check
-      - run: cargo clippy --manifest-path core/Cargo.toml --all-targets -- -D warnings
-      - run: cargo test --manifest-path core/Cargo.toml
-      - name: pigeon-host 体积上限 8MB
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - id: core
         run: |
-          cargo build --release --manifest-path core/Cargo.toml --bin pigeon-host
-          size=$(stat -f%z core/target/release/pigeon-host 2>/dev/null || stat -c%s core/target/release/pigeon-host)
+          test -f core/Cargo.toml \
+            && echo "exists=true" >> "$GITHUB_OUTPUT" \
+            || echo "exists=false" >> "$GITHUB_OUTPUT"
+      - if: steps.core.outputs.exists == 'true'
+        run: cargo fmt --manifest-path core/Cargo.toml --check
+      - if: steps.core.outputs.exists == 'true'
+        run: |
+          cargo clippy --manifest-path core/Cargo.toml \
+            --all-targets -- -D warnings
+      - if: steps.core.outputs.exists == 'true'
+        run: cargo test --manifest-path core/Cargo.toml
+      - if: steps.core.outputs.exists == 'true'
+        name: pigeon-host 体积上限 8MB
+        run: |
+          cargo build --release --manifest-path core/Cargo.toml \
+            --bin pigeon-host
+          bin=core/target/release/pigeon-host
+          size=$(stat -f%z "$bin" 2>/dev/null || stat -c%s "$bin")
           echo "pigeon-host: $size bytes"
           test "$size" -le 8388608
 
-  swift:
-    if: ${{ hashFiles('Package.swift') != '' }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+  # include/pigeon_core.h is generated from core/src/ffi/; a hand-edited
+  # header fails here. Linux only: the output is platform independent.
+  header:
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - run: swift build
-      - run: swift test
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - id: core
+        run: |
+          test -f core/Cargo.toml \
+            && echo "exists=true" >> "$GITHUB_OUTPUT" \
+            || echo "exists=false" >> "$GITHUB_OUTPUT"
+      - if: steps.core.outputs.exists == 'true'
+        run: cargo install --locked cbindgen --version 0.27.0
+      - if: steps.core.outputs.exists == 'true'
+        name: 头文件与 cbindgen 输出一致
+        run: |
+          cbindgen --config core/cbindgen.toml --crate pigeon-core \
+            --output /tmp/pigeon_core.h core
+          diff -u include/pigeon_core.h /tmp/pigeon_core.h
+
+  # The client is AppKit-only, so this job is macOS-only by design.
+  swift:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - id: swiftpm
+        run: |
+          test -f Package.swift \
+            && echo "exists=true" >> "$GITHUB_OUTPUT" \
+            || echo "exists=false" >> "$GITHUB_OUTPUT"
+      # The client links `libpigeon_core.a`, so the core must exist first.
+      - if: steps.swiftpm.outputs.exists == 'true'
+        run: cargo build --manifest-path core/Cargo.toml
+      - if: steps.swiftpm.outputs.exists == 'true'
+        run: swift build
+      - if: steps.swiftpm.outputs.exists == 'true'
+        run: swift test

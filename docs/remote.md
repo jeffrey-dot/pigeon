@@ -8,10 +8,14 @@
 | 方式 | 做法 | 需要远端装 pigeon | 能持久化 | 备注 |
 |---|---|---|---|---|
 | **A. `--proxy` 桥接（推荐）** | `ssh host pigeon-host --proxy`：把 stdin/stdout 上的协议帧转给远端宿主的 unix socket | ✅ | ✅ | 不依赖 sshd 的 stream-local 转发开关（很多机器默认关闭） |
-| B. unix socket 直转 | `ssh -L /tmp/p.sock:/run/user/1000/pigeon-host.sock host` | ✅ | ✅ | 简洁，但需要远端 `AllowStreamLocalForwarding yes` |
+| B. unix socket 直转 | `ssh -L /tmp/p.sock:$XDG_RUNTIME_DIR/pigeon.sock host` | ✅ | ✅ | 简洁，但需要远端 `AllowStreamLocalForwarding yes` |
 | C. 退化模式 | 普通 `ssh host` 开一个 pty | ❌ | ❌（会话随 ssh 断开） | **仍然有状态显示**：我们就是终端，OSC 7501 会直接到达；只是没有远端持久化与远端分屏 |
 
 三种都能同时支持：连接时先探测（A → B → C），并明确告诉用户当前用的是哪一种。
+
+`--stdio` 是同一条传输的另一种用法：不桥接已有 socket，而是让本次启动的 `pigeon-host` 直接作为宿主在
+stdin/stdout 上说话（首次安装后的第一次启动用它）；之后它常驻，后续连接用 `--proxy` 桥接到它的 unix socket。
+两种模式的帧格式与 `docs/protocol.md` 完全一致。
 
 ## 2. 只往远端推一个很小的宿主（不是整个 pigeon）
 
@@ -42,7 +46,7 @@
    ```
 
 4. 校验 sha256（客户端内嵌期望值，远端 `shasum -a 256` 比对；不一致就删文件并报错）；
-5. 启动：`ssh host ~/.pigeon/host/3.2.0/pigeon-host --stdio`（或让它常驻后用 `--proxy` 接）。
+5. 启动：`ssh host ~/.pigeon/host/3.2.0/pigeon-host --proxy`（宿主已在远端常驻，桥接它的 unix socket；首次安装后用 `--stdio` 拉起常驻实例，两者都能被同一客户端复用）。
 
 ### 规则
 
@@ -62,16 +66,18 @@
 
 ```text
 客户端                                   远端
-  │ ssh host pigeon --proxy                 │
+  │ ssh host pigeon-host --proxy           │
   ├──────── stdio（长度前缀帧）─────────────►│── unix socket ──► pigeon-host
   │                                        │                   ├─ PTY / VT 状态
   └─ 本地渲染 ◄── 快照 + 增量 ─────────────┘                   └─ 布局 / OSC 7501
 ```
 
-- **握手**：`hello{protocol_version, client_version}` → `hello_ack{server_version, capabilities}`。
-  版本不匹配 → 明确报错并给升级命令；`capabilities` 用于优雅降级（例如不支持滚动回放时侧栏隐藏该项）。
-- **attach**：`attach{session_id}` → 全量快照（含备用屏、光标、滚动区）→ 之后只收脏行增量。
-- **反向**：`keys{bytes}`、`mouse{...}`、`resize{cols,rows}`、`new_pane`/`close_pane`、`select`。
+- **握手**：`hello{proto, client, features}` → `hello_ack{proto, server, features, host_id, client_id}`。
+  版本不匹配 → `hello_error{reason:"version"}` 并给升级命令；`features` 取交集用于优雅降级
+  （例如不支持 `scrollback` 时侧栏隐藏滚动条）。
+- **attach**：`attach{id, pane_id}` → 全量快照（含备用屏、光标、滚动区）→ 之后只收脏行增量（`delta`）。
+- **反向**（字段以 `docs/protocol.md` §3 为准）：`keys{pane_id, bytes}`、`mouse{pane_id, kind, x, y, button, mods}`、
+  `resize_pane{pane_id, cols, rows}`、`new_session{id, cwd?}`、`close_pane{id, pane_id}`、`focus{pane_id}`。
 - **保活**：帧级心跳（15s）；ssh 断开即视为可重连，重连走一次新的 `hello + attach`。
 - **压缩**：大输出时按帧 zstd（可选能力，握手协商）；默认关，先测延迟。
 
@@ -84,9 +90,9 @@
 
 ## 5. 安全
 
-- 只经 `ssh`；`pigeon-host` **只监听 unix socket**（`$XDG_RUNTIME_DIR/pigeon.sock` 或 `/tmp/pigeon-<uid>.sock`，权限 0700）。
+- 只经 `ssh`；`pigeon-host` **只监听 unix socket**（`$XDG_RUNTIME_DIR/pigeon.sock`，回退 `/tmp/pigeon-<uid>.sock`，权限 0700）。
 - `--proxy` 只转发协议帧：不接受任意命令、不做 shell 展开。
-- `--install-remote` 永不静默安装；打印完整命令与哈希；不修改远端 shell 配置。
+- `--remote-install` / `--no-remote-install` 永不静默安装；打印完整命令与哈希；不修改远端 shell 配置。
 - 认证/密钥/known_hosts 全部交给系统 `ssh`；pigeon 不读、不缓存任何凭据。
 - 远端进程以普通用户身份运行，与用户手敲命令同权限。
 
@@ -101,7 +107,7 @@
 
 | 里程碑 | 内容 |
 |---|---|
-| M2 | 协议 + 快照（本机后台进程），`hello/capabilities` 先定好，避免远端返工 |
+| M2 | 协议 + 快照（本机后台进程），`hello`/`features` 先定好，避免远端返工 |
 | M4 | 宿主自动推送与安装、`--proxy` / socket 直转 / 退化模式、多主机侧栏分组与重连 |
 | M5 | Linux 客户端复用同一协议；远端也可是 Linux |
 

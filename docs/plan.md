@@ -27,7 +27,7 @@
 ## 2. 目标架构
 
 ```text
-┌──────────────── pigeon 客户端（AppKit / SwiftUI）─────────────────┐
+┌──────────────── pigeon 客户端（AppKit + Swift）───────────────────┐
 │ 侧栏 SidebarModel ← StatusStore（OSC 7501）                     │
 │   │                                                             │
 │ 分屏视图 ← LayoutTree（我们自己的矩形树，不是 tmux layout 字符串）│
@@ -37,7 +37,7 @@
                             │ unix socket（本机）/ ssh 转发（远端）
 ┌───────────────────────────┴─────────────────────────────────────┐
 │ pigeon-host（无窗口，也可推到远端）：每个 pane 一个 PTY            │
-│   ├─ PigeonCore（Swift，C ABI）：完整 VT 状态机 + 布局 + 状态记录   │
+│   ├─ pigeon-core（Rust，C ABI）：完整 VT 状态机 + 布局 + 状态记录   │
 │   ├─ LayoutTree：会话/窗口/pane 的几何与焦点                      │
 │   ├─ StatusStore：解析 pane 字节流里的 OSC 7501                   │
 │   └─ 协议：attach 全量重绘 / 增量屏幕 diff / 键盘 / 鼠标 / resize │
@@ -64,16 +64,16 @@
 | B Swift 内核 + C ABI 导出（备选） | SwiftTerm 的 `Terminal`（headless，支持 Linux） | 同 A | 零 FFI、零新工具链，M0 最快 | 性能上限低；被第三方复用时生态弱 |
 | C libghostty-vt 内核 | Ghostty 的 VT 核心 | 自建 | 内核现成 | 依赖上游演进；仍需自建布局/会话层 |
 
-**结论：走 A —— 内核先用 Swift（SwiftTerm headless），导出 C ABI，客户端按平台薄薄一层（前端路线见 `docs/gui.md`）。** 详细设计见 **`docs/core.md`**
-（边界、C 头草案、快照/增量、线程与所有权、测试策略）。
-**为什么不是 Rust**：Rust 本身不难，难的是「两门语言 + 两套构建 + 一层 FFI」——
-首发的边际收益只有“内核更可复用”，而我们短期只有自己两个客户端。Swift 同样能编译到 Linux、
-也能用 `@_cdecl` 导出 C ABI 给 GTK 客户端链接，所以复用性并不依赖 Rust。
+**结论：走 A —— 内核用 Rust（`alacritty_terminal` / `vte`，包在自家 `Term` trait 后），经 `cbindgen` 导出 C ABI，客户端按平台薄薄一层（前端路线见 `docs/gui.md`）。** 详细设计见 **`docs/core.md`**
+（边界、C 头、快照/增量、线程与所有权、测试策略）。
+**为什么是 Rust**：VT 状态机是最容易攒长尾 bug 的地方，`alacritty_terminal`/`vte` 是已经被大量终端验证过的实现，
+自己重写不划算；C ABI 又是天然的跨语言边界，GTK 客户端与将来的第三方消费者都从同一条缝进来。
+代价是「两门语言 + 两套构建 + 一层 FFI」，换来的是 M5 之前不必再赌一次内核重写。
 
-**什么时候改回 Rust**（触发任一即重新评估，届时换的是 `Term` 实现，UI/协议不动）：
-1. 16 pane × 1MB/s 时内核 CPU 打不上去或帧时间超标（决定性能）；
-2. 确定要做 Windows 客户端（Swift 在 Windows 上生态最弱）；
-3. 想把内核开放给第三方（JS/Python/Rust 生态）当作库用。
+**什么时候改回 Swift（备选 B）**（触发任一即重新评估，届时换的是 `Term` 实现，UI/协议/C ABI 都不动）：
+1. Rust 在 macOS 交叉编译 / 静态链接（musl）上出现绕不过去的阻塞，撑不住 `docs/remote.md` 的 8MB 与单文件硬指标；
+2. FFI 的调试与构建成本超过收益（例如 cbindgen 覆盖不了某个必要能力）；
+3. 确定要做 Windows 客户端，且 Swift 的交叉编译链反而更省事。
 
 ### 3.2 跨平台策略（macOS 首发，Linux 跟进）
 
@@ -81,15 +81,17 @@
 
 | 层 | 平台 | 说明 |
 |---|---|---|
-| `PigeonShared`（协议 / 模型 / OSC 7501 解析） | 全平台 | 只许 Foundation + POSIX；禁止 Apple-only API（`NSTask`、`CoreGraphics`、`AppKit`） |
-| `pigeon-host`（PTY + VT 状态机 + 会话；本机与远端同一个二进制） | 全平台 | 用 `forkpty` 这类 POSIX 接口；SwiftTerm 的 **headless 核心**（`Terminal`/`HeadlessTerminal`）在 macOS 和 Linux 都能编（其 `Package.swift` 已按平台分支），只有 AppKit 视图是 Apple 专属 |
+| `core/`（VT / 布局 / OSC 7501 / 协议 / 会话） | 全平台 | Rust；只许 std + POSIX 绑定；无 UI、无字体、无图形 API；`unsafe` 只在 `ffi.rs` |
+| `pigeon-host`（PTY + 会话宿主；本机与远端同一个二进制） | 全平台 | `core/` 里的 bin；用 `forkpty` 这类 POSIX 接口；静态单文件 3–8MB（见 `docs/remote.md`） |
+| `include/pigeon_core.h` | 全平台 | 由 `cbindgen` 从 `core/src/ffi.rs` 生成，宿主与所有客户端共用的唯一 ABI 面 |
 | 客户端 | 按平台 | macOS：**AppKit**（`NSOutlineView` 侧栏 + 自绘网格，M0 首发）；Linux：**GTK4**（M5）。为什么不用 winit/Qt/Electron 见 `docs/gui.md` |
 
 - **协议是跨语言契约**：长度前缀 + 版本号，字段语义写进 `docs/protocol.md`（M0 随快照复原一起产出）。Linux 客户端可以用
-  Swift + GTK，也可以换语言重写——后台进程一行不改。
+  Swift + GTK，也可以换语言重写——内核与宿主一行不改。
 - 如果将来更看重“一套 UI 代码跑两个平台”，那就要接受非原生侧栏外观（winit / Flutter / Tauri 路线），
-  这是备选 B，首发不选。
-- **CI 从 M0 起就双平台**：macOS + Ubuntu 各跑一遍 `swift build && swift test`，别让 Linux 债攒到最后。
+  那是 `docs/gui.md` 的方案 C/D，首发不选。
+- **CI 从 M0 起就双平台**：macOS + Ubuntu 各跑一遍 `cargo test`（内核与宿主是跨平台的）；
+  `swift build && swift test` 只在 macOS（`PigeonApp` 是平台专属）。
 
 ### 3.3 后台会话进程是什么（对你隐形，不用配置）
 
@@ -150,10 +152,10 @@ tmux attach（前台，一个普通程序）
 远端跑**同一个** `pigeon-host`（3–8 MB 的小宿主，自动推送安装），本机窗口通过系统 `ssh` 连过去，接管服务器上的终端。
 细节见 **`docs/remote.md`**，三条要点：
 
-1. **三种对接**（自动探测并明示）：`ssh host pigeon --proxy`（stdio 桥接，推荐）→ unix socket 直转 →
+1. **三种对接**（自动探测并明示）：`ssh host pigeon-host --proxy`（stdio 桥接，推荐）→ unix socket 直转 →
    退化模式（普通 ssh，仍能显示 OSC 7501 状态，但没有远端持久化）。
-2. **安装**：`pigeon --install-remote host` 先打印命令再执行；推对应架构的静态二进制 + sha256 校验；
-   不静默覆盖已有版本、不改远端 shell 配置。
+2. **安装**：客户端首次连接时自动推送并安装（先打印命令与哈希再执行，`--no-remote-install` 可关）；
+   推对应架构的静态二进制 + sha256 校验；不静默覆盖已有版本、不改远端 shell 配置。
 3. **安全**：只经 ssh，不开端口；远端只监听 0700 的 unix socket；`--proxy` 只转发协议帧；
    认证/密钥/known_hosts 全交给系统 `ssh`。
 
@@ -173,8 +175,8 @@ tmux attach（前台，一个普通程序）
 
 | 项目 | 语言 | 借鉴什么 |
 |---|---|---|
-| **SwiftTerm** | Swift | 直接用它当内核；读 `Terminal.swift`（VT 状态机）、`HeadlessTerminal.swift`（无 UI 跑终端——正是后台进程要的）、`AppleTerminalView.swift`（AppKit 视图与输入法/鼠标）、`ProgramStatus.swift`（OSC 7501 的参考实现） |
-| **Ghostty / libghostty-vt** | Zig | 干净的“VT 核心 ↔ UI”分层；`libghostty-vt` 的嵌入接口是我们路线 B 的蓝本 |
+| **SwiftTerm** | Swift | **只作对账与规格来源，当内核的是 Rust**：读 `Terminal.swift`（VT 状态机）、`HeadlessTerminal.swift`（无 UI 跑终端）、`AppleTerminalView.swift`（AppKit 视图与输入法/鼠标）、`ProgramStatus.swift`（OSC 7501 的参考实现），用来喂 `tools/vt-parity` 比对 |
+| **Ghostty / libghostty-vt** | Zig | 干净的“VT 核心 ↔ UI”分层；`libghostty-vt` 的嵌入接口是我们路线 C（Ghostty 内核）的蓝本 |
 | **kitty** | C + Python | `screen.c` / `parser.c` 的 VT 细节，`child-monitor.c` 的 PTY 事件循环与背压（`pause-after`）；它也是“性能怎么做到”的参照 |
 | **Alacritty** | Rust | 极简内核 + `vte` crate（独立可复用的 VT 解析器）；配置热重载的做法 |
 | **WezTerm** | Rust | 它自带 mux（`Mux`/`Tab`/`Pane` 结构）与“多路复用 + 原生 UI”的整体设计 |
@@ -206,7 +208,7 @@ tmux attach（前台，一个普通程序）
 | **M2 多客户端与健壮性** | 协议版本协商、多窗口同看一个会话、后台进程崩溃处理 | 两个窗口看同一会话尺寸正确；`kill -9` 后台进程有明确提示并可重开；协议版本不匹配拒绝连接并说明 |
 | **M3 侧栏** | 树 + 状态 + 未读 + 通知 + 跳转 | 分组与计数正确；`blocked` 优先；后台 pane 状态可见；kill -9 后 ≤5s 回落；点击/键盘都能跳 |
 | **M4 SSH** | 宿主自动推送到远端 + 连接管理 | 断网 30s 恢复；远端任务不受影响；认证失败/远端没跑起来有明确提示 |
-| **M5 Linux 客户端** | 复用同一后台进程与协议，Linux 原生客户端（GTK）/ 或换语言的客户端 | Ubuntu 上功能对齐 macOS：会话、分屏、侧栏、OSC 7501 状态；`swift test` 在 Ubuntu 全绿 |
+| **M5 Linux 客户端** | 复用同一宿主与协议，Linux 原生客户端（GTK）/ 或换语言的客户端 | Ubuntu 上功能对齐 macOS：会话、分屏、侧栏、OSC 7501 状态；`cargo test` 在 Ubuntu 全绿（Swift 侧只跑 macOS） |
 | **M6 Beta** | 性能、IME、剪贴板、双平台打包签名 | 三档机器上 16 pane × 大输出不卡；macOS 分发包可安装；Linux 有 AppImage/tar |
 
 M0–M1 可以直接复用现有代码：内核的对账语料（来自 tmux 阶段录制的字节流）、SwiftTerm 原型作为**对照实现对账**、
@@ -232,7 +234,7 @@ M0–M1 可以直接复用现有代码：内核的对账语料（来自 tmux 阶
 | 多客户端尺寸冲突 | pane 尺寸跳变 | 显式策略：默认跟随“最近活跃”的客户端，并在侧栏显示当前尺寸来源；允许锁定尺寸 |
 | 原生 IME 与终端光标位置 | 候选窗错位 | 参考 SwiftTerm 的 IME 处理；M1 就测拼音 |
 | 性能（无 GPU 也要能看） | 大输出卡顿 | M1 用 CoreText/图层缓存；M5 前评估 Metal |
-| Linux 客户端等于第二份 UI | 双倍 UI 工作 | 协议先行（`docs/protocol.md` 字段级）；Shared/Daemon 从第一天就 Linux 可编译，CI 双平台；交互规格 `docs/ui.md` 对齐两边行为 |
+| Linux 客户端等于第二份 UI | 双倍 UI 工作 | 协议先行（`docs/protocol.md` 字段级）；`core/` 从第一天就 Linux 可编译，CI 双平台；交互规格 `docs/ui.md` 对齐两边行为 |
 | Swift 生态在 Linux 上的坑（GUI 绑定、字体、输入法） | Linux 版体验差 | M5 前只保证后台进程/协议在 Linux 可跑；客户端选型留到 M5（GTK 绑定 vs 换语言） |
 
 ## 9.5 许可证
@@ -252,3 +254,32 @@ M0–M1 可以直接复用现有代码：内核的对账语料（来自 tmux 阶
 | 兼容性对账脚本 | `~/dev/gmux/app/compat.py` | 改成“我们的内核 vs 参考实现” |
 | tmux 交互与配置影响的实测记录 | `~/dev/gmux/docs/tmux-integration.md` | 设计后台进程与尺寸策略时的反面教材 |
 | fork 阶段的结论 | `~/dev/gmux/docs/kitty-fork-status.md` | 为什么不 fork kitty、为什么不做字符侧栏 |
+
+## 11. 已知缺口
+
+M0 落地后仍在的洞。
+
+**已关闭**（上一版列出的文档层缺口）：
+
+| 旧缺口 | 关闭方式 |
+|---|---|
+| `core/Cargo.toml` / `core/src/` / `Package.swift` 不存在，CI 作业全是 no-op | 三样都存在，CI 四个作业都在做事（`docs` 链接、`rust` fmt/clippy/test/体积、`header` cbindgen diff、`swift` cargo+swift build/test） |
+| `include/pigeon_core.h` 是手写预览 | 由 `cbindgen` 从 `core/src/ffi.rs` 生成，`diff -u` 为空 |
+| `core/cbindgen.toml` 不存在 | 已建，配置与 CI 命令一致 |
+| 客户端如何经 C ABI 编解码未定 | `pg_msg_*`（new/free/type/set/get/encode/decode/snapshot/sessions），Swift 侧零 CBOR |
+| `Tests/` 规划未落地 | `Tests/PigeonAppTests`（KeyEncoder / AppKit 按键映射 / Grouping / SidebarModel，14 个用例） |
+
+| 缺口 | 现状 | 何时关闭 |
+|---|---|---|
+| `tools/vt-parity/run.sh` 与 golden 语料未建 | 只在 `AGENTS.md` 里被引用；目前靠 `core/tests/` 的确定性测试兜底 | M1 接真实程序对账时 |
+| OSC 8 超链接被丢弃 | `PgCell.hyperlink_id` 恒为 0，`cell[4]` 不上线（协议已留位） | 需要按链接跳转时 |
+| DECSTBM 滚动区恒等于整屏 | `alacritty_terminal` 不暴露 `scroll_region`；`snapshot.scroll` 发 `(0, rows-1)` | 需要客户端画滚动条时 |
+| `ColorRequest`（OSC 4/10/11 查询）不回应 | `core/src/term/alacritty.rs` 明确忽略；程序会退回默认色 | 有人反馈配色查询不准时 |
+| Swift 客户端不协商 `delta` | 只收 `snapshot`（协议 §5 允许）；每次变化一份全屏 | M1 做性能时开启增量 |
+| IME 候选窗未实现 | 走 AppKit 默认 `keyDown`；拼音候选定位于 M6 | M6 |
+| `zstd` 能力只定义了帧内 tag | 阈值、何时启用未定 | M4 远端实测后 |
+| CI 没有可移植性静态检查 | `ci.yml` 只做 fmt / clippy / test / 体积 / 头文件 diff / swift build+test | 加 `unsafe`/平台 crate 的 grep 检查时 |
+| `swift test` 依赖完整 Xcode | `xcode-select` 指向 CommandLineTools 时 XCTest 缺失，需 `DEVELOPER_DIR` | 换成 swift-testing 或写进 README |
+
+**平台说明**：`pigeon-host` 在 macOS 与 Linux 用同一份代码；M0 只在 macOS 上人工验收过，
+Ubuntu 侧由 `cargo test` 覆盖内核与协议，PTY/信号路径加入 Linux CI 的真实运行是 M5 的事。
