@@ -119,12 +119,13 @@ pigeon/
 - `core/src/` 里**不许**出现 `unsafe`（唯一例外：`ffi.rs` 的 `extern "C"` 边界）。
 - Swift 侧：`PigeonCore` 不许 `import AppKit`；`PigeonApp` 可以，但 `import CoreText` 只允许在
  `CoreTextRenderer.swift`。
-- PTY 一律 `openpty`/`forkpty` + 原始 fd 读写，不用 `NSTask`/`Process` 之外的 Apple 专属机制。
+- PTY 用 `portable-pty`（内部就是 `forkpty`/`openpty` 的封装）。因为 `core/src` 除 `ffi/` 外不许 `unsafe`，
+  **不直接操作原始 fd**；也不用 `NSTask`/`Process` 之类 Apple 专属机制。
 - 路径用 `FileManager`/POSIX；配置放 `~/.config/pigeon`（macOS 与 Linux 一致），不要用 `~/Library/...`。
 - 信号（`SIGWINCH`/`SIGCHLD`）用 `signal()` 或 `SelfPipe`/`signalfd` 的思路，不依赖 macOS runloop 特性。
 - 字体/渲染/输入法只在客户端层处理；`core/` 只搬字节与状态。
-- `tokio` / `portable-pty` **只允许在 `core/src/bin/` 里使用**：Cargo 没有按 target 的依赖，
-  所以靠这条约束 + review 保证库本体保持同步、无 IO。
+- `tokio` / `portable-pty` 是 **optional 依赖，只由 `host` feature 打开（默认开），且只允许在 `core/src/bin/` 里使用**。
+  CI 会跑 `cargo build --lib --no-default-features`，并 grep 保证库本体不引用它们。
 
 ### 模块内的硬规则
 

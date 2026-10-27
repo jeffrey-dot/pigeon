@@ -82,7 +82,7 @@
 | 层 | 平台 | 说明 |
 |---|---|---|
 | `core/`（VT / 布局 / OSC 7501 / 协议 / 会话） | 全平台 | Rust；只许 std + POSIX 绑定；无 UI、无字体、无图形 API；`unsafe` 只在 `ffi.rs` |
-| `pigeon-host`（PTY + 会话宿主；本机与远端同一个二进制） | 全平台 | `core/` 里的 bin；用 `forkpty` 这类 POSIX 接口；静态单文件 3–8MB（见 `docs/remote.md`） |
+| `pigeon-host`（PTY + 会话宿主；本机与远端同一个二进制） | 全平台 | `core/` 里的 bin；用 `portable-pty`（forkpty/openpty 的安全封装）；静态单文件 3–8MB（见 `docs/remote.md`） |
 | `include/pigeon_core.h` | 全平台 | 由 `cbindgen` 从 `core/src/ffi/mod.rs` 生成，宿主与所有客户端共用的唯一 ABI 面 |
 | 客户端 | 按平台 | macOS：**AppKit**（`NSOutlineView` 侧栏 + 自绘网格，M0 首发）；Linux：**GTK4**（M5）。为什么不用 winit/Qt/Electron 见 `docs/gui.md` |
 
@@ -279,6 +279,7 @@ M0 落地后仍在的洞。
 | IME 候选窗未实现 | 走 AppKit 默认 `keyDown`；拼音候选定位于 M6 | M6 |
 | `zstd` 能力只定义了帧内 tag | 阈值、何时启用未定 | M4 远端实测后 |
 | CI 没有可移植性静态检查 | `ci.yml` 只做 fmt / clippy / test / 体积 / 头文件 diff / swift build+test | 加 `unsafe`/平台 crate 的 grep 检查时 |
+| PTY 走 `portable-pty` 而不是原始 fd | 为了让 `core/src`（除 `ffi/`）零 `unsafe`；拿到的是已有 fd 的 reader/writer 句柄 | 需要原始 fd 做特殊 ioctl 时 |
 | `swift test` 依赖完整 Xcode | `xcode-select` 指向 CommandLineTools 时 XCTest 缺失，需 `DEVELOPER_DIR` | 换成 swift-testing 或写进 README |
 
 **平台说明**：`pigeon-host` 在 macOS 与 Linux 用同一份代码；CI 的 `rust` 作业在 ubuntu 与 macos

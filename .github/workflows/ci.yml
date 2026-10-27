@@ -48,6 +48,13 @@ jobs:
       - if: steps.core.outputs.exists == 'true'
         run: cargo test --manifest-path core/Cargo.toml
       - if: steps.core.outputs.exists == 'true'
+        name: 库本体不得引用 tokio / portable-pty
+        run: |
+          ! rg -n "use (tokio|portable_pty)" core/src -g '!core/src/bin/**'
+      - if: steps.core.outputs.exists == 'true'
+        name: 不带 host feature 也能构建库
+        run: cargo build --manifest-path core/Cargo.toml --lib --no-default-features
+      - if: steps.core.outputs.exists == 'true'
         name: pigeon-host 体积上限 8MB
         run: |
           cargo build --release --manifest-path core/Cargo.toml \
