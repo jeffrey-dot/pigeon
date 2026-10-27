@@ -1,0 +1,52 @@
+name: ci
+on: [push, pull_request]
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 文档链接检查（相对链接必须存在）
+        run: |
+          python3 - <<'PY'
+          import pathlib, re, sys
+          bad = []
+          for md in pathlib.Path('.').rglob('*.md'):
+              if '.agents' in str(md) or 'node_modules' in str(md):
+                  continue
+              for m in re.finditer(r'\]\(([^)#]+\.md)\)', md.read_text()):
+                  target = (md.parent / m.group(1)).resolve()
+                  if not target.exists():
+                      bad.append(f'{md}: {m.group(1)}')
+          print('\n'.join(bad) or 'links ok')
+          sys.exit(1 if bad else 0)
+          PY
+
+  rust:
+    if: ${{ hashFiles('core/Cargo.toml') != '' }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo fmt --manifest-path core/Cargo.toml --check
+      - run: cargo clippy --manifest-path core/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --manifest-path core/Cargo.toml
+      - name: pigeon-host 体积上限 8MB
+        run: |
+          cargo build --release --manifest-path core/Cargo.toml --bin pigeon-host
+          size=$(stat -f%z core/target/release/pigeon-host 2>/dev/null || stat -c%s core/target/release/pigeon-host)
+          echo "pigeon-host: $size bytes"
+          test "$size" -le 8388608
+
+  swift:
+    if: ${{ hashFiles('Package.swift') != '' }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift build
+      - run: swift test

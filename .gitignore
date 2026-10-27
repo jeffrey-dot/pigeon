@@ -1,0 +1,20 @@
+# Rust
+target/
+core/target/
+**/*.rs.bk
+
+# Swift / Xcode
+.build/
+*.xcodeproj/xcuserdata/
+DerivedData/
+
+# 构建产物
+pigeon-host
+*.p8
+*.dmg
+
+# OS / 编辑器
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/settings.json
