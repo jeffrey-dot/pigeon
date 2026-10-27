@@ -24,7 +24,7 @@ macOS + Xcode 命令行工具（`swift --version` ≥ 6）与 Rust（见 `rust-t
 
 ```sh
 cargo build --manifest-path core/Cargo.toml    # 内核 + pigeon-host（两平台都要能过）
-cargo test  --manifest-path core/Cargo.toml    # 内核单测 + ABI + 宿主端到端（59 个用例）
+cargo test  --manifest-path core/Cargo.toml    # 内核单测 + ABI + 宿主端到端（64 个用例）
 cargo run   --manifest-path core/Cargo.toml --bin pigeon-host   # 会话宿主（本机自动拉起；远端按需推送；手动跑用于调试）
 cargo build                     # 先建核心：客户端链接 core/target/*/libpigeon_core.a
 swift build                     # 客户端（macOS only）

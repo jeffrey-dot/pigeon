@@ -1,9 +1,13 @@
 #!/bin/bash
-# Reproducible GUI checklist for M0. Every step prints what it proved.
+# Reproducible GUI checklist for M0: real window, real keystrokes, real resize.
 #
-#   tools/m0-gui-check.sh            # uses .build/debug/pigeon + release host
+# Requires Accessibility permission for the terminal that runs this script
+# (System Settings → Privacy & Security → Accessibility), because keystrokes and
+# window resizing go through System Events.
 #
-# Screenshots land in docs/images/m0/. Nothing here touches your shell config.
+#   tools/m0-gui-check.sh
+#
+# Screenshots land in docs/images/m0/; every case prints what it proved.
 set -u
 cd "$(dirname "$0")/.."
 
@@ -12,42 +16,66 @@ HOST=${HOST:-core/target/release/pigeon-host}
 OUT=${OUT:-docs/images/m0}
 mkdir -p "$OUT"
 
-run_case() {           # $1 pane program, $2 screenshot name, $3 extra wait
-    local program=$1 shot=$2 wait=${3:-4}
-    local dir; dir=$(mktemp -d /tmp/pigeon-gui-XXXXXX)
-    PIGEON_DEBUG=1 "$HOST" --socket "$dir/pigeon.sock" --shell "$program" >"$dir/host.log" 2>&1 &
-    local host_pid=$!
+osa() { osascript "$@" >/dev/null 2>&1; }
+shoot() { screencapture -x -o "$1" 2>/dev/null; sips -Z 1400 -s format jpeg -s formatOptions 65 "$1" --out "$1" >/dev/null 2>&1; }
+
+start() { # $1 pane program
+    R=$(mktemp -d /tmp/pigeon-gui-XXXXXX)
+    PIGEON_DEBUG=1 "$HOST" --socket "$R/pigeon.sock" --shell "$1" >"$R/host.log" 2>&1 &
+    HOST_PID=$!
     sleep 1
-    XDG_RUNTIME_DIR="$dir" PIGEON_DEBUG=1 "$APP" >"$dir/app.log" 2>&1 &
-    local app_pid=$!
-    sleep "$wait"
-    screencapture -x -o "$OUT/$shot.jpg" 2>/dev/null
-    echo "[$shot] screenshot: $OUT/$shot.jpg"
-    echo "[$shot] resize_pane sent: $(grep -c 'resize_pane' "$dir/host.log")"
-    kill "$app_pid" 2>/dev/null; sleep 1
-    echo "[$shot] shell alive after the window closed: $(pgrep -P "$host_pid" | wc -l | tr -d ' ')"
-    kill "$host_pid" 2>/dev/null
-    echo
+    XDG_RUNTIME_DIR="$R" "$APP" >"$R/app.log" 2>&1 &
+    APP_PID=$!
+    sleep 4
+    osa -e 'tell application "System Events" to set frontmost of process "pigeon" to true'
 }
 
-echo "== htop =="
-run_case /opt/homebrew/bin/htop htop 5
+stop() {
+    kill "$APP_PID" 2>/dev/null; sleep 1
+    echo "  shell still alive after the window closed: $(pgrep -P "$HOST_PID" | wc -l | tr -d ' ')"
+    kill "$HOST_PID" 2>/dev/null
+}
 
-echo "== close a window, reopen it: the same pane must come back =="
-dir=$(mktemp -d /tmp/pigeon-reopen-XXXXXX)
-PIGEON_DEBUG=1 "$HOST" --socket "$dir/pigeon.sock" --shell /bin/sh >"$dir/host.log" 2>&1 &
-host_pid=$!
-sleep 1
-XDG_RUNTIME_DIR="$dir" "$APP" >/dev/null 2>&1 &
-app1=$!
-sleep 4
-screencapture -x -o "$OUT/reopen-1.jpg" 2>/dev/null
-kill "$app1" 2>/dev/null; sleep 1
-echo "after closing the window, the shell is still there: $(pgrep -P "$host_pid" | wc -l | tr -d ' ')"
-XDG_RUNTIME_DIR="$dir" "$APP" >/dev/null 2>&1 &
-app2=$!
-sleep 4
-screencapture -x -o "$OUT/reopen-2.jpg" 2>/dev/null
-kill "$app2" 2>/dev/null
-kill "$host_pid" 2>/dev/null
-echo "screenshots: $OUT/reopen-1.jpg $OUT/reopen-2.jpg"
+echo "== typing in the shell =="
+start /bin/sh
+osa -e 'tell application "System Events" to keystroke "echo typed-by-a-human"'
+osa -e 'tell application "System Events" to key code 36'
+sleep 2
+shoot "$OUT/typed-shell.jpg"
+stop
+
+echo "== typing inside vim (alternate screen) =="
+start /tmp/pigeon-vim.sh 2>/dev/null || true
+if [ -n "${R:-}" ]; then
+    osa -e 'tell application "System Events" to key code 0'
+    osa -e 'tell application "System Events" to keystroke "alt screen survives"'
+    osa -e 'tell application "System Events" to key code 53'
+    sleep 1
+    shoot "$OUT/alt-1.jpg"
+    kill "$APP_PID" 2>/dev/null; sleep 1
+    echo "  vim still running after the window closed: $(pgrep -P "$HOST_PID" | wc -l | tr -d ' ')"
+    XDG_RUNTIME_DIR="$R" "$APP" >/dev/null 2>&1 &
+    APP_PID=$!
+    sleep 4
+    shoot "$OUT/alt-2.jpg"
+    stop
+fi
+
+echo "== paging less with the keyboard =="
+start /tmp/pigeon-less.sh 2>/dev/null || true
+if [ -n "${R:-}" ]; then
+    osa -e 'tell application "System Events" to key code 49'
+    sleep 1
+    shoot "$OUT/less-page2.jpg"
+    stop
+fi
+
+echo "== resizing the window =="
+start /bin/sh
+before=$(grep -c resize_pane "$R/host.log")
+osa -e 'tell application "System Events" to tell process "pigeon" to set size of window 1 to {1200, 700}'
+sleep 2
+after=$(grep -c resize_pane "$R/host.log")
+echo "  resize_pane before=$before after=$after"
+shoot "$OUT/window-resized.jpg"
+stop

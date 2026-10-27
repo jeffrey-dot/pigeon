@@ -267,7 +267,7 @@ M0 落地后仍在的洞。
 | `include/pigeon_core.h` 是手写预览 | 由 `cbindgen` 从 `core/src/ffi/mod.rs` 生成，`diff -u` 为空 |
 | `core/cbindgen.toml` 不存在 | 已建，配置与 CI 命令一致 |
 | 客户端如何经 C ABI 编解码未定 | `pg_msg_*`（new/free/type/set/get/encode/decode/snapshot/sessions），Swift 侧零 CBOR |
-| `Tests/` 规划未落地 | `Tests/PigeonAppTests`（KeyEncoder / AppKit 按键映射 / Grouping / SidebarModel，14 个用例） |
+| `Tests/` 规划未落地 | `Tests/PigeonAppTests`（KeyEncoder / AppKit 按键映射 / Grouping / SidebarModel，15 个用例） |
 
 | 缺口 | 现状 | 何时关闭 |
 |---|---|---|

@@ -44,18 +44,31 @@ swift test                                         # 15 个用例
 | 提示符 + 方块光标 | ![prompt](images/m0/prompt.jpg) |
 | vim：缓冲区 + 状态行 | ![vim](images/m0/vim.jpg) |
 | less：首屏 + `(END)` | ![less](images/m0/less.jpg) |
+| 真实键盘事件：System Events 往窗口发 `ls` / `pwd`（走系统事件通道，不是 App 内部调用） | ![typed](images/m0/typed-shell.jpg) |
+| 键盘事件进 vim（`i` 输入、`Esc`）：备用屏 | ![vim-typed](images/m0/vim-typed.jpg) |
+| 关窗→重开：vim 的备用屏与内容原样回来 | ![alt-1](images/m0/alt-1.jpg) → ![alt-2](images/m0/alt-2.jpg) |
+| 键盘事件给 less 翻页（空格） | ![less-page2](images/m0/less-page2.jpg) |
+| 窗口改到 1200×700 后重绘（System Events 设置窗口尺寸） | ![resize](images/m0/window-resized.jpg) |
 | htop：CPU/内存面板 + 进程列表 | ![htop](images/m0/htop.jpg) |
 | 真彩色 + 调色板反显 + 中文宽字符（width 修复后：CJK 不再被拉开） | ![truecolor](images/m0/truecolor.jpg) |
 | 关窗后重开：同一个 pane 回来 | ![reopen-1](images/m0/reopen-1.jpg) → ![reopen-2](images/m0/reopen-2.jpg) |
 
-一键复现（`tools/m0-gui-check.sh`，输出上面这些图）：
+一键复现（`tools/m0-gui-check.sh`；需要给运行它的终端开 Accessibility 权限）：
 
 ```sh
 ./tools/m0-gui-check.sh
-# [htop] resize_pane sent: 1
-# [htop] shell alive after the window closed: 1
-# after closing the window, the shell is still there: 1
+# == typing in the shell ==
+#   shell still alive after the window closed: 1
+# == typing inside vim (alternate screen) ==
+#   vim still running after the window closed: 1
+# == paging less with the keyboard ==
+# == resizing the window ==
+#   resize_pane before=1 after=2
 ```
+
+**这一步抓到一个真 bug**：窗口改大后 `PaneView` 先把 `cols/rows` 换成新尺寸、而 cell 缓冲还是旧的，
+渲染器就踩着越界区间崩了（`Fatal error: Range requires lowerBound <= upperBound`）。
+已修：`syncGrid()` 只改「请求的尺寸」，`cols/rows` 只由收到的快照更新；渲染器再加一层 `cells.count >= cols*rows` 的守卫。
 
 htop 的自动化用例（`htop_renders_its_panels_and_quits_on_q`）断言面板出现且 `q` 后
 `pane_exited{code:0}`；less 翻页（`less_pages_forward_when_space_is_pressed`）断言空格后出现第 40 行。
@@ -66,8 +79,9 @@ htop 的自动化用例（`htop_renders_its_panels_and_quits_on_q`）断言面�
 | 项 | 原因 |
 |---|---|
 | 物理键盘 | AppleScript 注入被 TCC 拒绝；改由 `PaneKeyTests`（AppKit 映射）+ 宿主 `keys` e2e 覆盖，真实按键仍待人按 |
-| 拖动窗口边缘改尺寸 | 需要真实鼠标事件；`tools/m0-gui-check.sh` 打印「resize_pane sent: 1」，协议与 PTY 侧由 `resize_reaches_the_shell` 断言 `stty size` = `30 100`；真正拖动未测 |
-| 重开窗口的像素级 diff | 已截 `reopen-1/2.jpg` 且宿主在关窗后仍持有子进程；两张图肉眼一致，但没有做逐像素比较 |
+| ~~拖动窗口改尺寸~~ | 已验：`tools/m0-gui-check.sh` 用 System Events 把窗口改成 1200×700，宿主日志 `resize_pane` 从 1 变成 2，客户端网格从 111×36 变成 149×36 |
+| ~~物理键盘~~ | 已验：System Events 发送键盘事件，shell/vim/less 都有截图（`typed-shell.jpg`、`vim-typed.jpg`、`less-page2.jpg`）。仍需人按下的是「真实手速/输入法」这类体验项 |
+| 重开窗口的像素级 diff | `alt-1.jpg`/`alt-2.jpg` 展示的是同一屏（vim 备用屏 + 输入的文字），但没做逐像素比较；逐 cell 相等由 `comparable()` 断言 |
 | Ubuntu 实跑 | 本机无 Linux；CI matrix 已配 ubuntu + macos |
 | GitHub Actions 实跑 | 仓库无 remote，未推送；四个作业的命令已在本机按同顺序跑过 |
 

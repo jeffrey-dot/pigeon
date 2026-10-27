@@ -60,12 +60,12 @@ final class PaneView: NSView {
         let size = CoreTextRenderer.cellSize()
         let newCols = UInt16(max(Int(bounds.width / size.width), 2))
         let newRows = UInt16(max(Int(bounds.height / size.height), 1))
-        cols = Int(newCols)
-        rows = Int(newRows)
+        // Only the *requested* size changes here. `cols`/`rows` describe the
+        // cells we hold, and those must keep matching until the host answers
+        // with a new snapshot — otherwise the renderer walks off the grid.
         guard (newCols, newRows) != reported else { return }
         reported = (newCols, newRows)
         onResize?(newCols, newRows)
-        needsDisplay = true
     }
 
     func apply(snapshot: UnsafePointer<PgSnapshot>) {

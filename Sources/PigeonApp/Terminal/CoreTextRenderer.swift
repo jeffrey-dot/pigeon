@@ -25,7 +25,9 @@ enum CoreTextRenderer {
         cursor: PaneView.Cursor,
         in bounds: CGRect
     ) {
-        guard cols > 0, rows > 0, !cells.isEmpty else { return }
+        // A resize can land between the request and the new snapshot; draw only
+        // what we hold instead of trapping on a half-updated grid.
+        guard cols > 0, rows > 0, !cells.isEmpty, cells.count >= cols * rows else { return }
         if ProcessInfo.processInfo.environment["PIGEON_DEBUG"] != nil {
             FileHandle.standardError.write(Data("pigeon: draw cells=\(cells.count) size=\(bounds.size)\n".utf8))
         }
@@ -36,7 +38,10 @@ enum CoreTextRenderer {
 
         for row in 0..<rows {
             let originY = bounds.height - CGFloat(row + 1) * size.height
-            let rowCells = Array(cells[(row * cols)..<min((row + 1) * cols, cells.count)])
+            let start = row * cols
+            let end = min(start + cols, cells.count)
+            guard start < end else { continue }
+            let rowCells = Array(cells[start..<end])
             guard rowCells.count == cols else { continue }
 
             // Backgrounds first, then the glyph run on top.
