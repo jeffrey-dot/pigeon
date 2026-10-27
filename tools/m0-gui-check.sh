@@ -79,7 +79,11 @@ XDG_RUNTIME_DIR="$R" "$APP" >/dev/null 2>&1 &
 APP_PID=$!
 sleep 4
 osa -e 'tell application "System Events" to set frontmost of process "pigeon" to true'
-osa -e 'tell application "System Events" to keystroke "!"'   # proves it accepts input again
+# Type again after the reopen: the screenshot must show the new text, which also
+# proves the restored pane still accepts input.
+osa -e 'tell application "System Events" to key code 0'                     # i
+osa -e 'tell application "System Events" to keystroke " after-reopen"'
+osa -e 'tell application "System Events" to key code 53'                    # Escape
 sleep 1
 shoot "$OUT/alt-2.jpg"
 stop

@@ -112,7 +112,7 @@ pigeon/
 | 渲染、字体、输入法 | `Sources/PigeonApp/Terminal/`，不往下漏 |
 | 一次性脚本 / 对账工具 | `tools/`，不放进 `Sources/` 或 `core/src/` |
 
-### 可移植性硬规则（CI 目前只跑 fmt/clippy/test；静态检查见 `docs/plan.md` §11）
+### 可移植性硬规则（CI 跑 fmt / clippy / test / tokio+portable-pty 引用检查 / `--lib --no-default-features` 构建 / 体积上限 / 头文件 diff；仍缺 `unsafe` 与平台 crate 的静态检查，见 `docs/plan.md` §11）
 
 - `core/` 里**不许**出现：平台专属 crate（`core-foundation`、`objc2`…）、`cfg(target_os = …)` 分支
  （PTY 与信号可以有一处，且必须两边都有实现）、直接操作窗口/字体/图形 API。

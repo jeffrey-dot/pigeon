@@ -15,7 +15,7 @@ cbindgen --config core/cbindgen.toml --crate pigeon-core \
          --output /tmp/pg.h core                   # 与 include/pigeon_core.h 无差异
 cargo build                                        # 客户端链接用（core/target/*/libpigeon_core.a）
 swift build                                        # 通过
-swift test                                         # 15 个用例
+swift test                                         # 18 个用例
 ```
 
 `swift test` 需要完整 Xcode：`xcode-select` 指向 CommandLineTools 时 XCTest 缺失，
@@ -33,7 +33,7 @@ swift test                                         # 15 个用例
 | 宿主端到端 | 断开→重连快照严格相等（cells/attrs/fg/bg/cursor/alt/scroll）；坏版本；未知消息不断开；`resize_pane` 后 `stty size` 读回 `30 100`；`close_pane` 终止子进程并从会话列表消失 |
 | C ABI（内嵌） | `pg_core_new` → `pg_pane_new` → `pg_pane_feed` → `pg_pane_snapshot`：**宽字符 width 2 / continuation 0 穿过 C 边界**（GUI 走的正是这条路）；OSC 7501 记录经 `pg_status_*` 读出；DA1 应答经 `pg_pane_respond` 取出；布局返回整屏 rect |
 | 真实程序 | `less` 翻页（空格后看到第 40 行）、`htop` 渲染面板并 `q` 干净退出、`vim` 打开文件并 `:q!` 退出 |
-| Swift 逻辑 | KeyEncoder、NSEvent→KeyStroke 映射、Grouping、SidebarModel（排序/分组/needs-you/相对时间） |
+| Swift 逻辑 | KeyEncoder、NSEvent→KeyStroke 映射、Grouping、SidebarModel（排序/分组/needs-you/相对时间）、渲染列定位（宽字符独占两列、续格跳过） |
 
 ## 2. 截图（`docs/images/m0/`）
 
@@ -45,13 +45,12 @@ swift test                                         # 15 个用例
 | vim：缓冲区 + 状态行 | ![vim](images/m0/vim.jpg) |
 | less：首屏 + `(END)` | ![less](images/m0/less.jpg) |
 | 键盘事件：System Events 输入 `echo typed-by-a-human`（系统事件通道，非 App 内部调用） | ![typed](images/m0/typed-shell.jpg) |
-| 键盘事件进 vim（`i` 输入、`Esc`）：备用屏 | ![vim-typed](images/m0/vim-typed.jpg) |
-| 关窗→重开：vim 的备用屏与内容原样回来（重开后脚本再敲一个 `!`，所以两张图 md5 不同） | ![alt-1](images/m0/alt-1.jpg) → ![alt-2](images/m0/alt-2.jpg) |
+| 关窗→重开：vim 备用屏与内容原样回来；重开后脚本再进入插入模式补打 ` after-reopen`，截图里能看到这行新字 | ![alt-1](images/m0/alt-1.jpg) → ![alt-2](images/m0/alt-2.jpg) |
 | 键盘事件给 less 翻页（空格） | ![less-page2](images/m0/less-page2.jpg) |
 | 窗口改到 1200×700 后重绘（System Events 设置窗口尺寸） | ![resize](images/m0/window-resized.jpg) |
 | htop：CPU/内存面板 + 进程列表 | ![htop](images/m0/htop.jpg) |
 | htop：按 `q` 退出后回到 `sh-3.2$` 提示符（pane 是 `htop` 然后 `exec /bin/sh`；脚本打印 `htop processes after pressing q: 1`，那个 1 就是 shell） | ![htop-quit](images/m0/htop-quit.jpg) |
-| 真彩色 + 调色板反显 + 中文宽字符（width 修复后：CJK 不再被拉开） | ![truecolor](images/m0/truecolor.jpg) |
+| 真彩色 + 调色板反显 + 中文宽字符（渲染器按列定位后：`中文宽字符` 占 10 列，后面的 `wide` 从第 11 列开始） | ![truecolor](images/m0/truecolor.jpg) |
 
 一键复现（`tools/m0-gui-check.sh`）：
 
@@ -90,9 +89,15 @@ cargo build --release --bin pigeon-host && cargo build && swift build   # 先构
 脚本自己生成 `demo.txt`、`long.txt`、`vim.sh`、`less.sh`（都在临时目录里，跑完删除），
 所以新克隆的仓库不需要任何 `/tmp` 预置文件。
 
-**这一步抓到一个真 bug**：窗口改大后 `PaneView` 先把 `cols/rows` 换成新尺寸、而 cell 缓冲还是旧的，
-渲染器就踩着越界区间崩了（`Fatal error: Range requires lowerBound <= upperBound`）。
-已修：`syncGrid()` 只改「请求的尺寸」，`cols/rows` 只由收到的快照更新；渲染器再加一层 `cells.count >= cols*rows` 的守卫。
+**这一步抓到两个真 bug**：
+
+1. 窗口改大后 `PaneView` 先把 `cols/rows` 换成新尺寸、而 cell 缓冲还是旧的，渲染器踩越界崩了
+   （`Fatal error: Range requires lowerBound <= upperBound`）。已修：`syncGrid()` 只改「请求的尺寸」，
+   `cols/rows` 只由收到的快照更新；渲染器再加 `cells.count >= cols*rows` 守卫。
+2. 宽字符对齐：渲染器原来把整行拼成一个 `CTLine`，而 CJK 字形的 advance 约 1.6 个等宽格，
+   于是宽字符后面的内容整体左移。已改为**按列定位**：每段同色文本画在 `column * cellWidth`，
+   宽字符独占一个 run（不让 CoreText 用它自己的 advance 影响后面），续格跳过。
+   `RendererTests` 用纯逻辑断言这件事（`[A 中 cont B]` → 起点 0/1/3）。
 
 htop 的自动化用例（`htop_renders_its_panels_and_quits_on_q`）断言面板出现且 `q` 后
 `pane_exited{code:0}`；less 翻页（`less_pages_forward_when_space_is_pressed`）断言空格后出现第 40 行。

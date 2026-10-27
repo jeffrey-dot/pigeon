@@ -6,6 +6,20 @@ import PigeonCore
 enum CoreTextRenderer {
     static let fontSize: CGFloat = 13
 
+    /// A run of cells sharing one colour, pinned to the column it starts at.
+    ///
+    /// Cells are positioned by column, never by concatenating a whole row: a CJK
+    /// glyph's advance is ~1.6 monospace cells, so letting CoreText flow the line
+    /// would shift everything after a wide character to the left.
+    struct TextRun: Equatable {
+        let startColumn: Int
+        let text: String
+        let colorValue: UInt32
+        /// A wide glyph gets a run of its own: CoreText would otherwise advance by
+        /// its own (~1.6 cell) metric instead of the two columns it owns.
+        let wide: Bool
+    }
+
     static func font(bold: Bool) -> NSFont {
         let base = NSFont.monospacedSystemFont(ofSize: fontSize, weight: bold ? .bold : .regular)
         return base
@@ -58,28 +72,24 @@ enum CoreTextRenderer {
                 _ = fg
             }
 
-            let attributed = NSMutableAttributedString()
-            for cell in rowCells where cell.width != 0 {
-                guard let scalar = Unicode.Scalar(cell.codepoint) else { continue }
-                let (fg, _) = resolved(cell)
-                attributed.append(
-                    NSAttributedString(
-                        string: String(Character(scalar)),
-                        attributes: [
-                            NSAttributedString.Key(kCTFontAttributeName as String): font,
-                            NSAttributedString.Key(kCTForegroundColorAttributeName as String):
-                                color(fg).cgColor,
-                        ]
-                    )
-                )
-            }
-            guard attributed.length > 0 else { continue }
-
-            let line = CTLineCreateWithAttributedString(attributed)
             guard let context = NSGraphicsContext.current?.cgContext else { continue }
             context.textMatrix = .identity
-            context.textPosition = CGPoint(x: 0, y: originY + (-font.descender))
-            CTLineDraw(line, context)
+            for run in Self.textRuns(for: rowCells) {
+                let attributed = NSAttributedString(
+                    string: run.text,
+                    attributes: [
+                        NSAttributedString.Key(kCTFontAttributeName as String): font,
+                        NSAttributedString.Key(kCTForegroundColorAttributeName as String):
+                            color(run.colorValue).cgColor,
+                    ]
+                )
+                let line = CTLineCreateWithAttributedString(attributed)
+                context.textPosition = CGPoint(
+                    x: CGFloat(run.startColumn) * size.width,
+                    y: originY + (-font.descender)
+                )
+                CTLineDraw(line, context)
+            }
         }
 
         if cursor.visible, cursor.x < cols, cursor.y < rows {
@@ -91,6 +101,31 @@ enum CoreTextRenderer {
                 height: size.height
             ).fill()
         }
+    }
+
+    /// Groups a row into runs, skipping continuation cells (width 0) so the cell
+    /// after a wide character keeps its own column.
+    static func textRuns(for rowCells: [PaneView.Cell]) -> [TextRun] {
+        var runs: [TextRun] = []
+        for (column, cell) in rowCells.enumerated() {
+            guard cell.width != 0, let scalar = Unicode.Scalar(cell.codepoint) else { continue }
+            let (fg, _) = resolved(cell)
+            let character = String(Character(scalar))
+            let wide = cell.width == 2
+            if let last = runs.last, !wide, !last.wide, last.colorValue == fg {
+                runs[runs.count - 1] = TextRun(
+                    startColumn: last.startColumn,
+                    text: last.text + character,
+                    colorValue: fg,
+                    wide: false
+                )
+            } else {
+                runs.append(
+                    TextRun(startColumn: column, text: character, colorValue: fg, wide: wide)
+                )
+            }
+        }
+        return runs
     }
 
     // MARK: - colours
