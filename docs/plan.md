@@ -278,7 +278,7 @@ M0 落地后仍在的洞。
 | Swift 客户端不协商 `delta` | 只收 `snapshot`（协议 §5 允许）；每次变化一份全屏 | M1 做性能时开启增量 |
 | IME 候选窗未实现 | 走 AppKit 默认 `keyDown`；拼音候选定位于 M6 | M6 |
 | `zstd` 能力只定义了帧内 tag | 阈值、何时启用未定 | M4 远端实测后 |
-| CI 没有可移植性静态检查 | `ci.yml` 只做 fmt / clippy / test / 体积 / 头文件 diff / swift build+test | 加 `unsafe`/平台 crate 的 grep 检查时 |
+| CI 没有可移植性静态检查 | 现在有：fmt / clippy / test / `! rg "use (tokio|portable_pty)"` / `--lib --no-default-features` 构建 / 体积上限 / 头文件 diff / swift build+test；仍缺 `unsafe` 与平台专属 crate 的 grep | 加 `unsafe`/`cfg(target_os)` 检查时 |
 | PTY 走 `portable-pty` 而不是原始 fd | 为了让 `core/src`（除 `ffi/`）零 `unsafe`；拿到的是已有 fd 的 reader/writer 句柄 | 需要原始 fd 做特殊 ioctl 时 |
 | `swift test` 依赖完整 Xcode | `xcode-select` 指向 CommandLineTools 时 XCTest 缺失，需 `DEVELOPER_DIR` | 换成 swift-testing 或写进 README |
 

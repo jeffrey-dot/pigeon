@@ -46,25 +46,46 @@ swift test                                         # 15 个用例
 | less：首屏 + `(END)` | ![less](images/m0/less.jpg) |
 | 键盘事件：System Events 输入 `echo typed-by-a-human`（系统事件通道，非 App 内部调用） | ![typed](images/m0/typed-shell.jpg) |
 | 键盘事件进 vim（`i` 输入、`Esc`）：备用屏 | ![vim-typed](images/m0/vim-typed.jpg) |
-| 关窗→重开：vim 的备用屏与内容原样回来 | ![alt-1](images/m0/alt-1.jpg) → ![alt-2](images/m0/alt-2.jpg) |
+| 关窗→重开：vim 的备用屏与内容原样回来（重开后脚本再敲一个 `!`，所以两张图 md5 不同） | ![alt-1](images/m0/alt-1.jpg) → ![alt-2](images/m0/alt-2.jpg) |
 | 键盘事件给 less 翻页（空格） | ![less-page2](images/m0/less-page2.jpg) |
 | 窗口改到 1200×700 后重绘（System Events 设置窗口尺寸） | ![resize](images/m0/window-resized.jpg) |
 | htop：CPU/内存面板 + 进程列表 | ![htop](images/m0/htop.jpg) |
-| htop：按 `q` 退出后回到提示符（脚本打印 `htop processes after pressing q: 0`） | ![htop-quit](images/m0/htop-quit.jpg) |
+| htop：按 `q` 退出后回到 `sh-3.2$` 提示符（pane 是 `htop` 然后 `exec /bin/sh`；脚本打印 `htop processes after pressing q: 1`，那个 1 就是 shell） | ![htop-quit](images/m0/htop-quit.jpg) |
 | 真彩色 + 调色板反显 + 中文宽字符（width 修复后：CJK 不再被拉开） | ![truecolor](images/m0/truecolor.jpg) |
 
-一键复现（`tools/m0-gui-check.sh`；需要给运行它的终端开 Accessibility 权限）：
+一键复现（`tools/m0-gui-check.sh`）：
 
 ```sh
+cargo build --release --bin pigeon-host && cargo build && swift build   # 先构建
 ./tools/m0-gui-check.sh
-# == typing in the shell ==
-#   shell still alive after the window closed: 1
-# == typing inside vim (alternate screen) ==
-#   vim still running after the window closed: 1
-# == paging less with the keyboard ==
-# == resizing the window ==
-#   resize_pane before=1 after=2
 ```
+
+真实输出（macOS，htop 3.5.3；没装 htop 时该段自动跳过）：
+
+```text
+== prompt ==
+  pane processes after the window closed: 1
+== typing in the shell ==
+  pane processes after the window closed: 1
+== vim first screen ==
+  pane processes after the window closed: 1
+== vim typing, close, reopen ==
+  vim still running after the window closed: 1
+  pane processes after the window closed: 1
+== less: first page and one page down ==
+  pane processes after the window closed: 1
+== htop: render, quit with q, back to the prompt ==
+  htop processes after pressing q: 1
+  pane processes after the window closed: 1
+== truecolor and wide characters ==
+  pane processes after the window closed: 1
+== resizing the window ==
+  resize_pane before=1 after=2
+  pane processes after the window closed: 1
+```
+
+`resize_pane before=1 after=2` 是窗口改成 1200×700 后又发了一次 resize；客户端网格从
+111×36 变成 149×36（宿主 debug 日志可见）。
 
 脚本自己生成 `demo.txt`、`long.txt`、`vim.sh`、`less.sh`（都在临时目录里，跑完删除），
 所以新克隆的仓库不需要任何 `/tmp` 预置文件。
