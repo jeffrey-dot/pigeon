@@ -1,0 +1,4 @@
+# Keep the artifacts under core/target: Package.swift, the CI size check and the
+# docs all point there.
+[build]
+target-dir = "core/target"

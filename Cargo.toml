@@ -1,0 +1,11 @@
+# Workspace root: lets the documented commands run from the repository root
+# (`cargo build --release --bin pigeon-host`, `cargo test`).
+[workspace]
+members = ["core"]
+resolver = "2"
+
+# Profiles must live in the workspace root, otherwise cargo ignores them.
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

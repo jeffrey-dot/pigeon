@@ -1,0 +1,54 @@
+language = "C"
+include_guard = "PIGEON_CORE_H"
+pragma_once = false
+cpp_compat = true
+style = "both"
+usize_is_size_t = true
+documentation = true
+documentation_style = "doxy"
+tab_width = 4
+line_length = 100
+autogen_warning = ""
+
+header = """
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+
+/*
+ * pigeon core — C ABI
+ *
+ * GENERATED FILE — DO NOT EDIT.
+ * Source of truth: core/src/ffi/ (mod.rs for the ABI, msg.rs for the message
+ * codec). Regenerate from the repository root with
+ * exactly the command CI runs:
+ *
+ *     cbindgen --config core/cbindgen.toml --crate pigeon-core \\
+ *              --output include/pigeon_core.h core
+ *
+ * CI (.github/workflows/ci.yml, job `header`) regenerates into a temp file and
+ * `diff -u`s it against the committed one; a hand-edited header fails the build.
+ *
+ * Contract notes common to every function below:
+ *   - All calls are synchronous and non-blocking; the core never performs IO.
+ *   - All calls on one PgCore must be serialized by the caller (one thread at a
+ *     time). A PgSnapshot is immutable and may be sent to another thread.
+ *   - Strings are UTF-8 with an explicit length, never NUL-terminated.
+ *   - Failures return NULL/0/false and set the thread-local error, read with
+ *     pg_last_error(). A successful call clears it back to PG_OK, so a stale
+ *     error can never be observed. A Rust panic is caught at the FFI boundary
+ *     and reported as PG_ERR_PANIC; it never unwinds into C.
+ *   - Every struct starts with `size` (sizeof as filled by the caller, or as
+ *     written by the core) so fields can be appended without breaking ABI.
+ *     Callers may pass a larger size than this header declares; the core
+ *     zero-fills the unknown trailing bytes. A smaller size is rejected with
+ *     PG_ERR_INVALID_ARG. New per-cell data may also go into `attrs` bits.
+ */
+
+typedef struct PgCore PgCore;
+typedef struct PgMsg PgMsg;
+"""
+
+[export]
+exclude = ["PgCore", "PgMsg"]
+
+[fn]
+args = "horizontal"
