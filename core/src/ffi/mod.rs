@@ -14,6 +14,8 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr;
 
 use crate::error::{PgError, PgResult};
+use crate::session::PaneState;
+use crate::status::{Kind as StatusKind, State as StatusState};
 
 pub mod msg;
 
@@ -139,8 +141,10 @@ pub extern "C" fn pg_core_abi_version() -> u32 {
 ///
 /// Declared in the generated header as `typedef struct PgCore PgCore;`.
 pub struct PgCore {
-    #[allow(dead_code)] // read by the pane/layout stages
     config: PgConfig,
+    panes: std::collections::BTreeMap<u32, PaneState>,
+    next_pane: u32,
+    focused: u32,
 }
 
 #[repr(C)]
@@ -179,7 +183,12 @@ pub extern "C" fn pg_core_new(cfg: *const PgConfig) -> *mut PgCore {
             }
             config
         };
-        Ok(Box::into_raw(Box::new(PgCore { config })))
+        Ok(Box::into_raw(Box::new(PgCore {
+            config,
+            panes: std::collections::BTreeMap::new(),
+            next_pane: 1,
+            focused: 0,
+        })))
     })
 }
 
@@ -207,46 +216,90 @@ pub struct PgPaneOptions {
     pub title: PgStr,
 }
 
+/// Creates a pane. Returns 0 on failure (ids start at 1). `opts == NULL` means
+/// 80x24 with the core's scrollback setting.
 #[no_mangle]
-pub extern "C" fn pg_pane_new(_core: *mut PgCore, _opts: *const PgPaneOptions) -> u32 {
-    ffi_call(0, || Err(PgError::Unsupported))
+pub extern "C" fn pg_pane_new(core: *mut PgCore, opts: *const PgPaneOptions) -> u32 {
+    ffi_call(0, || {
+        let core = unsafe_mut(core)?;
+        let (cols, rows) = read_pane_options(opts)?.unwrap_or((80, 24));
+        let pane_id = core.next_pane;
+        core.next_pane = core.next_pane.saturating_add(1);
+        let history = scrollback_lines(&core.config);
+        core.panes
+            .insert(pane_id, PaneState::new(pane_id, cols, rows, history));
+        if core.focused == 0 {
+            core.focused = pane_id;
+        }
+        Ok(pane_id)
+    })
 }
 
 #[no_mangle]
-pub extern "C" fn pg_pane_free(_core: *mut PgCore, _pane_id: u32) {
-    ffi_call((), || Err(PgError::Unsupported));
+pub extern "C" fn pg_pane_free(core: *mut PgCore, pane_id: u32) {
+    ffi_call((), || {
+        let core = unsafe_mut(core)?;
+        core.panes.remove(&pane_id).ok_or(PgError::NoSuchPane)?;
+        if core.focused == pane_id {
+            core.focused = core.panes.keys().next().copied().unwrap_or(0);
+        }
+        Ok(())
+    });
 }
 
 /// Parses bytes; never blocks, never echoes.
 #[no_mangle]
 pub extern "C" fn pg_pane_feed(
-    _core: *mut PgCore,
-    _pane_id: u32,
-    _data: *const u8,
-    _len: usize,
+    core: *mut PgCore,
+    pane_id: u32,
+    data: *const u8,
+    len: usize,
 ) -> bool {
-    ffi_call(false, || Err(PgError::Unsupported))
+    ffi_call(false, || {
+        let core = unsafe_mut(core)?;
+        if data.is_null() && len > 0 {
+            return Err(PgError::InvalidArg);
+        }
+        // SAFETY: caller promises `len` readable bytes.
+        let bytes = unsafe { std::slice::from_raw_parts(data, len) };
+        let pane = core.panes.get_mut(&pane_id).ok_or(PgError::NoSuchPane)?;
+        pane.feed(bytes);
+        Ok(true)
+    })
 }
 
 #[no_mangle]
-pub extern "C" fn pg_pane_resize(
-    _core: *mut PgCore,
-    _pane_id: u32,
-    _cols: u16,
-    _rows: u16,
-) -> bool {
-    ffi_call(false, || Err(PgError::Unsupported))
+pub extern "C" fn pg_pane_resize(core: *mut PgCore, pane_id: u32, cols: u16, rows: u16) -> bool {
+    ffi_call(false, || {
+        let core = unsafe_mut(core)?;
+        let pane = core.panes.get_mut(&pane_id).ok_or(PgError::NoSuchPane)?;
+        pane.resize(cols, rows);
+        Ok(true)
+    })
 }
 
 /// Pulls pending terminal replies (DA/DSR/…); returns bytes written.
 #[no_mangle]
 pub extern "C" fn pg_pane_respond(
-    _core: *mut PgCore,
-    _pane_id: u32,
-    _out: *mut u8,
-    _cap: usize,
+    core: *mut PgCore,
+    pane_id: u32,
+    out: *mut u8,
+    cap: usize,
 ) -> usize {
-    ffi_call(0, || Err(PgError::Unsupported))
+    ffi_call(0, || {
+        let core = unsafe_mut(core)?;
+        let pane = core.panes.get_mut(&pane_id).ok_or(PgError::NoSuchPane)?;
+        let replies = pane.take_replies();
+        if replies.is_empty() {
+            return Ok(0);
+        }
+        if out.is_null() || cap < replies.len() {
+            return Err(PgError::Overflow);
+        }
+        // SAFETY: caller provided `cap` writable bytes.
+        unsafe { ptr::copy_nonoverlapping(replies.as_ptr(), out, replies.len()) };
+        Ok(replies.len())
+    })
 }
 
 // -------------------------------------------------------------- snapshot
@@ -320,19 +373,37 @@ pub struct PgSnapshot {
 
 /// Owned by the caller; free with [`pg_snapshot_free`]. Immutable, thread-safe.
 #[no_mangle]
-pub extern "C" fn pg_pane_snapshot(_core: *mut PgCore, _pane_id: u32) -> *mut PgSnapshot {
-    ffi_call(ptr::null_mut(), || Err(PgError::Unsupported))
+pub extern "C" fn pg_pane_snapshot(core: *mut PgCore, pane_id: u32) -> *mut PgSnapshot {
+    ffi_call(ptr::null_mut(), || {
+        let core = unsafe_mut(core)?;
+        let pane = core.panes.get_mut(&pane_id).ok_or(PgError::NoSuchPane)?;
+        let snapshot = pane.snapshot();
+        Ok(snapshot_to_ffi(pane_id, &snapshot, true))
+    })
 }
 
 /// Fills row indices dirty since the last call; returns how many were written.
 #[no_mangle]
 pub extern "C" fn pg_pane_dirty_rows(
-    _core: *mut PgCore,
-    _pane_id: u32,
-    _out: *mut u16,
-    _cap: usize,
+    core: *mut PgCore,
+    pane_id: u32,
+    out: *mut u16,
+    cap: usize,
 ) -> usize {
-    ffi_call(0, || Err(PgError::Unsupported))
+    ffi_call(0, || {
+        let core = unsafe_mut(core)?;
+        let pane = core.panes.get_mut(&pane_id).ok_or(PgError::NoSuchPane)?;
+        let dirty = pane.take_damage();
+        if out.is_null() && !dirty.is_empty() {
+            return Err(PgError::InvalidArg);
+        }
+        let written = dirty.len().min(cap);
+        if written > 0 {
+            // SAFETY: caller provided `cap` writable entries.
+            unsafe { ptr::copy_nonoverlapping(dirty.as_ptr(), out, written) };
+        }
+        Ok(written)
+    })
 }
 
 #[no_mangle]
@@ -478,19 +549,56 @@ pub struct PgStatus {
 }
 
 #[no_mangle]
-pub extern "C" fn pg_status_count(_core: *mut PgCore) -> usize {
-    ffi_call(0, || Err(PgError::Unsupported))
+pub extern "C" fn pg_status_count(core: *mut PgCore) -> usize {
+    ffi_call(0, || {
+        let core = unsafe_ref(core)?;
+        Ok(focused(core)?.status().len())
+    })
 }
 
+/// Fills `out` with the focused pane's status record at `index`.
 #[no_mangle]
-pub extern "C" fn pg_status_at(_core: *mut PgCore, _index: usize, _out: *mut PgStatus) -> bool {
-    ffi_call(false, || Err(PgError::Unsupported))
+pub extern "C" fn pg_status_at(core: *mut PgCore, index: usize, out: *mut PgStatus) -> bool {
+    ffi_call(false, || {
+        let core = unsafe_ref(core)?;
+        if out.is_null() {
+            return Err(PgError::InvalidArg);
+        }
+        let pane = focused(core)?;
+        let record = pane
+            .status()
+            .records()
+            .nth(index)
+            .ok_or(PgError::InvalidArg)?;
+        // SAFETY: `out` checked above; `msg` borrows the record, which stays
+        // alive until the next mutation of this core (documented in the header).
+        unsafe {
+            *out = PgStatus {
+                size: std::mem::size_of::<PgStatus>() as u32,
+                version: PG_CORE_ABI_VERSION,
+                pane_id: pane.pane_id,
+                seq: record.seq,
+                state: map_state(record.state),
+                kind: map_kind(record.kind),
+                msg: PgStr {
+                    size: std::mem::size_of::<PgStr>() as u32,
+                    ptr: record.msg.as_ptr(),
+                    len: record.msg.len(),
+                },
+            }
+        };
+        Ok(true)
+    })
 }
 
 /// Marks a done/error record as seen; it may then be evicted.
 #[no_mangle]
-pub extern "C" fn pg_status_ack(_core: *mut PgCore, _pane_id: u32, _seq: u32) -> bool {
-    ffi_call(false, || Err(PgError::Unsupported))
+pub extern "C" fn pg_status_ack(core: *mut PgCore, pane_id: u32, seq: u32) -> bool {
+    ffi_call(false, || {
+        let core = unsafe_mut(core)?;
+        let pane = core.panes.get_mut(&pane_id).ok_or(PgError::NoSuchPane)?;
+        Ok(pane.status_mut().ack("", seq))
+    })
 }
 
 // ---------------------------------------------------------------- layout
@@ -516,6 +624,7 @@ pub struct PgRect {
     pub h: f32,
 }
 
+/// Splits are M1; M0 has one pane per session and reports that honestly.
 #[no_mangle]
 pub extern "C" fn pg_layout_split(
     _core: *mut PgCore,
@@ -526,27 +635,179 @@ pub extern "C" fn pg_layout_split(
     ffi_call(0, || Err(PgError::Unsupported))
 }
 
+/// Closes a pane (and its process, when the host owns one).
 #[no_mangle]
-pub extern "C" fn pg_layout_close(_core: *mut PgCore, _pane_id: u32) -> bool {
-    ffi_call(false, || Err(PgError::Unsupported))
+pub extern "C" fn pg_layout_close(core: *mut PgCore, pane_id: u32) -> bool {
+    ffi_call(false, || {
+        let core = unsafe_mut(core)?;
+        core.panes.remove(&pane_id).ok_or(PgError::NoSuchPane)?;
+        if core.focused == pane_id {
+            core.focused = core.panes.keys().next().copied().unwrap_or(0);
+        }
+        Ok(true)
+    })
 }
 
+/// Split ratios are M1; the single-pane tree has nothing to resize.
 #[no_mangle]
 pub extern "C" fn pg_layout_resize(_core: *mut PgCore, _split_id: u32, _ratio: f32) -> bool {
     ffi_call(false, || Err(PgError::Unsupported))
 }
 
+/// One normalized rect per pane (M0: the focused pane fills the session box).
 #[no_mangle]
-pub extern "C" fn pg_layout_rects(_core: *mut PgCore, _out: *mut PgRect, _cap: usize) -> usize {
-    ffi_call(0, || Err(PgError::Unsupported))
+pub extern "C" fn pg_layout_rects(core: *mut PgCore, out: *mut PgRect, cap: usize) -> usize {
+    ffi_call(0, || {
+        let core = unsafe_ref(core)?;
+        if out.is_null() {
+            return Err(PgError::InvalidArg);
+        }
+        if cap == 0 {
+            return Err(PgError::Overflow);
+        }
+        let focused = focused(core)?.pane_id;
+        // SAFETY: caller provided at least one writable entry.
+        unsafe {
+            *out = PgRect {
+                size: std::mem::size_of::<PgRect>() as u32,
+                pane_id: focused,
+                x: 0.0,
+                y: 0.0,
+                w: 1.0,
+                h: 1.0,
+            }
+        };
+        Ok(1)
+    })
 }
 
 #[no_mangle]
-pub extern "C" fn pg_layout_focus(_core: *mut PgCore, _pane_id: u32) -> bool {
-    ffi_call(false, || Err(PgError::Unsupported))
+pub extern "C" fn pg_layout_focus(core: *mut PgCore, pane_id: u32) -> bool {
+    ffi_call(false, || {
+        let core = unsafe_mut(core)?;
+        if !core.panes.contains_key(&pane_id) {
+            return Err(PgError::NoSuchPane);
+        }
+        core.focused = pane_id;
+        Ok(true)
+    })
 }
 
 #[no_mangle]
-pub extern "C" fn pg_layout_focused(_core: *mut PgCore) -> u32 {
-    ffi_call(0, || Err(PgError::Unsupported))
+pub extern "C" fn pg_layout_focused(core: *mut PgCore) -> u32 {
+    ffi_call(0, || Ok(unsafe_ref(core)?.focused))
+}
+
+// ---------------------------------------------------------------- helpers
+
+fn unsafe_ref<'a>(core: *const PgCore) -> PgResult<&'a PgCore> {
+    if core.is_null() {
+        return Err(PgError::InvalidArg);
+    }
+    // SAFETY: the caller guarantees a live handle.
+    Ok(unsafe { &*core })
+}
+
+fn unsafe_mut<'a>(core: *mut PgCore) -> PgResult<&'a mut PgCore> {
+    if core.is_null() {
+        return Err(PgError::InvalidArg);
+    }
+    // SAFETY: the caller guarantees a live handle and serialized access.
+    Ok(unsafe { &mut *core })
+}
+
+fn focused(core: &PgCore) -> PgResult<&PaneState> {
+    core.panes.get(&core.focused).ok_or(PgError::NoSuchPane)
+}
+
+fn scrollback_lines(config: &PgConfig) -> usize {
+    match config.scrollback_lines {
+        0 => 10_000,
+        lines => usize::try_from(lines.min(100_000)).unwrap_or(10_000),
+    }
+}
+
+fn read_pane_options(opts: *const PgPaneOptions) -> PgResult<Option<(u16, u16)>> {
+    if opts.is_null() {
+        return Ok(None);
+    }
+    // SAFETY: caller guarantees a readable PgPaneOptions.
+    let opts = unsafe { &*opts };
+    if usize::try_from(opts.size).unwrap_or(0) < std::mem::size_of::<PgPaneOptions>() {
+        return Err(PgError::InvalidArg);
+    }
+    Ok(Some((opts.cols.max(2), opts.rows.max(1))))
+}
+
+fn map_state(state: StatusState) -> PgStatusState {
+    match state {
+        StatusState::Idle => PgStatusState::PG_STATE_IDLE,
+        StatusState::Working => PgStatusState::PG_STATE_WORKING,
+        StatusState::Blocked => PgStatusState::PG_STATE_BLOCKED,
+        StatusState::Done => PgStatusState::PG_STATE_DONE,
+        StatusState::Error => PgStatusState::PG_STATE_ERROR,
+    }
+}
+
+fn map_kind(kind: StatusKind) -> PgStatusKind {
+    match kind {
+        StatusKind::None => PgStatusKind::PG_KIND_NONE,
+        StatusKind::Permission => PgStatusKind::PG_KIND_PERMISSION,
+        StatusKind::Question => PgStatusKind::PG_KIND_QUESTION,
+        StatusKind::Auth => PgStatusKind::PG_KIND_AUTH,
+    }
+}
+
+/// Converts a terminal-domain snapshot into an owned C snapshot.
+fn snapshot_to_ffi(
+    pane_id: u32,
+    snapshot: &crate::term::Snapshot,
+    with_history: bool,
+) -> *mut PgSnapshot {
+    let screen = snapshot
+        .screen
+        .iter()
+        .map(|row| row.iter().map(to_pg_cell).collect())
+        .collect();
+    let history = if with_history {
+        snapshot
+            .history
+            .iter()
+            .map(|row| row.iter().map(to_pg_cell).collect())
+            .collect()
+    } else {
+        Vec::new()
+    };
+    build_snapshot(
+        pane_id,
+        snapshot.cols,
+        snapshot.rows,
+        snapshot.alt,
+        PgCursor {
+            size: std::mem::size_of::<PgCursor>() as u32,
+            x: snapshot.cursor.x,
+            y: snapshot.cursor.y,
+            visible: u8::from(snapshot.cursor.visible),
+            shape: snapshot.cursor.shape,
+        },
+        PgScrollRegion {
+            size: std::mem::size_of::<PgScrollRegion>() as u32,
+            top: snapshot.scroll.0,
+            bottom: snapshot.scroll.1,
+        },
+        screen,
+        history,
+    )
+}
+
+fn to_pg_cell(cell: &crate::term::Cell) -> PgCell {
+    PgCell {
+        size: std::mem::size_of::<PgCell>() as u32,
+        codepoint: cell.codepoint,
+        fg: cell.fg,
+        bg: cell.bg,
+        attrs: cell.attrs,
+        hyperlink_id: cell.link,
+        width: cell.width,
+    }
 }

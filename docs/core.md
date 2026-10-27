@@ -44,8 +44,8 @@
 | pane | `pg_pane_new` `pg_pane_free` `pg_pane_feed` `pg_pane_resize` `pg_pane_respond` | 字节进出；PTY 归宿主，内核不做 IO |
 | 快照 | `pg_pane_snapshot` `pg_pane_dirty_rows` `pg_snapshot_free` | attach 全量 / 之后只发脏行 |
 | 状态 | `pg_status_count` `pg_status_at` `pg_status_ack` | OSC 7501 记录的读取与“已看过”确认 |
-| 布局 | `pg_layout_split` `pg_layout_close` `pg_layout_resize` `pg_layout_rects` `pg_layout_focus` `pg_layout_focused` | 纯数据，view 由客户端实现 |
-| 消息 | `pg_msg_new` `pg_msg_free` `pg_msg_type` `pg_msg_set_u32/i32/bool/str/bytes/str_array` `pg_msg_get_u32/i32/bool/str` `pg_msg_encoded_len` `pg_msg_encode_frame` `pg_msg_decode_frame` `pg_msg_snapshot` `pg_msg_sessions_count` `pg_msg_session_at` `pg_msg_session_panes` | 协议编解码：Swift 侧零 CBOR，字段名即 `docs/protocol.md` 的字段名 |
+| 布局 | `pg_layout_split` `pg_layout_close` `pg_layout_resize` `pg_layout_rects` `pg_layout_focus` `pg_layout_focused` | 纯数据；M0 单 pane：`rects` 返回整屏、`focus/close` 生效，`split/resize` 报 `PG_ERR_UNSUPPORTED`（M1） |
+| 消息 | `pg_msg_new` `pg_msg_free` `pg_msg_type` `pg_msg_set_u32/i32/bool/str/bytes/str_array` `pg_msg_get_u32/i32/bool/str` `pg_msg_encoded_len` `pg_msg_encode` `pg_msg_decode`（payload）`pg_msg_encode_frame` `pg_msg_decode_frame`（带长度前缀）`pg_msg_snapshot` `pg_msg_sessions_count` `pg_msg_session_at` `pg_msg_session_panes` | 协议编解码：Swift 侧零 CBOR，字段名即 `docs/protocol.md` 的字段名 |
 
 约定（同样写在头文件里，这里只说“为什么”）：
 - 字符串是 **UTF-8 + 长度**（不带 NUL 终止）；**每个结构体**（含 `PgCell` / `PgCursor` / `PgScrollRegion`）
@@ -85,7 +85,7 @@ PgSnapshot {            // 字段以 include/pigeon_core.h 为准，此处只写
 **决定**：内核用 **Rust**，`alacritty_terminal` / `vte` 包在我们自己的 `Term` trait 后面
 （`feed/resize/snapshot/scroll`），C ABI 头文件由 `cbindgen` 从 `core/src/ffi/mod.rs` 生成（见 §4）。
 换成 Swift（SwiftTerm headless）或 libghostty-vt 时，只替换 `Term` 的实现，头文件、客户端、协议都不动。
-SwiftTerm 同时保留为**对账参考**（`tools/vt-parity`），因为它跟 AppKit 的 IME/渲染集成得最好，是最省事的对照物。
+SwiftTerm 同时保留为**对账参考**（M1 起的 `tools/vt-parity`），因为它跟 AppKit 的 IME/渲染集成得最好，是最省事的对照物。
 
 ## 7. 参考（读什么、偷什么）
 

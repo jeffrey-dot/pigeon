@@ -360,54 +360,73 @@ PgCore *pg_core_new(const struct PgConfig *cfg);
  */
 void pg_core_free(PgCore *core);
 
-uint32_t pg_pane_new(PgCore *_core, const struct PgPaneOptions *_opts);
+/**
+ * Creates a pane. Returns 0 on failure (ids start at 1). `opts == NULL` means
+ * 80x24 with the core's scrollback setting.
+ */
+uint32_t pg_pane_new(PgCore *core, const struct PgPaneOptions *opts);
 
-void pg_pane_free(PgCore *_core, uint32_t _pane_id);
+void pg_pane_free(PgCore *core, uint32_t pane_id);
 
 /**
  * Parses bytes; never blocks, never echoes.
  */
-bool pg_pane_feed(PgCore *_core, uint32_t _pane_id, const uint8_t *_data, size_t _len);
+bool pg_pane_feed(PgCore *core, uint32_t pane_id, const uint8_t *data, size_t len);
 
-bool pg_pane_resize(PgCore *_core, uint32_t _pane_id, uint16_t _cols, uint16_t _rows);
+bool pg_pane_resize(PgCore *core, uint32_t pane_id, uint16_t cols, uint16_t rows);
 
 /**
  * Pulls pending terminal replies (DA/DSR/…); returns bytes written.
  */
-size_t pg_pane_respond(PgCore *_core, uint32_t _pane_id, uint8_t *_out, size_t _cap);
+size_t pg_pane_respond(PgCore *core, uint32_t pane_id, uint8_t *out, size_t cap);
 
 /**
  * Owned by the caller; free with [`pg_snapshot_free`]. Immutable, thread-safe.
  */
-struct PgSnapshot *pg_pane_snapshot(PgCore *_core, uint32_t _pane_id);
+struct PgSnapshot *pg_pane_snapshot(PgCore *core, uint32_t pane_id);
 
 /**
  * Fills row indices dirty since the last call; returns how many were written.
  */
-size_t pg_pane_dirty_rows(PgCore *_core, uint32_t _pane_id, uint16_t *_out, size_t _cap);
+size_t pg_pane_dirty_rows(PgCore *core, uint32_t pane_id, uint16_t *out, size_t cap);
 
 void pg_snapshot_free(struct PgSnapshot *snap);
 
-size_t pg_status_count(PgCore *_core);
+size_t pg_status_count(PgCore *core);
 
-bool pg_status_at(PgCore *_core, size_t _index, struct PgStatus *_out);
+/**
+ * Fills `out` with the focused pane's status record at `index`.
+ */
+bool pg_status_at(PgCore *core, size_t index, struct PgStatus *out);
 
 /**
  * Marks a done/error record as seen; it may then be evicted.
  */
-bool pg_status_ack(PgCore *_core, uint32_t _pane_id, uint32_t _seq);
+bool pg_status_ack(PgCore *core, uint32_t pane_id, uint32_t seq);
 
+/**
+ * Splits are M1; M0 has one pane per session and reports that honestly.
+ */
 uint32_t pg_layout_split(PgCore *_core, uint32_t _pane_id, enum PgAxis _axis, float _ratio);
 
-bool pg_layout_close(PgCore *_core, uint32_t _pane_id);
+/**
+ * Closes a pane (and its process, when the host owns one).
+ */
+bool pg_layout_close(PgCore *core, uint32_t pane_id);
 
+/**
+ * Split ratios are M1; the single-pane tree has nothing to resize.
+ */
 bool pg_layout_resize(PgCore *_core, uint32_t _split_id, float _ratio);
 
-size_t pg_layout_rects(PgCore *_core, struct PgRect *_out, size_t _cap);
+/**
+ * One normalized rect per pane (M0: the focused pane fills the session box).
+ */
+size_t pg_layout_rects(PgCore *core, struct PgRect *out, size_t cap);
 
-bool pg_layout_focus(PgCore *_core, uint32_t _pane_id);
+bool pg_layout_focus(PgCore *core, uint32_t pane_id);
 
-uint32_t pg_layout_focused(PgCore *_core);
+uint32_t pg_layout_focused(PgCore *core);
 
 /**
  * Creates an empty message of `kind`, or NULL for `PG_MSG_UNKNOWN`.
@@ -468,8 +487,23 @@ PgMsg *pg_msg_decode_frame(const uint8_t *buf, size_t len, size_t *consumed);
 /**
  * Builds an owned snapshot from a `snapshot` message; free with
  * [`super::pg_snapshot_free`]. NULL for any other message type.
+ *
+ * Goes through [`crate::session::snapshot_from_message`], so cell widths (wide
+ * chars and their continuation) are derived exactly like everywhere else.
  */
 struct PgSnapshot *pg_msg_snapshot(const PgMsg *msg);
+
+/**
+ * Payload-only codec, exactly the names the contract asks for: CBOR bytes in and
+ * out, without the 4-byte frame prefix.
+ */
+size_t pg_msg_encode(const PgMsg *msg, uint8_t *out, size_t cap);
+
+/**
+ * Decodes one CBOR payload (no length prefix). Unknown `t` yields a handle of
+ * type `PG_MSG_UNSUPPORTED` carrying `t_of`.
+ */
+PgMsg *pg_msg_decode(const uint8_t *payload, size_t len);
 
 /**
  * Sets a field to an array of strings (e.g. `hello.features`).

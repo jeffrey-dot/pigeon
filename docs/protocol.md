@@ -1,7 +1,7 @@
 # pigeon 协议（客户端 ⇄ 会话宿主）
 
 > 这是**字段级契约**：`pigeon-host`（本机/远端）与任何客户端都照它实现。
-> 另一条同源的边界是 C ABI（`include/pigeon_core.h`，由 `core/src/ffi.rs` 生成），
+> 另一条同源的边界是 C ABI（`include/pigeon_core.h`，由 `core/src/ffi/mod.rs` 生成），
 > 用于“把内核编进客户端”的嵌入模式；两者共用同一份内核，字段语义必须一致（见 §9）。
 
 ## 1. 传输与分帧

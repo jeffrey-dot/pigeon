@@ -17,7 +17,7 @@ use std::ptr;
 
 use ciborium::value::Value;
 
-use super::{ffi_call, PgCell, PgCursor, PgScrollRegion, PgSnapshot, PgStr};
+use super::{ffi_call, PgSnapshot, PgStr};
 use crate::error::{PgError, PgResult};
 use crate::proto::{self, Message, MAX_FRAME};
 
@@ -107,6 +107,14 @@ impl PgMsg {
             t: message.name().to_owned(),
             fields,
         })
+    }
+
+    /// Rebuilds the typed message; used by the snapshot accessor so the wire
+    /// schema is validated in exactly one place.
+    fn to_message(&self) -> PgResult<Message> {
+        let mut payload = Vec::new();
+        ciborium::into_writer(&self.as_value(), &mut payload).map_err(|_| PgError::InvalidArg)?;
+        proto::decode(&payload)
     }
 
     fn as_value(&self) -> Value {
@@ -358,6 +366,9 @@ pub extern "C" fn pg_msg_decode_frame(
 
 /// Builds an owned snapshot from a `snapshot` message; free with
 /// [`super::pg_snapshot_free`]. NULL for any other message type.
+///
+/// Goes through [`crate::session::snapshot_from_message`], so cell widths (wide
+/// chars and their continuation) are derived exactly like everywhere else.
 #[no_mangle]
 pub extern "C" fn pg_msg_snapshot(msg: *const PgMsg) -> *mut PgSnapshot {
     ffi_call(ptr::null_mut(), || {
@@ -365,43 +376,68 @@ pub extern "C" fn pg_msg_snapshot(msg: *const PgMsg) -> *mut PgSnapshot {
         if type_of(&msg.t) != PgMsgType::PG_MSG_SNAPSHOT {
             return Err(PgError::InvalidArg);
         }
-        let cols = u16::try_from(get_int(msg, "cols")?).map_err(|_| PgError::InvalidArg)?;
-        let rows = u16::try_from(get_int(msg, "rows")?).map_err(|_| PgError::InvalidArg)?;
-        let screen = read_grid(msg, "screen", cols, rows)?;
-        let history = match msg.fields.get("history") {
-            Some(_) => {
-                let value = msg.fields.get("history").cloned().unwrap_or(Value::Null);
-                let Value::Array(touched) = value else {
-                    return Err(PgError::InvalidArg);
-                };
-                read_rows(&touched, cols)?
-            }
-            None => Vec::new(),
+        let message = msg.to_message()?;
+        let pane_id = match message {
+            Message::Snapshot { pane_id, .. } => pane_id,
+            _ => return Err(PgError::InvalidArg),
         };
-        let cursor = read_cursor(msg)?;
-        let scroll = read_scroll(msg)?;
-        let alt = matches!(msg.fields.get("alt"), Some(Value::Bool(true)));
-        let pane_id = msg
-            .fields
-            .get("pane_id")
-            .and_then(|value| match value {
-                Value::Integer(integer) => u32::try_from(i128::from(*integer)).ok(),
-                _ => None,
-            })
-            .unwrap_or(0);
-        Ok(super::build_snapshot(
-            pane_id, cols, rows, alt, cursor, scroll, screen, history,
-        ))
+        let snapshot =
+            crate::session::snapshot_from_message(&message).ok_or(PgError::InvalidArg)?;
+        Ok(super::snapshot_to_ffi(pane_id, &snapshot, true))
     })
+}
+
+/// Payload-only codec, exactly the names the contract asks for: CBOR bytes in and
+/// out, without the 4-byte frame prefix.
+#[no_mangle]
+pub extern "C" fn pg_msg_encode(msg: *const PgMsg, out: *mut u8, cap: usize) -> usize {
+    ffi_call(0, || {
+        let msg = unsafe_ref(msg)?;
+        let payload = encode_payload(msg)?;
+        if out.is_null() || cap < payload.len() {
+            return Err(PgError::Overflow);
+        }
+        // SAFETY: caller provided `cap` writable bytes.
+        unsafe { ptr::copy_nonoverlapping(payload.as_ptr(), out, payload.len()) };
+        Ok(payload.len())
+    })
+}
+
+/// Decodes one CBOR payload (no length prefix). Unknown `t` yields a handle of
+/// type `PG_MSG_UNSUPPORTED` carrying `t_of`.
+#[no_mangle]
+pub extern "C" fn pg_msg_decode(payload: *const u8, len: usize) -> *mut PgMsg {
+    ffi_call(ptr::null_mut(), || {
+        if payload.is_null() && len > 0 {
+            return Err(PgError::InvalidArg);
+        }
+        // SAFETY: caller promises `len` readable bytes.
+        let bytes = unsafe { std::slice::from_raw_parts(payload, len) };
+        match proto::decode(bytes) {
+            Ok(message) => Ok(Box::into_raw(Box::new(PgMsg::from_message(&message)?))),
+            Err(PgError::Unsupported) => {
+                let tag = type_tag(bytes).unwrap_or_default();
+                let handle = PgMsg {
+                    t: "unsupported".to_owned(),
+                    fields: BTreeMap::from([("t_of".to_owned(), Value::Text(tag))]),
+                };
+                Ok(Box::into_raw(Box::new(handle)))
+            }
+            Err(err) => Err(err),
+        }
+    })
+}
+
+fn encode_payload(msg: &PgMsg) -> PgResult<Vec<u8>> {
+    let message = msg.to_message()?;
+    proto::encode(&message)
 }
 
 // ---------------------------------------------------------------- helpers
 
 fn encode_frame(msg: &PgMsg) -> PgResult<Vec<u8>> {
-    let mut payload = Vec::new();
-    ciborium::into_writer(&msg.as_value(), &mut payload).map_err(|_| PgError::InvalidArg)?;
     // Validate against the real schema before anything reaches the wire.
-    let message = proto::decode(&payload)?;
+    let message = msg.to_message()?;
     proto::encode_frame(&message)
 }
 
@@ -415,117 +451,6 @@ fn type_tag(payload: &[u8]) -> Option<String> {
             (Value::Text(name), Value::Text(tag)) if name == "t" => Some(tag),
             _ => None,
         })
-}
-
-fn get_int(msg: &PgMsg, field: &str) -> PgResult<u64> {
-    match msg.fields.get(field) {
-        Some(Value::Integer(integer)) => {
-            u64::try_from(i128::from(*integer)).map_err(|_| PgError::InvalidArg)
-        }
-        _ => Err(PgError::InvalidArg),
-    }
-}
-
-fn read_cursor(msg: &PgMsg) -> PgResult<PgCursor> {
-    let Some(Value::Map(entries)) = msg.fields.get("cursor") else {
-        return Err(PgError::InvalidArg);
-    };
-    let mut cursor = PgCursor {
-        size: std::mem::size_of::<PgCursor>() as u32,
-        x: 0,
-        y: 0,
-        visible: 0,
-        shape: 0,
-    };
-    for (key, value) in entries {
-        let Value::Text(name) = key else { continue };
-        match (name.as_str(), value) {
-            ("x", Value::Integer(n)) => cursor.x = to_u16(*n),
-            ("y", Value::Integer(n)) => cursor.y = to_u16(*n),
-            ("visible", Value::Bool(flag)) => cursor.visible = u8::from(*flag),
-            ("shape", Value::Integer(n)) => cursor.shape = to_u16(*n) as u8,
-            _ => {}
-        }
-    }
-    Ok(cursor)
-}
-
-fn read_scroll(msg: &PgMsg) -> PgResult<PgScrollRegion> {
-    let Some(Value::Map(entries)) = msg.fields.get("scroll") else {
-        return Err(PgError::InvalidArg);
-    };
-    let mut region = PgScrollRegion {
-        size: std::mem::size_of::<PgScrollRegion>() as u32,
-        top: 0,
-        bottom: 0,
-    };
-    for (key, value) in entries {
-        let Value::Text(name) = key else { continue };
-        match (name.as_str(), value) {
-            ("top", Value::Integer(n)) => region.top = to_u16(*n),
-            ("bottom", Value::Integer(n)) => region.bottom = to_u16(*n),
-            _ => {}
-        }
-    }
-    Ok(region)
-}
-
-fn read_grid(msg: &PgMsg, field: &str, cols: u16, rows: u16) -> PgResult<Vec<Vec<PgCell>>> {
-    let Some(Value::Array(touched)) = msg.fields.get(field) else {
-        return Err(PgError::InvalidArg);
-    };
-    let grid = read_rows(touched, cols)?;
-    if grid.len() != usize::from(rows) {
-        return Err(PgError::InvalidArg);
-    }
-    Ok(grid)
-}
-
-fn read_rows(rows: &[Value], cols: u16) -> PgResult<Vec<Vec<PgCell>>> {
-    rows.iter()
-        .map(|row| {
-            let Value::Array(cells) = row else {
-                return Err(PgError::InvalidArg);
-            };
-            if cells.len() != usize::from(cols) {
-                return Err(PgError::InvalidArg);
-            }
-            cells
-                .iter()
-                .map(|cell| {
-                    let Value::Array(parts) = cell else {
-                        return Err(PgError::InvalidArg);
-                    };
-                    if parts.len() != 4 && parts.len() != 5 {
-                        return Err(PgError::InvalidArg);
-                    }
-                    let number = |index: usize| -> PgResult<u32> {
-                        match &parts[index] {
-                            Value::Integer(integer) => {
-                                u32::try_from(i128::from(*integer)).map_err(|_| PgError::InvalidArg)
-                            }
-                            _ => Err(PgError::InvalidArg),
-                        }
-                    };
-                    Ok(PgCell {
-                        size: std::mem::size_of::<PgCell>() as u32,
-                        codepoint: number(0)?,
-                        fg: number(2)?,
-                        bg: number(3)?,
-                        attrs: u32::from(number(1)? as u8),
-                        hyperlink_id: if parts.len() == 5 { number(4)? } else { 0 },
-                        // The wire omits the width; a continuation is encoded by
-                        // the owner's 2, so anything non-wide is 1.
-                        width: 1,
-                    })
-                })
-                .collect()
-        })
-        .collect()
-}
-
-fn to_u16(value: ciborium::value::Integer) -> u16 {
-    u16::try_from(i128::from(value)).unwrap_or(0)
 }
 
 fn field_name(field: *const c_char) -> PgResult<String> {

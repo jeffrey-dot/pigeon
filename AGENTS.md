@@ -24,12 +24,12 @@ macOS + Xcode 命令行工具（`swift --version` ≥ 6）与 Rust（见 `rust-t
 
 ```sh
 cargo build --manifest-path core/Cargo.toml    # 内核 + pigeon-host（两平台都要能过）
-cargo test  --manifest-path core/Cargo.toml    # 内核单测（status / proto / layout / vt-parity）
+cargo test  --manifest-path core/Cargo.toml    # 内核单测 + ABI + 宿主端到端（59 个用例）
 cargo run   --manifest-path core/Cargo.toml --bin pigeon-host   # 会话宿主（本机自动拉起；远端按需推送；手动跑用于调试）
 cargo build                     # 先建核心：客户端链接 core/target/*/libpigeon_core.a
 swift build                     # 客户端（macOS only）
 swift test                      # 客户端纯逻辑单测（SidebarModel / Grouping / KeyEncoder）
-tools/vt-parity/run.sh          # VT 对账：同一段字节流喂我们与参考实现，逐屏比较
+# tools/vt-parity/run.sh        # VT 对账（M1 建；现在还只有 core/tests 的确定性用例）
 ```
 
 这些命令在对应模块落地前会失败——**先建模块，再加功能**，不要为了跑通而把逻辑塞进 `main.rs` 或 `PigeonApp.swift`。
@@ -55,8 +55,8 @@ pigeon/
 ├── AGENTS.md
 ├── Package.swift                 # targets: PigeonApp / PigeonCore / PigeonAppTests（macOS only）
 ├── docs/                         # plan.md, protocol.md, ui.md, 历史资料
-├── tools/vt-parity/              # 对账脚本与 golden 文件（不含产品代码）
-├── include/pigeon_core.h         # 生成物：cbindgen 从 core/src/ffi.rs 输出，不许手改
+├── tools/vt-parity/              # M1：对账脚本与 golden 文件（不含产品代码）
+├── include/pigeon_core.h         # 生成物：cbindgen 从 core/src/ffi/mod.rs 输出，不许手改
 ├── core/                         # Rust 内核 + 会话宿主（crate + bin，平台无关）
 │   ├── Cargo.toml
 │   ├── cbindgen.toml             # 头文件生成配置（名字/前缀/文档注释）
@@ -71,7 +71,7 @@ pigeon/
 │   │   ├── session/              # session/window/pane 模型
 │   │   └── proto/                # 分帧 + CBOR 编解码（协议的唯一实现）
 │   ├── src/bin/pigeon-host.rs    # 会话宿主：PTY / unix socket / 多客户端（3–8MB 硬指标）
-│   └── tests/                    # status / proto / layout / vt-parity
+│   └── tests/                    # abi（C ABI 内嵌路径）+ host（真实 PTY 端到端）
 └── Sources/
     ├── PigeonCore/               # C 头封装（module map + 类型映射，不实现语义）
     └── PigeonApp/                # macOS 客户端：只做 UI 与输入
@@ -112,7 +112,7 @@ pigeon/
 | 渲染、字体、输入法 | `Sources/PigeonApp/Terminal/`，不往下漏 |
 | 一次性脚本 / 对账工具 | `tools/`，不放进 `Sources/` 或 `core/src/` |
 
-### 可移植性硬规则（M0 起进 CI；当前无代码，见 `docs/plan.md` §11）
+### 可移植性硬规则（CI 目前只跑 fmt/clippy/test；静态检查见 `docs/plan.md` §11）
 
 - `core/` 里**不许**出现：平台专属 crate（`core-foundation`、`objc2`…）、`cfg(target_os = …)` 分支
  （PTY 与信号可以有一处，且必须两边都有实现）、直接操作窗口/字体/图形 API。
@@ -123,6 +123,8 @@ pigeon/
 - 路径用 `FileManager`/POSIX；配置放 `~/.config/pigeon`（macOS 与 Linux 一致），不要用 `~/Library/...`。
 - 信号（`SIGWINCH`/`SIGCHLD`）用 `signal()` 或 `SelfPipe`/`signalfd` 的思路，不依赖 macOS runloop 特性。
 - 字体/渲染/输入法只在客户端层处理；`core/` 只搬字节与状态。
+- `tokio` / `portable-pty` **只允许在 `core/src/bin/` 里使用**：Cargo 没有按 target 的依赖，
+  所以靠这条约束 + review 保证库本体保持同步、无 IO。
 
 ### 模块内的硬规则
 
@@ -153,7 +155,7 @@ pigeon/
 - 新增解析规则（OSC 7501、按键编码、协议消息）→ **必须**带一个正例 + 一个畸形输入的反例（Rust 放 `core/tests/`，
   Swift 放 `Tests/`）。
 - 修 bug → 先写能复现的测试，再修。
-- VT 兼容性改动 → 跑 `tools/vt-parity/run.sh`；golden 文件变更要在 PR 里说明原因。
+- VT 兼容性改动 → M1 起跑 `tools/vt-parity/run.sh`；现在靠 `core/tests` 的确定性用例（快照/宽字符/备用屏/真彩色）。
 - 提交前必须全绿：`cargo test`（macOS + Ubuntu）+ `swift build && swift test`（macOS）。
 - 测试不要依赖网络、不要依赖用户自己的 tmux/shell 配置；需要环境时自己在 `TMPDIR` 里造。
 

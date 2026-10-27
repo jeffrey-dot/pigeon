@@ -53,6 +53,11 @@ impl PaneState {
         self.term.take_replies()
     }
 
+    /// Row indices changed since the last call.
+    pub fn take_damage(&mut self) -> Vec<u16> {
+        self.term.take_damage()
+    }
+
     pub fn status(&self) -> &StatusStore {
         &self.status
     }
@@ -328,6 +333,25 @@ mod tests {
         let payload = crate::proto::encode(&message).expect("encode");
         let decoded = crate::proto::decode(&payload).expect("decode");
         super::snapshot_from_message(&decoded).expect("rebuild")
+    }
+
+    /// The rebuild path the client actually uses: a snapshot in, a snapshot out,
+    /// with no byte replay. Exercises `FrozenTerm`.
+    #[test]
+    fn frozen_terminal_replays_the_snapshot_verbatim() {
+        let mut pane = PaneState::new(1, 20, 3, 10);
+        pane.feed("\x1b[1;32mgreen\x1b[0m \u{4f60}\u{597d}".as_bytes());
+
+        let original = pane.snapshot();
+        let mut frozen = PaneState::from_snapshot(original.clone());
+        assert_eq!(frozen.snapshot(), original, "stored picture must survive");
+
+        let via_wire = super::snapshot_from_message(&frozen.snapshot_message(false))
+            .expect("rebuild from the message");
+        assert_eq!(
+            via_wire, original,
+            "message rebuild equals the live snapshot"
+        );
     }
 
     #[test]

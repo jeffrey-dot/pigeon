@@ -7,6 +7,16 @@ use std::os::unix::net::UnixStream;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+/// Every host test spawns a real shell (and sometimes vim/htop/less). Running
+/// them in parallel starves the machine and makes timing assertions flaky.
+static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn one_at_a_time() -> std::sync::MutexGuard<'static, ()> {
+    SERIAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 use pigeon_core::proto::{self, Message};
 
 struct Host {
@@ -23,7 +33,10 @@ impl Drop for Host {
 }
 
 fn start_host() -> Host {
-    start_host_with("/bin/sh")
+    // An empty prompt keeps the grid still once a command finishes, so the
+    // before/after comparison is not racing a redraw.
+    let quiet = script("#!/bin/sh\nexec env PS1= /bin/sh -i\n");
+    start_host_with(quiet.to_str().expect("utf8"))
 }
 
 fn start_host_with(program: &str) -> Host {
@@ -86,7 +99,7 @@ impl Client {
 
     /// Reads until a message matching `want` arrives, ignoring the rest.
     fn wait_for(&mut self, want: impl Fn(&Message) -> bool) -> Message {
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(25);
         loop {
             if let Some(found) = self.drain(&want) {
                 return found;
@@ -158,24 +171,89 @@ fn screen_text(message: &Message) -> String {
         .join("\n")
 }
 
-/// Re-attaches until two consecutive snapshots are identical, so a live shell
+/// Drops the only field that legitimately changes between two attaches.
+fn normalized(message: &Message) -> Message {
+    match message.clone() {
+        Message::Snapshot {
+            pane_id,
+            cols,
+            rows,
+            alt,
+            cursor,
+            scroll,
+            screen,
+            history,
+            links,
+            ..
+        } => Message::Snapshot {
+            pane_id,
+            seq: 0,
+            cols,
+            rows,
+            alt,
+            cursor,
+            scroll,
+            screen,
+            history,
+            links,
+        },
+        other => other,
+    }
+}
+
+/// Re-attaches until two consecutive snapshots are identical (all cells,
+/// attributes, colours, cursor, alt flag and scroll region), so a live shell
 /// cannot race the comparison.
-fn stable_snapshot(client: &mut Client, pane_id: u32) -> String {
-    let mut previous = String::new();
-    for _ in 0..25 {
+fn stable_snapshot(client: &mut Client, pane_id: u32) -> Message {
+    let mut streak = 0;
+    let mut previous: Option<Message> = None;
+    for _ in 0..30 {
         client.send(&Message::Attach {
             id: 99,
             pane_id,
             size_policy: None,
         });
-        let text = screen_text(&snapshot(client));
-        if text == previous {
-            return text;
+        let message = normalized(&snapshot(client));
+        if previous.as_ref() == Some(&message) {
+            streak += 1;
+            if streak >= 3 {
+                return message;
+            }
+        } else {
+            streak = 0;
+            previous = Some(message);
         }
-        previous = text;
-        std::thread::sleep(Duration::from_millis(120));
+        std::thread::sleep(Duration::from_millis(150));
     }
-    previous
+    previous.unwrap_or_else(|| normalized(&snapshot(client)))
+}
+
+/// Everything the acceptance criterion names: grid, attributes, colours and
+/// widths (inside the cells), cursor, alternate-screen flag and scroll region.
+/// Scrollback is excluded: it may legitimately grow between two attaches.
+fn comparable(
+    message: &Message,
+) -> (
+    u16,
+    u16,
+    bool,
+    proto::Cursor,
+    proto::Scroll,
+    Vec<Vec<proto::Cell>>,
+) {
+    let Message::Snapshot {
+        cols,
+        rows,
+        alt,
+        cursor,
+        scroll,
+        screen,
+        ..
+    } = normalized(message)
+    else {
+        panic!("expected a snapshot");
+    };
+    (cols, rows, alt, cursor, scroll, screen)
 }
 
 /// Waits until some snapshot's grid contains `needle`.
@@ -192,6 +270,7 @@ fn snapshot(client: &mut Client) -> Message {
 
 #[test]
 fn shell_outlives_the_client_and_the_screen_is_restored() {
+    let _serial = one_at_a_time();
     let host = start_host();
 
     // First client: create a session, attach, type a marker.
@@ -229,7 +308,8 @@ fn shell_outlives_the_client_and_the_screen_is_restored() {
     });
     // Wait until the shell has echoed the command into the grid.
     wait_for_text(&mut first, "pigeon-marker");
-    let before_text = stable_snapshot(&mut first, pane_id);
+    let before = stable_snapshot(&mut first, pane_id);
+    let before_text = screen_text(&before);
     assert!(before_text.contains("pigeon-marker"), "{before_text}");
 
     drop(first); // the "window closes"
@@ -248,10 +328,11 @@ fn shell_outlives_the_client_and_the_screen_is_restored() {
         "the pane survived the disconnect"
     );
 
-    let after_text = stable_snapshot(&mut second, pane_id);
+    let after = stable_snapshot(&mut second, pane_id);
     assert_eq!(
-        after_text, before_text,
-        "reconnecting must restore the same screen"
+        comparable(&after),
+        comparable(&before),
+        "reconnecting must restore the same grid: cells, attributes, colours, cursor, alt flag"
     );
 
     // The shell is still alive: the marker command runs again.
@@ -264,6 +345,7 @@ fn shell_outlives_the_client_and_the_screen_is_restored() {
 
 #[test]
 fn bad_version_is_rejected_with_hello_error() {
+    let _serial = one_at_a_time();
     let host = start_host();
     let mut client = Client::connect(&host.socket);
     client.send(&Message::Hello {
@@ -277,6 +359,7 @@ fn bad_version_is_rejected_with_hello_error() {
 
 #[test]
 fn unknown_message_gets_unsupported_and_the_connection_survives() {
+    let _serial = one_at_a_time();
     let host = start_host();
     let mut client = Client::connect(&host.socket);
     hello(&mut client);
@@ -308,6 +391,7 @@ fn unknown_message_gets_unsupported_and_the_connection_survives() {
 
 #[test]
 fn resize_reaches_the_shell() {
+    let _serial = one_at_a_time();
     let host = start_host();
     let mut client = Client::connect(&host.socket);
     hello(&mut client);
@@ -396,6 +480,7 @@ fn attach_first(client: &mut Client) -> u32 {
 
 #[test]
 fn less_pages_forward_when_space_is_pressed() {
+    let _serial = one_at_a_time();
     if !have_program("less") {
         eprintln!("less not installed; skipping");
         return;
@@ -432,6 +517,7 @@ fn less_pages_forward_when_space_is_pressed() {
 
 #[test]
 fn htop_renders_its_panels_and_quits_on_q() {
+    let _serial = one_at_a_time();
     if !have_program("htop") {
         eprintln!("htop not installed; skipping");
         return;
@@ -458,6 +544,7 @@ fn htop_renders_its_panels_and_quits_on_q() {
 
 #[test]
 fn vim_edits_and_quits() {
+    let _serial = one_at_a_time();
     if !have_program("vim") {
         eprintln!("vim not installed; skipping");
         return;
@@ -490,5 +577,36 @@ fn vim_edits_and_quits() {
     };
     assert_eq!(code, 0);
     let _ = std::fs::remove_file(&file);
+    let _ = std::fs::remove_file(&pane);
+}
+
+#[test]
+fn close_pane_terminates_the_child() {
+    let _serial = one_at_a_time();
+    let pane = script("#!/bin/sh\nexec sleep 60\n");
+    let host = start_host_with(pane.to_str().expect("utf8"));
+    let mut client = Client::connect(&host.socket);
+    hello(&mut client);
+    let pane_id = attach_first(&mut client);
+
+    client.send(&Message::ClosePane { id: 9, pane_id });
+    let Message::PaneExited {
+        pane_id: exited, ..
+    } = client.wait_for(|m| matches!(m, Message::PaneExited { .. }))
+    else {
+        unreachable!()
+    };
+    assert_eq!(exited, pane_id, "the closed pane reports its exit");
+
+    // And it is gone from the session list.
+    client.send(&Message::Sessions { items: Vec::new() });
+    let Message::Sessions { items } = client.wait_for(|m| matches!(m, Message::Sessions { .. }))
+    else {
+        unreachable!()
+    };
+    assert!(
+        !items.iter().any(|item| item.panes.contains(&pane_id)),
+        "a closed pane must not be listed"
+    );
     let _ = std::fs::remove_file(&pane);
 }

@@ -83,7 +83,7 @@
 |---|---|---|
 | `core/`（VT / 布局 / OSC 7501 / 协议 / 会话） | 全平台 | Rust；只许 std + POSIX 绑定；无 UI、无字体、无图形 API；`unsafe` 只在 `ffi.rs` |
 | `pigeon-host`（PTY + 会话宿主；本机与远端同一个二进制） | 全平台 | `core/` 里的 bin；用 `forkpty` 这类 POSIX 接口；静态单文件 3–8MB（见 `docs/remote.md`） |
-| `include/pigeon_core.h` | 全平台 | 由 `cbindgen` 从 `core/src/ffi.rs` 生成，宿主与所有客户端共用的唯一 ABI 面 |
+| `include/pigeon_core.h` | 全平台 | 由 `cbindgen` 从 `core/src/ffi/mod.rs` 生成，宿主与所有客户端共用的唯一 ABI 面 |
 | 客户端 | 按平台 | macOS：**AppKit**（`NSOutlineView` 侧栏 + 自绘网格，M0 首发）；Linux：**GTK4**（M5）。为什么不用 winit/Qt/Electron 见 `docs/gui.md` |
 
 - **协议是跨语言契约**：长度前缀 + 版本号，字段语义写进 `docs/protocol.md`（M0 随快照复原一起产出）。Linux 客户端可以用
@@ -264,7 +264,7 @@ M0 落地后仍在的洞。
 | 旧缺口 | 关闭方式 |
 |---|---|
 | `core/Cargo.toml` / `core/src/` / `Package.swift` 不存在，CI 作业全是 no-op | 三样都存在，CI 四个作业都在做事（`docs` 链接、`rust` fmt/clippy/test/体积、`header` cbindgen diff、`swift` cargo+swift build/test） |
-| `include/pigeon_core.h` 是手写预览 | 由 `cbindgen` 从 `core/src/ffi.rs` 生成，`diff -u` 为空 |
+| `include/pigeon_core.h` 是手写预览 | 由 `cbindgen` 从 `core/src/ffi/mod.rs` 生成，`diff -u` 为空 |
 | `core/cbindgen.toml` 不存在 | 已建，配置与 CI 命令一致 |
 | 客户端如何经 C ABI 编解码未定 | `pg_msg_*`（new/free/type/set/get/encode/decode/snapshot/sessions），Swift 侧零 CBOR |
 | `Tests/` 规划未落地 | `Tests/PigeonAppTests`（KeyEncoder / AppKit 按键映射 / Grouping / SidebarModel，14 个用例） |
@@ -281,5 +281,6 @@ M0 落地后仍在的洞。
 | CI 没有可移植性静态检查 | `ci.yml` 只做 fmt / clippy / test / 体积 / 头文件 diff / swift build+test | 加 `unsafe`/平台 crate 的 grep 检查时 |
 | `swift test` 依赖完整 Xcode | `xcode-select` 指向 CommandLineTools 时 XCTest 缺失，需 `DEVELOPER_DIR` | 换成 swift-testing 或写进 README |
 
-**平台说明**：`pigeon-host` 在 macOS 与 Linux 用同一份代码；M0 只在 macOS 上人工验收过，
-Ubuntu 侧由 `cargo test` 覆盖内核与协议，PTY/信号路径加入 Linux CI 的真实运行是 M5 的事。
+**平台说明**：`pigeon-host` 在 macOS 与 Linux 用同一份代码；CI 的 `rust` 作业在 ubuntu 与 macos
+各跑一遍 `cargo test`（含 spawn 真实 PTY 的宿主用例）。本机只有 macOS，因此 Ubuntu 那一路尚未实测，
+这是环境限制而不是排期。

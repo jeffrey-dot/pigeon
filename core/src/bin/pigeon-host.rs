@@ -12,11 +12,13 @@ use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex as StdMutex};
+use std::time::Duration;
 
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
+use tokio::time::{interval, MissedTickBehavior};
 
 use pigeon_core::error::PgError;
 use pigeon_core::proto::{self, Message, PROTO_VERSION};
@@ -47,6 +49,8 @@ impl Event {
 enum Cmd {
     Input(Vec<u8>),
     Resize(u16, u16),
+    /// Terminate the child (protocol `close_pane`).
+    Kill,
     Snapshot {
         history: bool,
         reply: oneshot::Sender<Message>,
@@ -326,6 +330,8 @@ async fn dispatch(
             None
         }
         Message::ClosePane { pane_id, .. } => {
+            // Close means close: terminate the child and drop the pane.
+            forward(sessions, pane_id, Cmd::Kill).await;
             sessions.lock().await.remove(&pane_id);
             None
         }
@@ -368,7 +374,7 @@ async fn spawn_session(
     if let Some(dir) = cwd {
         command.cwd(dir);
     }
-    let mut child = pair.slave.spawn_command(command).ok()?;
+    let child = pair.slave.spawn_command(command).ok()?;
     drop(pair.slave);
 
     let mut reader = pair.master.try_clone_reader().ok()?;
@@ -406,15 +412,6 @@ async fn spawn_session(
         }
     });
 
-    let (exit_tx, mut exit_rx) = mpsc::channel::<i32>(1);
-    std::thread::spawn(move || {
-        let code = child
-            .wait()
-            .map(|status| status.exit_code() as i32)
-            .unwrap_or(-1);
-        let _ = exit_tx.blocking_send(code);
-    });
-
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<Cmd>(64);
     let pane_id = {
         let mut handles = sessions.lock().await;
@@ -426,10 +423,20 @@ async fn spawn_session(
     let events = events.clone();
     tokio::spawn(async move {
         let mut pane = PaneState::new(pane_id, DEFAULT_COLS, DEFAULT_ROWS, SCROLLBACK);
+        let mut child = child;
+        let mut ticker = interval(Duration::from_millis(150));
+        ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        let mut commands_open = true;
         loop {
             tokio::select! {
-                command = cmd_rx.recv() => {
-                    let Some(command) = command else { break };
+                command = cmd_rx.recv(), if commands_open => {
+                    let Some(command) = command else {
+                        // The session was dropped: stop taking commands but keep
+                        // running until the child is reaped, so `pane_exited`
+                        // still reaches the remaining clients.
+                        commands_open = false;
+                        continue;
+                    };
                     match command {
                         Cmd::Input(bytes) => {
                             // Keystrokes go to the child; the echo comes back
@@ -451,13 +458,28 @@ async fn spawn_session(
                         Cmd::Snapshot { history, reply } => {
                             let _ = reply.send(pane.snapshot_message(history));
                         }
+                        Cmd::Kill => {
+                            let _ = child.kill();
+                        }
+                    }
+                }
+                _ = ticker.tick() => {
+                    if let Ok(Some(status)) = child.try_wait() {
+                        pane.status_mut().on_process_exit();
+                        let _ = events.send(Event::Exited {
+                            pane_id,
+                            code: status.exit_code() as i32,
+                        });
+                        break;
                     }
                 }
                 chunk = pty_rx.recv() => {
                     let Some(chunk) = chunk else {
-                        // The PTY closed: wait for the child so `pane_exited`
-                        // carries a real exit code instead of being dropped.
-                        let code = exit_rx.recv().await.unwrap_or(-1);
+                        // PTY gone: report the real exit code, then stop.
+                        let code = child
+                            .wait()
+                            .map(|status| status.exit_code() as i32)
+                            .unwrap_or(-1);
                         pane.status_mut().on_process_exit();
                         let _ = events.send(Event::Exited { pane_id, code });
                         break;
@@ -468,12 +490,6 @@ async fn spawn_session(
                         let _ = write_tx.send(replies);
                     }
                     flush(&mut pane, &events);
-                }
-                code = exit_rx.recv() => {
-                    let code = code.unwrap_or(-1);
-                    pane.status_mut().on_process_exit();
-                    let _ = events.send(Event::Exited { pane_id, code });
-                    break;
                 }
             }
         }
