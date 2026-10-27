@@ -43,10 +43,11 @@ swift test                                         # 18 个用例
 |---|---|
 | 提示符 + 方块光标 | ![prompt](images/m0/prompt.jpg) |
 | vim：缓冲区 + 状态行 | ![vim](images/m0/vim.jpg) |
-| less：首屏 + `(END)` | ![less](images/m0/less.jpg) |
+| less：首屏（第 1–35 行 + 文件名状态行） | ![less](images/m0/less.jpg) |
+| less：`G` 跳到文件末尾，状态行显示 `(END)` | ![less-end](images/m0/less-end.jpg) |
 | 键盘事件：System Events 输入 `echo typed-by-a-human`（系统事件通道，非 App 内部调用） | ![typed](images/m0/typed-shell.jpg) |
 | 关窗→重开：vim 备用屏与内容原样回来；重开后脚本再进入插入模式补打 ` after-reopen`，截图里能看到这行新字 | ![alt-1](images/m0/alt-1.jpg) → ![alt-2](images/m0/alt-2.jpg) |
-| 键盘事件给 less 翻页（空格） | ![less-page2](images/m0/less-page2.jpg) |
+| 键盘事件给 less 翻页（空格 → 第 36–70 行） | ![less-page2](images/m0/less-page2.jpg) |
 | 窗口改到 1200×700 后重绘（System Events 设置窗口尺寸） | ![resize](images/m0/window-resized.jpg) |
 | htop：CPU/内存面板 + 进程列表 | ![htop](images/m0/htop.jpg) |
 | htop：按 `q` 退出后回到 `sh-3.2$` 提示符（pane 是 `htop` 然后 `exec /bin/sh`；脚本打印 `htop processes after pressing q: 1`，那个 1 就是 shell） | ![htop-quit](images/m0/htop-quit.jpg) |

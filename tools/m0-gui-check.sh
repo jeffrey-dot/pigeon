@@ -88,12 +88,15 @@ sleep 1
 shoot "$OUT/alt-2.jpg"
 stop
 
-echo "== less: first page and one page down =="
+echo "== less: first page, one page down, end of file =="
 start "$WORK/less.sh"
 shoot "$OUT/less.jpg"
-osa -e 'tell application "System Events" to key code 49'
+osa -e 'tell application "System Events" to key code 49'          # space
 sleep 1
 shoot "$OUT/less-page2.jpg"
+osa -e 'tell application "System Events" to keystroke "G"'        # jump to the end
+sleep 1
+shoot "$OUT/less-end.jpg"
 stop
 
 if [ -n "$HTOP" ]; then
