@@ -1,0 +1,5 @@
+module PigeonCore {
+    header "shim.h"
+    link "pigeon_core"
+    export *
+}
