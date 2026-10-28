@@ -17,7 +17,7 @@ use std::ptr;
 
 use ciborium::value::Value;
 
-use super::{ffi_call, PgSnapshot, PgStr};
+use super::{ffi_call, PgAxis, PgRect, PgSnapshot, PgSplit, PgStr};
 use crate::error::{PgError, PgResult};
 use crate::proto::{self, Message, MAX_FRAME};
 
@@ -43,6 +43,10 @@ pub enum PgMsgType {
     PG_MSG_PONG = 15,
     PG_MSG_ERROR = 16,
     PG_MSG_UNSUPPORTED = 17,
+    PG_MSG_SPLIT_PANE = 18,
+    PG_MSG_RESIZE_SPLIT = 19,
+    PG_MSG_FOCUS = 20,
+    PG_MSG_LAYOUT = 21,
 }
 
 /// Wire name ↔ enum. Kept in one place so the two can never drift.
@@ -64,6 +68,10 @@ const NAMES: &[(PgMsgType, &str)] = &[
     (PgMsgType::PG_MSG_PONG, "pong"),
     (PgMsgType::PG_MSG_ERROR, "error"),
     (PgMsgType::PG_MSG_UNSUPPORTED, "unsupported"),
+    (PgMsgType::PG_MSG_SPLIT_PANE, "split_pane"),
+    (PgMsgType::PG_MSG_RESIZE_SPLIT, "resize_split"),
+    (PgMsgType::PG_MSG_FOCUS, "focus"),
+    (PgMsgType::PG_MSG_LAYOUT, "layout"),
 ];
 
 fn name_of(msg_type: PgMsgType) -> Option<&'static str> {
@@ -176,6 +184,31 @@ pub extern "C" fn pg_msg_set_i32(msg: *mut PgMsg, field: *const c_char, value: i
         msg.fields
             .insert(field, Value::Integer(i64::from(value).into()));
         Ok(true)
+    })
+}
+
+/// Floats are only used for split ratios; they travel as CBOR float32/64.
+#[no_mangle]
+pub extern "C" fn pg_msg_set_f32(msg: *mut PgMsg, field: *const c_char, value: f32) -> bool {
+    ffi_call(false, || {
+        let msg = unsafe_mut(msg)?;
+        let field = field_name(field)?;
+        msg.fields.insert(field, Value::Float(f64::from(value)));
+        Ok(true)
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn pg_msg_get_f32(msg: *const PgMsg, field: *const c_char, fallback: f32) -> f32 {
+    ffi_call(fallback, || {
+        let msg = unsafe_ref(msg)?;
+        let field = field_name(field)?;
+        match msg.fields.get(&field) {
+            Some(Value::Float(value)) => Ok(*value as f32),
+            Some(Value::Integer(integer)) => Ok(i128::from(*integer) as f32),
+            None => Ok(fallback),
+            Some(_) => Err(PgError::InvalidArg),
+        }
     })
 }
 
@@ -426,6 +459,112 @@ pub extern "C" fn pg_msg_decode(payload: *const u8, len: usize) -> *mut PgMsg {
             Err(err) => Err(err),
         }
     })
+}
+
+/// Rects of a `layout` message, computed by the core (clients never do the maths).
+#[no_mangle]
+pub extern "C" fn pg_msg_layout_rects(msg: *const PgMsg, out: *mut PgRect, cap: usize) -> usize {
+    ffi_call(0, || {
+        let node = layout_node(unsafe_ref(msg)?)?;
+        let rects = node.rects();
+        if rects.is_empty() {
+            return Ok(0);
+        }
+        if out.is_null() || cap < rects.len() {
+            return Err(PgError::Overflow);
+        }
+        for (index, (pane_id, rect)) in rects.iter().enumerate() {
+            // SAFETY: the caller promised `cap` writable entries.
+            unsafe {
+                *out.add(index) = PgRect {
+                    size: std::mem::size_of::<PgRect>() as u32,
+                    pane_id: *pane_id,
+                    x: rect.x,
+                    y: rect.y,
+                    w: rect.w,
+                    h: rect.h,
+                };
+            }
+        }
+        Ok(rects.len())
+    })
+}
+
+/// Dividers of a `layout` message, for divider hit-testing and drawing.
+#[no_mangle]
+pub extern "C" fn pg_msg_layout_splits(msg: *const PgMsg, out: *mut PgSplit, cap: usize) -> usize {
+    ffi_call(0, || {
+        let node = layout_node(unsafe_ref(msg)?)?;
+        let splits = node.splits();
+        if splits.is_empty() {
+            return Ok(0);
+        }
+        if out.is_null() || cap < splits.len() {
+            return Err(PgError::Overflow);
+        }
+        for (index, (id, axis, ratio, rect)) in splits.iter().enumerate() {
+            // SAFETY: the caller promised `cap` writable entries.
+            unsafe {
+                *out.add(index) = PgSplit {
+                    size: std::mem::size_of::<PgSplit>() as u32,
+                    id: *id,
+                    axis: match axis {
+                        crate::layout::Axis::Vertical => PgAxis::PG_AXIS_VERTICAL,
+                        crate::layout::Axis::Horizontal => PgAxis::PG_AXIS_HORIZONTAL,
+                    },
+                    ratio: *ratio,
+                    x: rect.x,
+                    y: rect.y,
+                    w: rect.w,
+                    h: rect.h,
+                };
+            }
+        }
+        Ok(splits.len())
+    })
+}
+
+/// Focus carried by a `layout` message (0 when absent).
+#[no_mangle]
+pub extern "C" fn pg_msg_layout_focus(msg: *const PgMsg) -> u32 {
+    ffi_call(0, || {
+        let msg = unsafe_ref(msg)?;
+        if type_of(&msg.t) != PgMsgType::PG_MSG_LAYOUT {
+            return Err(PgError::InvalidArg);
+        }
+        Ok(match msg.to_message()? {
+            Message::Layout { focus, .. } => focus.unwrap_or(0),
+            _ => 0,
+        })
+    })
+}
+
+fn layout_node(msg: &PgMsg) -> PgResult<crate::layout::LayoutNode> {
+    if type_of(&msg.t) != PgMsgType::PG_MSG_LAYOUT {
+        return Err(PgError::InvalidArg);
+    }
+    match msg.to_message()? {
+        Message::Layout { tree, .. } => Ok(from_proto_node(&tree)),
+        _ => Err(PgError::InvalidArg),
+    }
+}
+
+fn from_proto_node(node: &crate::proto::Node) -> crate::layout::LayoutNode {
+    use crate::layout::{Axis as LayoutAxis, LayoutNode};
+    use crate::proto::Node;
+    match node {
+        Node::Leaf { leaf } => LayoutNode::Leaf(*leaf),
+        Node::Split { split } => LayoutNode::Split {
+            id: split.id,
+            axis: match split.axis {
+                crate::proto::SplitAxis::Vertical => LayoutAxis::Vertical,
+                crate::proto::SplitAxis::Horizontal => LayoutAxis::Horizontal,
+            },
+            ratio: split.ratio,
+            a: Box::new(from_proto_node(&split.a)),
+            b: Box::new(from_proto_node(&split.b)),
+        },
+    }
 }
 
 fn encode_payload(msg: &PgMsg) -> PgResult<Vec<u8>> {

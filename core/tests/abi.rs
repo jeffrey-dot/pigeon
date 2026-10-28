@@ -278,3 +278,84 @@ fn layout_splits_closes_and_focuses() {
     pg_pane_free(core, first);
     pg_core_free(core);
 }
+
+#[test]
+fn layout_message_exposes_rects_and_splits() {
+    use pigeon_core::ffi::{
+        pg_msg_decode_frame, pg_msg_layout_focus, pg_msg_layout_rects, pg_msg_layout_splits,
+        pg_msg_type, PgAxis, PgMsgType, PgSplit,
+    };
+    use pigeon_core::proto::{Message, Node, SplitAxis, SplitNode};
+
+    let message = Message::Layout {
+        session_id: 1,
+        tree: Node::Split {
+            split: SplitNode {
+                id: 4,
+                axis: SplitAxis::Vertical,
+                ratio: 0.25,
+                a: Box::new(Node::Leaf { leaf: 1 }),
+                b: Box::new(Node::Split {
+                    split: SplitNode {
+                        id: 5,
+                        axis: SplitAxis::Horizontal,
+                        ratio: 0.5,
+                        a: Box::new(Node::Leaf { leaf: 2 }),
+                        b: Box::new(Node::Leaf { leaf: 3 }),
+                    },
+                }),
+            },
+        },
+        zoom: None,
+        focus: Some(2),
+    };
+    let frame = pigeon_core::proto::encode_frame(&message).expect("frame");
+    let mut consumed = 0usize;
+    let handle = pg_msg_decode_frame(frame.as_ptr(), frame.len(), &mut consumed);
+    assert!(!handle.is_null());
+    assert_eq!(pg_msg_type(handle), PgMsgType::PG_MSG_LAYOUT);
+    assert_eq!(pg_msg_layout_focus(handle), 2);
+
+    let mut rects = [PgRect {
+        size: std::mem::size_of::<PgRect>() as u32,
+        pane_id: 0,
+        x: 0.0,
+        y: 0.0,
+        w: 0.0,
+        h: 0.0,
+    }; 4];
+    assert_eq!(
+        pg_msg_layout_rects(handle, rects.as_mut_ptr(), rects.len()),
+        3
+    );
+    assert_eq!(rects[0].pane_id, 1);
+    assert!(
+        (rects[0].w - 0.25).abs() < 1e-5,
+        "geometry comes from the core"
+    );
+    assert_eq!(rects[1].pane_id, 2);
+    assert!((rects[1].x - 0.25).abs() < 1e-5);
+    assert!((rects[1].h - 0.5).abs() < 1e-5);
+
+    let mut splits = [PgSplit {
+        size: std::mem::size_of::<PgSplit>() as u32,
+        id: 0,
+        axis: PgAxis::PG_AXIS_VERTICAL,
+        ratio: 0.0,
+        x: 0.0,
+        y: 0.0,
+        w: 0.0,
+        h: 0.0,
+    }; 4];
+    assert_eq!(
+        pg_msg_layout_splits(handle, splits.as_mut_ptr(), splits.len()),
+        2
+    );
+    assert_eq!(splits[0].id, 4);
+    assert_eq!(splits[0].axis, PgAxis::PG_AXIS_VERTICAL);
+    assert!((splits[0].ratio - 0.25).abs() < 1e-5);
+    assert_eq!(splits[1].axis, PgAxis::PG_AXIS_HORIZONTAL);
+    assert!((splits[1].x - 0.25).abs() < 1e-5, "divider knows its box");
+
+    pigeon_core::ffi::pg_msg_free(handle);
+}

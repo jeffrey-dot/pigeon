@@ -24,6 +24,10 @@ enum Wire {
         field.withCString { _ = pg_msg_set_i32(message, $0, value) }
     }
 
+    static func set(_ message: OpaquePointer, f32 field: String, _ value: Float) {
+        field.withCString { _ = pg_msg_set_f32(message, $0, value) }
+    }
+
     static func set(_ message: OpaquePointer, bool field: String, _ value: Bool) {
         field.withCString { _ = pg_msg_set_bool(message, $0, value) }
     }

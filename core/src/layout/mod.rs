@@ -290,6 +290,94 @@ pub enum LayoutNode {
     },
 }
 
+impl LayoutNode {
+    /// Normalized rects in tree order — the geometry the client draws.
+    pub fn rects(&self) -> Vec<(PaneId, Rect)> {
+        let mut out = Vec::new();
+        self.collect_rects(
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 1.0,
+                h: 1.0,
+            },
+            &mut out,
+        );
+        out
+    }
+
+    /// Every divider: `(id, axis, ratio, the box it divides)`.
+    pub fn splits(&self) -> Vec<(SplitId, Axis, f32, Rect)> {
+        let mut out = Vec::new();
+        self.collect_splits(
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 1.0,
+                h: 1.0,
+            },
+            &mut out,
+        );
+        out
+    }
+
+    fn collect_rects(&self, rect: Rect, out: &mut Vec<(PaneId, Rect)>) {
+        match self {
+            Self::Leaf(pane) => out.push((*pane, rect)),
+            Self::Split {
+                axis, ratio, a, b, ..
+            } => {
+                let (first, second) = split_rects(rect, *axis, *ratio);
+                a.collect_rects(first, out);
+                b.collect_rects(second, out);
+            }
+        }
+    }
+
+    fn collect_splits(&self, rect: Rect, out: &mut Vec<(SplitId, Axis, f32, Rect)>) {
+        if let Self::Split {
+            id,
+            axis,
+            ratio,
+            a,
+            b,
+        } = self
+        {
+            out.push((*id, *axis, *ratio, rect));
+            let (first, second) = split_rects(rect, *axis, *ratio);
+            a.collect_splits(first, out);
+            b.collect_splits(second, out);
+        }
+    }
+}
+
+fn split_rects(rect: Rect, axis: Axis, ratio: f32) -> (Rect, Rect) {
+    match axis {
+        Axis::Vertical => (
+            Rect {
+                w: rect.w * ratio,
+                ..rect
+            },
+            Rect {
+                x: rect.x + rect.w * ratio,
+                w: rect.w * (1.0 - ratio),
+                ..rect
+            },
+        ),
+        Axis::Horizontal => (
+            Rect {
+                h: rect.h * ratio,
+                ..rect
+            },
+            Rect {
+                y: rect.y + rect.h * ratio,
+                h: rect.h * (1.0 - ratio),
+                ..rect
+            },
+        ),
+    }
+}
+
 fn describe_node(node: &Node) -> LayoutNode {
     match node {
         Node::Leaf(id) => LayoutNode::Leaf(*id),
@@ -610,6 +698,35 @@ mod tests {
         assert!(tree.focus(2));
         assert_eq!(tree.focused(), Some(2));
         assert!(!tree.focus(99));
+    }
+
+    #[test]
+    fn described_tree_reports_the_same_geometry() {
+        let mut tree = layout();
+        tree.split(1, 2, Axis::Vertical, 0.3, 100, 30)
+            .expect("split");
+        tree.split(2, 3, Axis::Horizontal, 0.6, 100, 30)
+            .expect("split");
+        let described = tree.describe().expect("tree");
+        assert_eq!(described.rects(), tree.rects());
+        let splits = described.splits();
+        assert_eq!(splits.len(), 2);
+        assert_eq!(splits[0].1, Axis::Vertical);
+        assert!((splits[0].2 - 0.3).abs() < 1e-5);
+        assert_eq!(
+            splits[0].3,
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 1.0,
+                h: 1.0
+            }
+        );
+        assert_eq!(splits[1].1, Axis::Horizontal);
+        assert!(
+            (splits[1].3.x - 0.3).abs() < 1e-5,
+            "inner split sits in the right half"
+        );
     }
 
     #[test]

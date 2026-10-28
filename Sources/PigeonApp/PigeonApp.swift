@@ -1,12 +1,17 @@
 import AppKit
 import PigeonCore
 
-/// Wires the window to a `pigeon-host` and drives the single pane.
+/// Wires the window to a `pigeon-host`: one split container, one pane view per
+/// pane, and the protocol messages that keep them in sync.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow!
-    private var pane: PaneView!
+    private var container: SplitContainerView!
     private var client: HostClient?
-    private var paneID: UInt32?
+    private var sessionID: UInt32?
+    private var focusedPane: UInt32?
+    /// Panes this window has already asked for a snapshot of.
+    private var attached: Set<UInt32> = []
+    private var nextRequest: UInt32 = 1
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         buildMenu()
@@ -29,26 +34,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             defer: false
         )
         window.title = "pigeon"
-        pane = PaneView(frame: frame)
-        pane.onInput = { [weak self] bytes in self?.sendKeys(bytes) }
-        pane.onResize = { [weak self] cols, rows in self?.sendResize(cols: cols, rows: rows) }
-        window.contentView = pane
+        container = SplitContainerView(frame: frame)
+        container.onSplit = { [weak self] axis in self?.split(axis) }
+        container.onClose = { [weak self] in self?.closeFocused() }
+        container.onFocus = { [weak self] pane in self?.focus(pane) }
+        container.onResizeSplit = { [weak self] split, ratio in self?.resizeSplit(split, ratio) }
+        container.onPaneInput = { [weak self] pane, bytes in self?.sendKeys(pane, bytes) }
+        container.onPaneResize = { [weak self] pane, cols, rows in
+            self?.sendResize(pane, cols: cols, rows: rows)
+        }
+        window.contentView = container
         window.makeKeyAndOrderFront(nil)
-        window.makeFirstResponder(pane)
+        window.makeFirstResponder(container)
         NSApp.activate(ignoringOtherApps: true)
     }
 
     private func buildMenu() {
         let mainMenu = NSMenu()
-        let appMenu = NSMenuItem()
-        mainMenu.addItem(appMenu)
-        let submenu = NSMenu()
-        submenu.addItem(
+        let appItem = NSMenuItem()
+        mainMenu.addItem(appItem)
+        let appMenu = NSMenu()
+        appMenu.addItem(
             withTitle: "Quit pigeon",
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"
         )
-        appMenu.submenu = submenu
+        appItem.submenu = appMenu
+
+        let viewItem = NSMenuItem()
+        mainMenu.addItem(viewItem)
+        let viewMenu = NSMenu(title: "View")
+        viewMenu.addItem(withTitle: "Split Left/Right", action: #selector(SplitContainerView.splitVertical(_:)), keyEquivalent: "d")
+        let down = NSMenuItem(
+            title: "Split Top/Bottom",
+            action: #selector(SplitContainerView.splitHorizontal(_:)),
+            keyEquivalent: "D"
+        )
+        viewMenu.addItem(down)
+        viewMenu.addItem(withTitle: "Close Pane", action: #selector(SplitContainerView.closeFocused(_:)), keyEquivalent: "w")
+        viewMenu.addItem(withTitle: "Previous Pane", action: #selector(SplitContainerView.focusPrevious(_:)), keyEquivalent: "[")
+        viewMenu.addItem(withTitle: "Next Pane", action: #selector(SplitContainerView.focusNext(_:)), keyEquivalent: "]")
+        viewItem.submenu = viewMenu
         NSApp.mainMenu = mainMenu
     }
 
@@ -59,17 +85,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             let client = try HostClient.connect(path: path)
             client.onMessage = { [weak self] message in
-                // AppKit is main-thread only; the socket runs on its own queue.
                 DispatchQueue.main.async {
                     defer { Wire.free(message) }
                     self?.handle(message)
                 }
             }
             client.onClose = { [weak self] in
-                DispatchQueue.main.async {
-                    NSLog("pigeon: host disconnected")
-                    self?.client = nil
-                }
+                DispatchQueue.main.async { self?.client = nil }
             }
             self.client = client
             sendHello()
@@ -86,55 +108,98 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return "/tmp/pigeon-\(getuid()).sock"
     }
 
+    private func requestID() -> UInt32 {
+        defer { nextRequest &+= 1 }
+        return nextRequest
+    }
+
+    private func send(_ build: (OpaquePointer) -> Void, type: PgMsgType) {
+        guard let client, let message = Wire.make(type) else { return }
+        defer { Wire.free(message) }
+        build(message)
+        client.send(message)
+    }
+
     private func sendHello() {
-        guard let client, let hello = Wire.make(PG_MSG_HELLO) else { return }
-        defer { Wire.free(hello) }
-        Wire.set(hello, u32: "proto", 0x0100)
-        Wire.set(hello, str: "client", "pigeon-mac")
-        Wire.set(hello, strings: "features", ["scrollback"])
-        client.send(hello)
+        send({ message in
+            Wire.set(message, u32: "proto", 0x0100)
+            Wire.set(message, str: "client", "pigeon-mac")
+            Wire.set(message, strings: "features", ["scrollback"])
+        }, type: PG_MSG_HELLO)
     }
 
     private func sendNewSession() {
-        guard let client, let message = Wire.make(PG_MSG_NEW_SESSION) else { return }
-        defer { Wire.free(message) }
-        Wire.set(message, u32: "id", 1)
-        client.send(message)
+        send({ message in
+            Wire.set(message, u32: "id", requestID())
+        }, type: PG_MSG_NEW_SESSION)
     }
 
-    private func sendAttach(_ paneID: UInt32) {
-        guard let client, let message = Wire.make(PG_MSG_ATTACH) else { return }
-        defer { Wire.free(message) }
-        Wire.set(message, u32: "id", 2)
-        Wire.set(message, u32: "pane_id", paneID)
-        client.send(message)
-        pane.forceSyncGrid()
+    private func sendAttach(_ pane: UInt32) {
+        guard attached.insert(pane).inserted else { return }
+        send({ message in
+            Wire.set(message, u32: "id", requestID())
+            Wire.set(message, u32: "pane_id", pane)
+        }, type: PG_MSG_ATTACH)
     }
 
-    private func sendKeys(_ bytes: [UInt8]) {
-        guard let client, let paneID, let message = Wire.make(PG_MSG_KEYS) else { return }
-        defer { Wire.free(message) }
-        Wire.set(message, u32: "pane_id", paneID)
-        Wire.set(message, bytes: "bytes", bytes)
-        client.send(message)
+    private func sendKeys(_ pane: UInt32, _ bytes: [UInt8]) {
+        send({ message in
+            Wire.set(message, u32: "pane_id", pane)
+            Wire.set(message, bytes: "bytes", bytes)
+        }, type: PG_MSG_KEYS)
     }
 
-    private func sendResize(cols: UInt16, rows: UInt16) {
-        guard let client, let paneID, let message = Wire.make(PG_MSG_RESIZE_PANE) else { return }
-        defer { Wire.free(message) }
-        Wire.set(message, u32: "pane_id", paneID)
-        Wire.set(message, u32: "cols", UInt32(cols))
-        Wire.set(message, u32: "rows", UInt32(rows))
-        client.send(message)
+    private func sendResize(_ pane: UInt32, cols: UInt16, rows: UInt16) {
+        send({ message in
+            Wire.set(message, u32: "pane_id", pane)
+            Wire.set(message, u32: "cols", UInt32(cols))
+            Wire.set(message, u32: "rows", UInt32(rows))
+        }, type: PG_MSG_RESIZE_PANE)
     }
+
+    private func split(_ axis: PgAxis) {
+        guard let focusedPane else { return }
+        send({ message in
+            Wire.set(message, u32: "id", requestID())
+            Wire.set(message, u32: "pane_id", focusedPane)
+            Wire.set(message, str: "axis", axis == PG_AXIS_VERTICAL ? "v" : "h")
+            Wire.set(message, f32: "ratio", 0.5)
+        }, type: PG_MSG_SPLIT_PANE)
+    }
+
+    private func closeFocused() {
+        guard let focusedPane else { return }
+        send({ message in
+            Wire.set(message, u32: "id", requestID())
+            Wire.set(message, u32: "pane_id", focusedPane)
+        }, type: PG_MSG_CLOSE_PANE)
+    }
+
+    private func focus(_ pane: UInt32) {
+        focusedPane = pane
+        send({ message in
+            Wire.set(message, u32: "pane_id", pane)
+        }, type: PG_MSG_FOCUS)
+    }
+
+    private func resizeSplit(_ split: UInt32, _ ratio: Double) {
+        send({ message in
+            Wire.set(message, u32: "id", requestID())
+            Wire.set(message, u32: "split_id", split)
+            Wire.set(message, f32: "ratio", Float(ratio))
+        }, type: PG_MSG_RESIZE_SPLIT)
+    }
+
+    // MARK: - protocol
 
     private func handle(_ message: OpaquePointer) {
         if ProcessInfo.processInfo.environment["PIGEON_DEBUG"] != nil {
-            FileHandle.standardError.write(Data("pigeon: <- \(Wire.type(message))\n".utf8))
+            FileHandle.standardError.write(
+                Data("pigeon: <- \(Wire.type(message))\n".utf8)
+            )
         }
         switch Wire.type(message) {
         case PG_MSG_HELLO_ACK:
-            // The host pushes `sessions` right after the ack.
             break
         case PG_MSG_SESSIONS:
             let count = pg_msg_sessions_count(message)
@@ -149,17 +214,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     pg_msg_session_panes(message, 0, buffer.baseAddress, buffer.count)
                 }
                 if written > 0 {
-                    paneID = panes[0]
+                    sessionID = info.session_id
                     sendAttach(panes[0])
                 }
             }
         case PG_MSG_CREATED:
-            paneID = Wire.u32(message, "pane_id")
-            if let paneID { sendAttach(paneID) }
+            sessionID = Wire.u32(message, "session_id")
+            sendAttach(Wire.u32(message, "pane_id"))
+        case PG_MSG_LAYOUT:
+            guard let model = LayoutModel(message: message) else { break }
+            if model.focus != 0 {
+                focusedPane = model.focus
+            }
+            // Every pane needs its own snapshot; the layout tells us which exist.
+            for pane in model.panes.map(\.id) {
+                sendAttach(pane)
+            }
+            container.apply(model)
         case PG_MSG_SNAPSHOT:
             guard let snapshot = pg_msg_snapshot(message) else { break }
             defer { pg_snapshot_free(snapshot) }
-            pane.apply(snapshot: snapshot)
+            let pane = snapshot.pointee.pane_id
+            focusedPane = focusedPane ?? pane
+            _ = container.applySnapshot(snapshot)
         case PG_MSG_PANE_EXITED:
             NSLog("pigeon: pane exited with code \(Wire.i32(message, "code"))")
         case PG_MSG_HELLO_ERROR:

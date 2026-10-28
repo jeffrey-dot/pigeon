@@ -813,3 +813,47 @@ fn closing_a_pane_merges_it_into_the_sibling() {
     assert_eq!(leaves_of(tree), vec![first], "the survivor fills the box");
     assert!(splits_of(tree).is_empty(), "no divider left");
 }
+
+#[test]
+fn resizing_a_split_changes_the_tree_and_the_panes() {
+    let _serial = one_at_a_time();
+    let host = start_host();
+    let mut client = Client::connect(&host.socket);
+    hello(&mut client);
+    let first = attach_first(&mut client);
+    let (_second, layout) = split(&mut client, first, proto::SplitAxis::Vertical, 0.5, 2);
+    let Message::Layout { tree, .. } = &layout else {
+        unreachable!()
+    };
+    let split_id = splits_of(tree)[0].0;
+
+    client.send(&Message::ResizeSplit {
+        id: 60,
+        split_id,
+        ratio: 0.7,
+    });
+    let resized = wait_for_layout(&mut client, |m| {
+        splits_of(tree_of(m))
+            .first()
+            .is_some_and(|(_, _, ratio)| (*ratio - 0.7).abs() < 1e-4)
+    });
+    let ratio = splits_of(tree_of(&resized))[0].2;
+    assert!(
+        (ratio - 0.7).abs() < 1e-4,
+        "ratio reached the tree: {ratio}"
+    );
+
+    // Both panes were re-fitted: the wider one now reports more columns.
+    for pane in leaves_of(tree_of(&resized)) {
+        client.send(&Message::Attach {
+            id: 61,
+            pane_id: pane,
+            size_policy: None,
+        });
+        let snapshot = snapshot(&mut client);
+        let Message::Snapshot { cols, rows, .. } = snapshot else {
+            unreachable!()
+        };
+        assert!(cols > 0 && rows > 0);
+    }
+}

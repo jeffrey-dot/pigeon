@@ -171,6 +171,10 @@ typedef enum PgMsgType {
     PG_MSG_PONG = 15,
     PG_MSG_ERROR = 16,
     PG_MSG_UNSUPPORTED = 17,
+    PG_MSG_SPLIT_PANE = 18,
+    PG_MSG_RESIZE_SPLIT = 19,
+    PG_MSG_FOCUS = 20,
+    PG_MSG_LAYOUT = 21,
 } PgMsgType;
 
 typedef enum PgStatusKind {
@@ -326,6 +330,20 @@ typedef struct PgRect {
 } PgRect;
 
 /**
+ * A divider in a layout message: the box it divides plus its ratio.
+ */
+typedef struct PgSplit {
+    uint32_t size;
+    uint32_t id;
+    enum PgAxis axis;
+    float ratio;
+    float x;
+    float y;
+    float w;
+    float h;
+} PgSplit;
+
+/**
  * One entry of a `sessions` message. Strings are borrowed from the message.
  */
 typedef struct PgSessionInfo {
@@ -454,6 +472,13 @@ bool pg_msg_set_u32(PgMsg *msg, const char *field, uint32_t value);
 
 bool pg_msg_set_i32(PgMsg *msg, const char *field, int32_t value);
 
+/**
+ * Floats are only used for split ratios; they travel as CBOR float32/64.
+ */
+bool pg_msg_set_f32(PgMsg *msg, const char *field, float value);
+
+float pg_msg_get_f32(const PgMsg *msg, const char *field, float fallback);
+
 bool pg_msg_set_bool(PgMsg *msg, const char *field, bool value);
 
 bool pg_msg_set_str(PgMsg *msg, const char *field, struct PgStr value);
@@ -517,6 +542,21 @@ size_t pg_msg_encode(const PgMsg *msg, uint8_t *out, size_t cap);
  * type `PG_MSG_UNSUPPORTED` carrying `t_of`.
  */
 PgMsg *pg_msg_decode(const uint8_t *payload, size_t len);
+
+/**
+ * Rects of a `layout` message, computed by the core (clients never do the maths).
+ */
+size_t pg_msg_layout_rects(const PgMsg *msg, struct PgRect *out, size_t cap);
+
+/**
+ * Dividers of a `layout` message, for divider hit-testing and drawing.
+ */
+size_t pg_msg_layout_splits(const PgMsg *msg, struct PgSplit *out, size_t cap);
+
+/**
+ * Focus carried by a `layout` message (0 when absent).
+ */
+uint32_t pg_msg_layout_focus(const PgMsg *msg);
 
 /**
  * Sets a field to an array of strings (e.g. `hello.features`).

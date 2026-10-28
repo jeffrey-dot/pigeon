@@ -690,6 +690,20 @@ pub extern "C" fn pg_layout_resize(core: *mut PgCore, split_id: u32, ratio: f32)
     })
 }
 
+/// A divider in a layout message: the box it divides plus its ratio.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct PgSplit {
+    pub size: u32,
+    pub id: u32,
+    pub axis: PgAxis,
+    pub ratio: f32,
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
 /// One normalized rect per pane, in tree order.
 #[no_mangle]
 pub extern "C" fn pg_layout_rects(core: *mut PgCore, out: *mut PgRect, cap: usize) -> usize {
