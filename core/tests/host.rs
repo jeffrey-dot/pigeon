@@ -1248,3 +1248,91 @@ fn a_pane_asks_for_its_background_and_the_host_answers() {
     // No `appearance` was sent: the host answers with its built-in harp dark theme.
     wait_for_pane_text(&mut client, pane_id, "rgb:0505/0505/0505");
 }
+
+/// The host's `appearance` path: a message reaches panes that already exist, an unusable one
+/// keeps the previous palette, and nothing is rebuilt.
+#[test]
+fn appearance_reaches_existing_panes_and_a_malformed_one_keeps_the_previous() {
+    let _serial = one_at_a_time();
+    let host = start_host();
+    let mut client = Client::connect(&host.socket);
+    hello(&mut client);
+    client.send(&Message::NewSession {
+        id: 1,
+        cwd: None,
+        shell: None,
+        env: None,
+    });
+    let Message::Created { pane_id, .. } =
+        client.wait_for(|m| matches!(m, Message::Created { .. }))
+    else {
+        unreachable!()
+    };
+    client.send(&Message::Attach {
+        id: 2,
+        pane_id,
+        size_policy: None,
+    });
+    let _ = snapshot(&mut client);
+
+    // `clear;` keeps only the newest answer on screen, so a stale line cannot satisfy a later
+    // assertion.
+    fn query() -> Vec<u8> {
+        b"clear; printf '\\033]11;?\\033\\\\'; IFS= read -r -n 25 -t 5 r; printf 'R[%s]' \"$r\" | cat -v\n"
+            .to_vec()
+    }
+
+    // 1) nothing sent yet: the built-in harp dark palette answers.
+    client.send(&Message::Keys {
+        pane_id,
+        bytes: query(),
+    });
+    wait_for_pane_text(&mut client, pane_id, "rgb:0505/0505/0505");
+
+    // 2) a light appearance reaches the pane that already exists.
+    client.send(&Message::Appearance {
+        fg: Some(0x0011_1111),
+        bg: Some(0x00ff_ffff),
+        ansi: vec![
+            0x212121, 0xC30771, 0x10A778, 0xA89C14, 0x008EC4, 0x523C79, 0x20A5BA, 0xE0E0E0,
+            0x212121, 0xFB007A, 0x5FD7AF, 0xF3E430, 0x20BBFC, 0x6855DE, 0x4FB8CC, 0xF1F1F1,
+        ],
+    });
+    client.send(&Message::Keys {
+        pane_id,
+        bytes: query(),
+    });
+    wait_for_pane_text(&mut client, pane_id, "rgb:ffff/ffff/ffff");
+
+    // 3) an unusable message keeps the previous palette instead of resetting it.
+    client.send(&Message::Appearance {
+        fg: None,
+        bg: None,
+        ansi: Vec::new(),
+    });
+    client.send(&Message::Keys {
+        pane_id,
+        bytes: query(),
+    });
+    let latest = client.wait_for(|m| match m {
+        Message::Snapshot { .. } => screen_text(m).contains("rgb:"),
+        _ => false,
+    });
+    let text = screen_text(&latest);
+    assert!(text.contains("rgb:ffff/ffff/ffff"), "kept palette: {text}");
+    assert!(
+        !text.contains("rgb:0505/0505/0505"),
+        "a malformed appearance must not reset the palette: {text}"
+    );
+
+    // 4) the session and its pane survived: nothing was rebuilt.
+    client.send(&Message::Sessions { items: Vec::new() });
+    let sessions = client.wait_for(|m| matches!(m, Message::Sessions { .. }));
+    match sessions {
+        Message::Sessions { items } => {
+            assert_eq!(items.len(), 1);
+            assert_eq!(items[0].panes, vec![pane_id]);
+        }
+        other => panic!("expected sessions, got {}", other.name()),
+    }
+}

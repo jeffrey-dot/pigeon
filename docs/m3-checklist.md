@@ -7,7 +7,7 @@
 ```sh
 cargo fmt --check                                  # 通过
 cargo clippy --all-targets -- -D warnings          # 通过
-cargo test                                         # 73 单元 + 11 ABI + 25 宿主 = 109 passed
+cargo test                                         # 73 单元 + 11 ABI + 23 宿主 = 107 passed
 cargo build --release --bin pigeon-host            # 1,250,800 B（1.19 MiB ≤ 8 MiB）
 cbindgen --config core/cbindgen.toml --crate pigeon-core \
          --output /tmp/pg.h core                   # 与 include/pigeon_core.h 无差异
@@ -107,11 +107,11 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 |---|---|
 | 协议 | `appearance { fg, bg, ansi[16] }`（c→s，全字段可选）；`docs/protocol.md` §3；往返/缺字段/错长度三条用例在 `core/src/proto/mod.rs` 的测试里 |
 | VT 层 | `colour_queries_are_answered_from_the_client_palette`（`]11;?` → `rgb:ffff/ffff/ffff`、`]10;?` → `rgb:1111/1111/1111`、`]4;1;?` → `rgb:c3c3/0707/7171`）、`colour_queries_stay_silent_without_a_palette`、`cursor_colour_and_unknown_queries_are_not_answered` |
-| 宿主 | 只保留**一条**端到端用例 `a_pane_asks_for_its_background_and_the_host_answers`：真宿主 + 真 PTY，shell 自己发 `OSC 11;?`、读回 25 字节并打印，断言拿到内置 harp 深色板的 `rgb:0505/0505/0505`（0.3s，不起脚本、不跑 TUI）。其余情形由 VT 层四条单测逐字节覆盖 |
+| 宿主 | `a_pane_asks_for_its_background_and_the_host_answers`（空宿主 → 建会话 → shell 自己发 `OSC 11;?` 并打印，断言内置深色板 `rgb:0505/0505/0505`，0.3s）与 `appearance_reaches_existing_panes_and_a_malformed_one_keeps_the_previous`（发 `appearance` → 已存在的 pane 下一问拿到 `rgb:ffff/ffff/ffff`；再发空 `appearance` → 仍是亮色、没有回到深色；`Sessions` 里 session/pane 数不变 = 没重建）。其余字节级情形由 VT 层四条单测覆盖 |
 | 客户端 | `appearance sent fg=111111 bg=ffffff`（`PIGEON_DEBUG` 日志）；启动后一次，此后每次外观切换（⌥⌘A 三态循环 / 系统外观变化，走同一条 `effectiveAppearance` KVO）再发一次 —— 脚本实测三次切换把计数从 1 推到 4 |
-| 缺省 | 客户端还没说话时，宿主用 harp 内置深色板回答（`Palette::default_dark()`，`#050505` / `#ffffff` + `DARK_MODE_*`）；`appearance` 缺字段或色值不是 16 个则保留原答复、不 panic，用例 `colour_queries_fall_back_to_harps_dark_theme`、`a_malformed_appearance_keeps_the_previous_palette` |
+| 缺省 | 客户端还没说话时，宿主用 harp 内置深色板回答（`Palette::default_dark()`，`#050505` / `#ffffff` + `DARK_MODE_*`）；`appearance` 缺字段或色值不是 16 个 → 保留当前答复（初始即该深色板），不 panic。这条语义由 `appearance_reaches_existing_panes_and_a_malformed_one_keeps_the_previous` 的第 3 步锁定 |
 | 对比度兜底 | 协议生效后客户端不再改 TUI 自己选的色：`TerminalPalette.readable` 的阈值降到 **1.2:1**，只拦真正看不见的色（`testTheFloorOnlyRescuesInvisibleText` 断言 harp 亮色黄 `#F3E430` 原样通过） |
-| 手测 | `/tmp/pigeon-manual…` 的宿主日志里有 2 条 `rgb:ffff/ffff/ffff` 回复；亮色外观下 `pi` 用亮色主题渲染，见 [osc11-light](images/m3/osc11-light.jpg) |
+| 手测 | 亮色外观下 `pi` 用亮色主题渲染，见 [osc11-light](images/m3/osc11-light.jpg)（同一次运行里 `appearance sent fg=111111 bg=ffffff`，PTY 侧收到 `]11;rgb:ffff/ffff/ffff`）；可重放的断言以 §2.3 上面两条宿主用例为准，不依赖 `/tmp` 日志 |
 
 ## 3. 产品调整（用户要求，2026-10-28）
 
