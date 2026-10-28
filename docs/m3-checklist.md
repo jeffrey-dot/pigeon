@@ -175,6 +175,10 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 | `header` | success（cbindgen `diff -u` 为空） |
 | `swift` | success（`swift test` **44 passed**，含新增 `PaneGridTests`） |
 
+HEAD（文档收尾 `293643c`）的 run 40683408546 同样五作业 success，但首跑时 `rust (macos-latest)` 红过一次：
+`acked_status_is_not_replayed_after_reconnect`（`core/tests/host.rs:1173`，靠 `sleep(300ms)` 等重连补发）在负载高的 runner 上会抢跑，
+`gh run rerun --failed` 后全绿。这是既有时间敏感用例，和本次三个回归无关；要根治得改那个用例的同步方式。
+
 本机同一提交的全量输出：
 
 ```sh
