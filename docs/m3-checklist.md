@@ -163,9 +163,9 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 
 ## 6. CI（GitHub Actions，真跑）
 
-代码提交 `fb0576c`（HEAD；浅/深同色系 + 文档收尾）的 CI 五作业 success：
+代码提交 `7fd5460`（终端零尺寸 / 退化 resize / 切换会话三个回归的修复）的 CI 五作业 success：
 
-<https://github.com/jeffrey-dot/pigeon/actions/runs/40664325916>
+<https://github.com/jeffrey-dot/pigeon/actions/runs/40668695404>
 
 | 作业 | 结果 |
 |---|---|
@@ -173,10 +173,7 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 | `rust (ubuntu-latest)` | success（`cargo test` 66 + 11 + 21 = 98 passed） |
 | `rust (macos-latest)` | success |
 | `header` | success（cbindgen `diff -u` 为空） |
-| `swift` | success（`swift test` 42 passed） |
-
-同一提交首跑时 `rust (macos-latest)` 红过一次：`acked_status_is_not_replayed_after_reconnect` 用 `sleep(300ms)` 等重连后的补发，
-在负载高的 runner 上会抢跑（`core/tests/host.rs:1173`），属既有时间敏感用例；`gh run rerun --failed` 后五作业全绿。
+| `swift` | success（`swift test` **44 passed**，含新增 `PaneGridTests`） |
 
 本机同一提交的全量输出：
 
@@ -184,8 +181,16 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 cargo fmt --check                                  # 通过
 cargo clippy --all-targets -- -D warnings          # 通过
 cargo test                                         # 66 + 11 + 21 = 98 passed
-swift build && swift test                          # Build complete / 42 passed
+swift build && swift test                          # Build complete / 44 passed
 cargo build --release --bin pigeon-host            # 1,234,288 B（1.18 MiB ≤ 8 MiB）
-cbindgen … --output /tmp/pg4.h && diff -q …        # header: no diff
-tools/m3-gui-check.sh                              # 见 §2 转录（浅/深 + 热切换，窗口级截图）
+cbindgen … --output /tmp/pg5.h && diff -q …        # header: no diff
+```
+
+手测证据（`PIGEON_DEBUG=1`，见 §4 第 10–12 条）：
+
+```text
+pigeon: select id=3 activePane=3 panes=[3]
+pigeon: layout session=3 selected=3 panes=[3]      ← 点行确实换了内容
+pigeon: grid pane=3 97x36 cursor=26,0 filled=23 lastRow=0
+grep -c " 2x1 " app7.log → 0                        ← 不再上报退化尺寸
 ```
