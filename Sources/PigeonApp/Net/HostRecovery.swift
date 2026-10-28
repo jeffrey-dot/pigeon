@@ -43,6 +43,17 @@ public enum HostRecovery {
         }
     }
 
+    /// Which way a lost connection comes back: a remote session re-probes its ssh
+    /// transports, a local one restarts the socket host next to us.
+    public enum Plan: Equatable {
+        case remote
+        case local
+    }
+
+    public static func plan(hasRemote: Bool) -> Plan {
+        hasRemote ? .remote : .local
+    }
+
     /// The command line shown when no host binary can be found to start automatically.
     public static let startCommand = "cargo run --manifest-path core/Cargo.toml --bin pigeon-host"
 }

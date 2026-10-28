@@ -170,7 +170,9 @@ impl Client {
 
     /// Reads until a message matching `want` arrives, ignoring the rest.
     fn wait_for(&mut self, want: impl Fn(&Message) -> bool) -> Message {
-        let deadline = Instant::now() + Duration::from_secs(25);
+        // Generous: the suite runs several real shells at once and a loaded machine can
+        // stall a redraw for a while (the "flaky" test was always this deadline).
+        let deadline = Instant::now() + Duration::from_secs(45);
         loop {
             if let Some(found) = self.drain(&want) {
                 return found;
@@ -790,6 +792,93 @@ fn scrollback_history_reaches_the_client_in_the_snapshot() {
         "the newest line stays on the live screen:\n{}",
         rows_text(&screen)
     );
+}
+
+/// Ten thousand lines, reachable by `scroll` without the backlog ever crossing the wire.
+#[test]
+fn scroll_reaches_ten_thousand_lines_of_history() {
+    let _serial = one_at_a_time();
+    let host = start_host();
+    let mut client = Client::connect(&host.socket);
+    hello(&mut client);
+    let pane = attach_first(&mut client);
+
+    // More output than the host keeps: 20000 lines through a 24-row screen.
+    client.send(&Message::Keys {
+        pane_id: pane,
+        bytes: b"seq 1 20000\r".to_vec(),
+    });
+    client.wait_for(|message| match message {
+        Message::Snapshot { screen, .. } => {
+            rows_text(screen).lines().any(|line| line.trim() == "20000")
+        }
+        _ => false,
+    });
+
+    // A live snapshot may still be in flight, so wait for one that actually looks back.
+    let wait_top = |client: &mut Client, below: u32| -> u32 {
+        let message = client.wait_for(|message| match message {
+            Message::Snapshot { screen, .. } => rows_text(screen)
+                .lines()
+                .find_map(|line| line.trim().parse::<u32>().ok())
+                .is_some_and(|top| top < below),
+            _ => false,
+        });
+        let Message::Snapshot { screen, .. } = &message else {
+            unreachable!()
+        };
+        rows_text(screen)
+            .lines()
+            .find_map(|line| line.trim().parse::<u32>().ok())
+            .unwrap_or_default()
+    };
+
+    // 5000 lines back from the live screen (line 20000) lands near 15000, not at the top.
+    client.send(&Message::Scroll {
+        pane_id: pane,
+        offset: -5000,
+    });
+    let at_15k = wait_top(&mut client, 19_950);
+    // The viewport top moves up by exactly the requested lines: live top ~19977 − 5000.
+    assert!(
+        (14_970..=14_990).contains(&at_15k),
+        "5000 lines back should show line ~14978, got {at_15k}"
+    );
+
+    // All the way back: the oldest retained line is ~10000, which is the 10k backlog.
+    client.send(&Message::Scroll {
+        pane_id: pane,
+        offset: -20_000,
+    });
+    let oldest = wait_top(&mut client, 10_100);
+    // 20000 lines fed, 24 still on screen, 10000 kept as backlog: oldest ~9977.
+    assert!(
+        (9_960..=9_990).contains(&oldest),
+        "the backlog is 10000 lines, oldest retained ~9977, got {oldest}"
+    );
+
+    // `offset: 0` is the live screen again.
+    client.send(&Message::Scroll {
+        pane_id: pane,
+        offset: 0,
+    });
+    let live = client.wait_for(|m| matches!(m, Message::Snapshot { .. }));
+    let live_text = screen_text(&live);
+    assert!(
+        live_text.lines().any(|line| line.trim() == "20000"),
+        "back to the bottom:\n{live_text}"
+    );
+
+    // An unknown pane is an error, not a silent success.
+    client.send(&Message::Scroll {
+        pane_id: 9999,
+        offset: -1,
+    });
+    let Message::Error { code, .. } = client.wait_for(|m| matches!(m, Message::Error { .. }))
+    else {
+        unreachable!()
+    };
+    assert_eq!(code, "no_such_pane");
 }
 
 /// Writes an executable shell script so a pane can run a program with arguments.

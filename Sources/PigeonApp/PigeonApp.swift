@@ -58,6 +58,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var appearanceObservation: NSKeyValueObservation?
     private let store = SidebarStore()
     private var state = SidebarState()
+    private let hostsStore = HostsStore()
+    private var hosts = HostsState()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // `PIGEON_APPEARANCE=light|dark|system` pins the app's appearance for the screenshot
@@ -71,10 +73,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.sendAppearance()
         }
         state = store.load()
+        hosts = hostsStore.load()
         buildMenu()
         buildWindow()
         if let host = ProcessInfo.processInfo.environment["PIGEON_REMOTE"], !host.isEmpty {
             startRemote(host)
+        } else if let remembered = hosts.current {
+            // The window reopens where it was left (`docs/remote.md` §4).
+            startRemote(remembered)
         } else if !connectHost() {
             hostLost("No session host is running.")
         }
@@ -120,8 +126,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         container.onPaneResize = { [weak self] pane, cols, rows in
             self?.sendResize(pane, cols: cols, rows: rows)
         }
-        // A fresh history comes with a fresh `attach`; nothing else carries scrollback.
-        container.onPaneHistory = { [weak self] pane in self?.sendAttach(pane, force: true) }
+        // Scrollback lives in the host; the window only says which way to look.
+        container.onPaneScroll = { [weak self] pane, lines in self?.sendScroll(pane, lines: lines) }
+        container.onPaneScrollBottom = { [weak self] pane in self?.sendScroll(pane, lines: 0) }
         container.onToggleZoom = { [weak self] in self?.toggleZoom() }
 
         splitView = NSSplitView()
@@ -261,6 +268,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sessionMenu.addItem(close)
         for item in sessionMenu.items { item.target = self }
         sessionItem.submenu = sessionMenu
+
+        let hostsItem = NSMenuItem()
+        mainMenu.addItem(hostsItem)
+        let hostsMenu = NSMenu(title: "Hosts")
+        for host in hosts.hosts {
+            let item = NSMenuItem(
+                title: host, action: #selector(selectHost(_:)), keyEquivalent: "")
+            item.representedObject = host
+            item.state = hosts.current == host ? .on : .off
+            hostsMenu.addItem(item)
+        }
+        let local = NSMenuItem(
+            title: "Use This Mac", action: #selector(useThisMac(_:)), keyEquivalent: "")
+        local.state = hosts.current == nil ? .on : .off
+        hostsMenu.addItem(local)
+        hostsMenu.addItem(.separator())
+        let add = NSMenuItem(
+            title: "Connect to Host…", action: #selector(connectToHost(_:)), keyEquivalent: "o")
+        add.keyEquivalentModifierMask = [.command, .shift]
+        hostsMenu.addItem(add)
+        for item in hostsMenu.items { item.target = self }
+        hostsItem.submenu = hostsMenu
         NSApp.mainMenu = mainMenu
     }
 
@@ -377,7 +406,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         recoveryAttempt += 1
         show(hostStatus: .reconnecting(attempt: recoveryAttempt))
         DispatchQueue.main.asyncAfter(deadline: .now() + HostRecovery.retryDelay) { [weak self] in
-            guard let self, !self.connectHost() else { return }
+            guard let self else { return }
+            if HostRecovery.plan(hasRemote: self.remote != nil) == .remote {
+                self.reconnectRemote(reason)
+                return
+            }
+            guard !self.connectHost() else { return }
             // No socket at all: start a local host and give it a moment to bind.
             if let path = HostLauncher.find(candidates: HostLauncher.candidates()) {
                 HostLauncher.launch(path: path)
@@ -389,7 +423,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// A dropped ssh channel comes back through the same A→B→C probe. The remote host kept
+    /// the panes, which is what makes a 30 s drop survivable at all.
+    private func reconnectRemote(_ reason: String) {
+        guard let session = remote else { return }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            do {
+                let outcome = try session.connect()
+                DispatchQueue.main.async { self?.apply(outcome) }
+            } catch {
+                DispatchQueue.main.async { [weak self] in
+                    self?.recover("\(reason) (\(error))")
+                }
+            }
+        }
+    }
+
     private func showStopped(_ reason: String) {
+        if let remote {
+            show(hostStatus: .stopped(
+                detail: "\(reason)\nCheck `ssh \(remote.host)`, then Retry."))
+            return
+        }
         show(hostStatus: .stopped(detail: "\(reason)\nStart it with: \(HostRecovery.startCommand)"))
     }
 
@@ -403,6 +458,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func retryHost() {
         recoveryAttempt = 0
+        if let remote {
+            recover("Reconnecting to \(remote.host)")
+            return
+        }
         if !connectHost() {
             recover("No session host is running.")
         }
@@ -479,6 +538,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Wire.set(message, u32: "id", requestID())
             Wire.set(message, u32: "pane_id", pane)
         }, type: PG_MSG_ATTACH)
+    }
+
+    /// `scroll` takes a delta: negative looks back, `0` is the live screen (protocol §3.3).
+    private func sendScroll(_ pane: UInt32, lines: Int) {
+        send({ message in
+            Wire.set(message, u32: "pane_id", pane)
+            Wire.set(message, i32: "offset", -Int32(lines))
+        }, type: PG_MSG_SCROLL)
     }
 
     private func sendKeys(_ pane: UInt32, _ bytes: [UInt8]) {
@@ -599,6 +666,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         state.order = order
         store.save(state)
         refreshSidebar()
+    }
+
+    // MARK: - hosts
+
+    @objc private func selectHost(_ sender: NSMenuItem) {
+        guard let host = sender.representedObject as? String else { return }
+        switchTo(host: host)
+    }
+
+    @objc private func useThisMac(_ sender: Any?) {
+        switchTo(host: nil)
+    }
+
+    @objc private func connectToHost(_ sender: Any?) {
+        let alert = NSAlert()
+        alert.messageText = "Connect to host"
+        alert.informativeText =
+            "An ssh destination, e.g. `arch`. pigeon-host is installed there on first use."
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
+        field.placeholderString = "user@host"
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Connect")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let host = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !host.isEmpty else { return }
+        switchTo(host: host)
+    }
+
+    /// One window is one connection, so switching hosts means hanging up first — and saying
+    /// so by clearing the old rows instead of half-showing them.
+    private func switchTo(host: String?) {
+        client?.close()
+        client = nil
+        remote?.close()
+        remote = nil
+        localSession = nil
+        rows = [:]
+        haveSnapshot = []
+        requested = []
+        selectedSession = nil
+        pendingSnapshots = [:]
+        container.apply(.empty)
+        if let host {
+            if !hosts.hosts.contains(host) {
+                hosts.hosts.append(host)
+            }
+            hosts.current = host
+        } else {
+            hosts.current = nil
+        }
+        hostsStore.save(hosts)
+        buildMenu()
+        refreshSidebar()
+        if let host {
+            startRemote(host)
+        } else if !connectHost() {
+            hostLost("No session host is running.")
+        }
     }
 
     @objc private func nextNeedsYou(_ sender: Any?) {

@@ -28,7 +28,7 @@ use pigeon_core::term::Palette;
 
 /// Capabilities this build offers (protocol §5).
 const SERVER_FEATURES: &[&str] = &["delta", "scrollback", "osc7501"];
-const SCROLLBACK: usize = 1000;
+const SCROLLBACK: usize = 10_000;
 const DEFAULT_COLS: u16 = 80;
 const DEFAULT_ROWS: u16 = 24;
 
@@ -143,6 +143,12 @@ enum Cmd {
     Snapshot {
         history: bool,
         reply: oneshot::Sender<Message>,
+    },
+    /// Look `offset` lines into the history; the reply carries the view and the applied
+    /// offset (protocol §3.3 `scroll`).
+    Scroll {
+        offset: usize,
+        reply: oneshot::Sender<(Message, usize)>,
     },
     LatestStatus {
         reply: oneshot::Sender<Option<Message>>,
@@ -281,6 +287,9 @@ struct ClientState {
     session: Option<u32>,
     /// Whether the handshake negotiated `delta` for this connection.
     delta_ok: bool,
+    /// How far each pane is scrolled back for *this* window; 0 is the live screen. Two
+    /// windows on one session scroll independently because this lives per connection.
+    views: HashMap<u32, usize>,
 }
 
 async fn handle_client<S>(
@@ -431,6 +440,11 @@ where
                         let Some(delta_ok) = state.watched.get(&pane_id).copied() else {
                             continue;
                         };
+                        // A scrolled-back window is reading history: live repaints would
+                        // tear the view it is looking at (protocol §3.3).
+                        if state.views.get(&pane_id).copied().unwrap_or(0) > 0 {
+                            continue;
+                        }
                         if delta_ok {
                             send(&mut writer, &message).await?;
                         } else if let Some(snapshot) = snapshot_of(sessions, pane_id, false).await {
@@ -538,6 +552,14 @@ fn apply_layout(session_id: u32, session: &mut Session, events: &broadcast::Send
 /// clients, so each window can show who is in charge.
 fn broadcast_size(session_id: u32, session: &Session, events: &broadcast::Sender<Event>) {
     let clients = session.clients.len().min(usize::from(u8::MAX)) as u8;
+    if clients > 1 && std::env::var_os("PIGEON_DEBUG").is_some() {
+        eprintln!(
+            "pigeon-host: size_state session={session_id} clients={clients} source={} box={}x{}",
+            session.policy.as_str(),
+            session.cols,
+            session.rows
+        );
+    }
     for (pane_id, rect) in session.layout.rects() {
         let (cols, rows) = pane_size(session, &rect);
         let _ = events.send(Event::SizeState {
@@ -920,6 +942,32 @@ async fn dispatch(
             note_activity(sessions, events, state.client_id, pane_id).await;
             None
         }
+        Message::Scroll { pane_id, offset } => {
+            let current = state.views.get(&pane_id).copied().unwrap_or(0);
+            let wanted = if offset == 0 {
+                0
+            } else {
+                (current as i64 - i64::from(offset)).max(0) as usize
+            };
+            let Some(sender) = sender_of(sessions, pane_id).await else {
+                return Some(Message::Error {
+                    code: "no_such_pane".into(),
+                    detail: format!("pane {pane_id}"),
+                    id: None,
+                });
+            };
+            let (tx, rx) = oneshot::channel();
+            sender
+                .send(Cmd::Scroll {
+                    offset: wanted,
+                    reply: tx,
+                })
+                .await
+                .ok()?;
+            let (message, applied) = rx.await.ok()?;
+            state.views.insert(pane_id, applied);
+            Some(message)
+        }
         Message::ResizePane {
             pane_id,
             cols,
@@ -1160,6 +1208,9 @@ fn spawn_pane(
                         }
                         Cmd::Snapshot { history, reply } => {
                             let _ = reply.send(pane.snapshot_message(history));
+                        }
+                        Cmd::Scroll { offset, reply } => {
+                            let _ = reply.send(pane.scroll_message(offset));
                         }
                         Cmd::Kill => {
                             let _ = child.kill();

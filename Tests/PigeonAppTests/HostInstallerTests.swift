@@ -161,12 +161,12 @@ final class HostInstallerTests: XCTestCase {
             throw XCTSkip("no local binary for \(platform); build one with `cargo build --release --target x86_64-unknown-linux-musl`")
         }
 
-        // A byte appended to a copy gives a fresh version hash, so the assertions do not
-        // depend on what a previous run of this test left on the host. Trailing bytes after
-        // an ELF are ignored, so the copy still runs.
+        // A random suffix gives a fresh version hash on every run, so "first connection
+        // uploads" keeps holding instead of depending on what the previous run left on the
+        // host. Trailing bytes after an ELF are ignored, so the copy still runs.
         let copy = FileManager.default.temporaryDirectory
             .appendingPathComponent("pigeon-host-e2e-\(UUID().uuidString)")
-        try (Data(contentsOf: artifact) + Data("\n".utf8)).write(to: copy)
+        try (Data(contentsOf: artifact) + Data(UUID().uuidString.utf8)).write(to: copy)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: copy.path)
         defer { try? FileManager.default.removeItem(at: copy) }
 

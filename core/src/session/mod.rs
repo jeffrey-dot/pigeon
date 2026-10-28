@@ -108,6 +108,18 @@ impl PaneState {
         self.seq
     }
 
+    /// The screen scrolled `offset` lines into the history, and the offset the terminal
+    /// actually applied (clamped to the history there is).
+    pub fn scroll_message(&mut self, offset: usize) -> (Message, usize) {
+        let snapshot = self.term.snapshot();
+        let applied = offset.min(snapshot.history.len());
+        let view = snapshot.scrolled(applied);
+        (
+            message_from_snapshot(self.pane_id, self.next_seq(), &view, false),
+            applied,
+        )
+    }
+
     /// Full picture for `attach`. `with_history` follows the negotiated
     /// `scrollback` capability.
     pub fn snapshot_message(&mut self, with_history: bool) -> Message {

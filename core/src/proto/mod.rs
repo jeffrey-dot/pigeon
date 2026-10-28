@@ -288,6 +288,12 @@ pub enum Message {
         cols: u16,
         rows: u16,
     },
+    /// Look back into the scrollback (protocol §3.3): a negative `offset` moves that many
+    /// lines into history, `0` returns to the live screen.
+    Scroll {
+        pane_id: u32,
+        offset: i32,
+    },
     /// Zoom one pane to the whole window (protocol §3.2).
     ZoomPane {
         id: u32,
@@ -362,6 +368,7 @@ impl Message {
             Self::Appearance { .. } => "appearance",
             Self::Keys { .. } => "keys",
             Self::ResizePane { .. } => "resize_pane",
+            Self::Scroll { .. } => "scroll",
             Self::ZoomPane { .. } => "zoom_pane",
             Self::Unzoom { .. } => "unzoom",
             Self::SizeState { .. } => "size_state",
@@ -457,6 +464,7 @@ fn is_known(tag: &str) -> bool {
             | "appearance"
             | "keys"
             | "resize_pane"
+            | "scroll"
             | "zoom_pane"
             | "unzoom"
             | "size_state"
@@ -652,6 +660,10 @@ mod tests {
                 rows: 40,
                 source: "latest".into(),
                 clients: 2,
+            },
+            Message::Scroll {
+                pane_id: 1,
+                offset: -5,
             },
             Message::ZoomPane { id: 7, pane_id: 1 },
             Message::Unzoom { id: 8, pane_id: 1 },
@@ -933,6 +945,10 @@ mod tests {
     #[test]
     fn zoom_messages_round_trip() {
         for message in [
+            Message::Scroll {
+                pane_id: 1,
+                offset: -5,
+            },
             Message::ZoomPane { id: 7, pane_id: 1 },
             Message::Unzoom { id: 8, pane_id: 1 },
         ] {

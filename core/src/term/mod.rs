@@ -67,6 +67,35 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
+    /// The screen as it looks scrolled back `offset` lines: history above, the live screen
+    /// below. Offset 0 is the live view. Used by the host to answer `scroll` — the client
+    /// never gets the whole history over the wire, so a 10k-line backlog costs one screen.
+    pub fn scrolled(&self, offset: usize) -> Self {
+        let mut view = self.clone();
+        let history = self.history.len();
+        let offset = offset.min(history);
+        if offset == 0 {
+            return view;
+        }
+        // Line `i` of the view is history line `start + i`, or — once those run out — line
+        // `start + i - history` of the live screen. That keeps the window exactly `rows` tall
+        // at every offset, including the very top of the backlog.
+        let start = history - offset;
+        view.screen = (0..self.rows as usize)
+            .map(|i| {
+                let line = start + i;
+                if line < history {
+                    self.history[line].clone()
+                } else {
+                    self.screen[line - history].clone()
+                }
+            })
+            .collect();
+        // The cursor belongs to the live screen; drawing it over history would lie.
+        view.cursor.visible = false;
+        view
+    }
+
     /// Compares the visible grid only; used by the reconnect tests.
     pub fn same_screen(&self, other: &Self) -> bool {
         self.cols == other.cols
@@ -356,6 +385,40 @@ mod tests {
             "oldest line first, got {first:?}"
         );
         assert_eq!(snap.history[0].len(), 20, "history rows are full width");
+    }
+
+    #[test]
+    fn scrolling_back_shows_history_above_the_live_screen() {
+        let mut t = term();
+        for line in 1..=30 {
+            t.feed(format!("line {line}\r\n").as_bytes());
+        }
+        let live = t.snapshot();
+        assert!(!live.history.is_empty(), "30 lines through a 5-row screen");
+
+        let back = live.scrolled(2);
+        let expected_top = live.history[live.history.len() - 2].clone();
+        assert_eq!(
+            back.screen[0], expected_top,
+            "the newest history row is on top"
+        );
+        assert_eq!(back.screen[2], live.screen[0], "the live screen follows");
+        assert!(!back.cursor.visible, "no cursor over history");
+        assert_eq!(
+            back.screen.len(),
+            live.rows as usize,
+            "the view is still a screen"
+        );
+
+        // The live view is untouched, and a huge offset is clamped to the history there is.
+        assert_eq!(live.scrolled(0).screen, live.screen);
+        assert!(live.cursor.visible == live.cursor.visible);
+        let far = live.scrolled(usize::MAX);
+        assert_eq!(
+            far.screen[0],
+            live.history[0].clone(),
+            "scrolling far back stops at the oldest line kept"
+        );
     }
 
     #[test]

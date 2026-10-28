@@ -68,7 +68,7 @@
 | c→s | `attach` | `id: u32`, `pane_id: u32` | `size_policy: str` | `size_policy` ∈ `latest`(默认)/`smallest`/`locked` |
 | s→c | `snapshot` | `pane_id: u32`, `seq: u32`, `cols: u16`, `rows: u16`, `alt: bool`, `cursor: {x: u16, y: u16, visible: bool, shape: u8}`, `scroll: {top: u16, bottom: u16}`, `screen: [[cell]]` | `history: [[cell]]`, `links: [{id: u32, uri: str}]` | 全量；`screen` 必须恰好 `rows` 行 × `cols` 列；`history` 仅在 `scrollback` 能力协商成功时出现；`links` 仅在至少一个 `cell.link` 非 0 时出现 |
 | s→c | `delta` | `pane_id: u32`, `seq: u32`, `rows: [{y: u16, cells: [cell]}]` | `cursor: {x: u16, y: u16, visible: bool, shape: u8}`, `scroll: {top: u16, bottom: u16}`, `links: [{id: u32, uri: str}]` | 只含脏行；`cells` 长度必须等于 `cols`；`cursor`/`scroll` 的字段与 `snapshot` 同名同型 |
-| c→s | `scroll` | `pane_id: u32`, `offset: i32` | — | 负 = 往历史看（`-1` = 上滚一行）；`0` 回到底部 |
+| c→s | `scroll` | `pane_id: u32`, `offset: i32` | — | 负 = 往历史看（`-1` = 上滚一行）；`0` 回到底部。宿主按**每连接**记住位置，回一帧该位置的 `snapshot`（不带 `history`）；回看期间该 pane 不再推实时帧，`offset: 0` 才恢复 |
 
 - `seq` 每个 pane 单调递增，从 1 开始。客户端收到 `seq != last + 1` → 丢掉增量、重新 `attach`。
 - `cursor.shape`：`0` 方块、`1` 下划线、`2` 竖线。
@@ -78,6 +78,7 @@
   - 颜色：`0x01000000 | idx` 表示调色板索引；否则按 `0xRRGGBB`。
   - `link` 缺省 = 无超链接；非 0 时指向同一帧 `links` 表里的 `id`（`links` 随该帧的 `snapshot`/`delta` 下发）。
 - 同一 `pane_id` 的 `snapshot` 会把该客户端的 `seq` 基准重置。
+- `scroll` 的 offset 是**相对当前位置的增量**（除了 `0` 表示“回到底部”），宿主把它夹在 `[0, history_len]`，所以多按几次 PageUp 不会越界；窗口各自回看，互不影响。
 - `history` 只在 `snapshot` 里出现（即时序上跟 `attach` 走）；增量帧不带历史。客户端要回看时重新 `attach` 拿最新历史——快照里的 `history` 与同一帧的 `screen` 是连续的，拼起来没有缝。
 - 宿主按单帧上限（8 MB）裁剪历史：超宽 pane 上只发最新的若干行，旧的丢掉而不是让 `attach` 失败。客户端不能假定「`history` 一定包含全部历史」。
 - `layout.tree` 用 `{leaf: 0}` 表示「这个 session 已经没有 pane 了」（pane id 从 1 开始）。

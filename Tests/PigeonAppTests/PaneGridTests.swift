@@ -24,17 +24,14 @@ final class PaneGridTests: XCTestCase {
         XCTAssertEqual(PaneView.gridSize(for: CGSize(width: 979, height: 647), cellSize: cell)?.rows, 35)
     }
 
-    func testScrollingIsClampedToTheHistoryThePaneHolds() {
-        XCTAssertEqual(PaneView.clampedOffset(-5, historyLines: 100), 0, "wheel down stops at the live grid")
-        XCTAssertEqual(PaneView.clampedOffset(20, historyLines: 100), 20)
-        XCTAssertEqual(PaneView.clampedOffset(500, historyLines: 100), 100, "no scrolling past the oldest line")
-        XCTAssertEqual(PaneView.clampedOffset(5, historyLines: 0), 0)
-    }
-
-    func testTheAlternateScreenNeverScrolls() {
-        XCTAssertFalse(PaneView.canScroll(alt: true, historyLines: 500), "vim/htop own the screen")
-        XCTAssertFalse(PaneView.canScroll(alt: false, historyLines: 0), "no history, nothing to show")
-        XCTAssertTrue(PaneView.canScroll(alt: false, historyLines: 500))
+    /// The pane no longer keeps history: it asks the host to look back, so the only rule
+    /// left here is that an upward wheel becomes a "look back" request of the right size.
+    func testWheelDirectionBecomesAScrollRequest() {
+        // A line-based wheel already reports lines; a precise (trackpad) one reports pixels.
+        let up = PaneView.wheelLines(deltaY: 1, precise: false, cellHeight: 18, remainder: 0)
+        XCTAssertEqual(up.lines, 1, "wheel up moves one line into history")
+        let down = PaneView.wheelLines(deltaY: -3, precise: false, cellHeight: 18, remainder: 0)
+        XCTAssertEqual(down.lines, -3, "wheel down moves forward")
     }
 
     func testTrackpadPixelsAccumulateIntoWholeLines() {

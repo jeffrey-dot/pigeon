@@ -16,8 +16,10 @@ final class SplitContainerView: NSView {
     var onPaneResize: ((UInt32, UInt16, UInt16) -> Void)?
     /// ⌘⇧↩: zoom the focused pane, or unzoom it when it already fills the window.
     var onToggleZoom: (() -> Void)?
-    /// The pane needs a fresh scrollback: the owner re-attaches that pane (protocol §3.3).
-    var onPaneHistory: ((UInt32) -> Void)?
+    /// Look back (positive) or forward (negative) in a pane's history, and the "back to the
+    /// live screen" request (protocol §3.3 `scroll`).
+    var onPaneScroll: ((UInt32, Int) -> Void)?
+    var onPaneScrollBottom: ((UInt32) -> Void)?
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -56,7 +58,8 @@ final class SplitContainerView: NSView {
         view.paneID = id
         view.onInput = { [weak self] bytes in self?.onPaneInput?(id, bytes) }
         view.onResize = { [weak self] cols, rows in self?.onPaneResize?(id, cols, rows) }
-        view.onNeedHistory = { [weak self] pane in self?.onPaneHistory?(pane) }
+        view.onScroll = { [weak self] lines in self?.onPaneScroll?(id, lines) }
+        view.onScrollToBottom = { [weak self] in self?.onPaneScrollBottom?(id) }
         addSubview(view)
         return view
     }

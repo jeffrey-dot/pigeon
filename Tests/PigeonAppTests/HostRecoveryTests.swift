@@ -30,6 +30,11 @@ final class HostRecoveryTests: XCTestCase {
         XCTAssertFalse(HostRecovery.canRetry(after: HostRecovery.attempts + 1))
     }
 
+    func testALostRemoteSessionIsRecoveredByReprobingSsh() {
+        XCTAssertEqual(HostRecovery.plan(hasRemote: true), .remote)
+        XCTAssertEqual(HostRecovery.plan(hasRemote: false), .local)
+    }
+
     func testTheHelpTextNamesTheRealCommand() {
         XCTAssertTrue(HostRecovery.startCommand.contains("--bin pigeon-host"))
     }
