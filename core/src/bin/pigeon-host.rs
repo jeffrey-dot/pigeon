@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
 use tokio::time::{interval, MissedTickBehavior};
@@ -151,6 +151,19 @@ enum Cmd {
     SetPalette(Option<Palette>),
 }
 
+/// How clients reach this host (docs/remote.md §2).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Transport {
+    /// Unix socket only: the local, always-on case.
+    Socket,
+    /// Socket *and* stdin/stdout: how a remote host is started over `ssh`, so the same
+    /// process serves the ssh channel now and later bridges from the socket.
+    Stdio,
+    /// Bridge stdin/stdout to an already running host. `ssh host pigeon-host --proxy` makes
+    /// the ssh channel the transport; this mode knows nothing about the protocol.
+    Proxy,
+}
+
 fn main() -> ExitCode {
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -174,13 +187,18 @@ fn main() -> ExitCode {
 async fn run() -> Result<(), String> {
     let mut socket = default_socket_path();
     let mut shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_owned());
+    let mut transport = Transport::Socket;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--socket" => socket = PathBuf::from(args.next().ok_or("--socket needs a path")?),
             "--shell" => shell = args.next().ok_or("--shell needs a path")?,
+            "--stdio" => transport = Transport::Stdio,
+            "--proxy" => transport = Transport::Proxy,
             "-h" | "--help" => {
-                println!("usage: pigeon-host [--socket PATH] [--shell PATH]");
+                println!("usage: pigeon-host [--socket PATH] [--shell PATH] [--stdio|--proxy]");
+                println!("  --stdio  also serve one client on stdin/stdout (start a remote host)");
+                println!("  --proxy  bridge stdin/stdout to a running host's socket");
                 return Ok(());
             }
             other => return Err(format!("unknown argument: {other}")),
@@ -193,6 +211,10 @@ async fn run() -> Result<(), String> {
     // Before a client speaks, answer colour queries with harp's built-in dark theme.
     let palette: PaletteSlot = Arc::new(std::sync::Mutex::new(Some(Palette::default_dark())));
 
+    if transport == Transport::Proxy {
+        return proxy(&socket).await;
+    }
+
     if std::fs::metadata(&socket).is_ok_and(|meta| meta.file_type().is_socket()) {
         let _ = std::fs::remove_file(&socket);
     }
@@ -201,6 +223,23 @@ async fn run() -> Result<(), String> {
     std::fs::set_permissions(&socket, Permissions::from_mode(0o700))
         .map_err(|error| format!("chmod {socket:?}: {error}"))?;
     eprintln!("pigeon-host listening on {}", socket.display());
+
+    if transport == Transport::Stdio {
+        // One extra client on this process's stdio. When the ssh channel closes the client
+        // goes away and the host keeps serving the socket: that is what makes a remote host
+        // outlive the window that started it.
+        let sessions = Arc::clone(&sessions);
+        let events = events.clone();
+        let meta = Arc::clone(&meta);
+        let palette = Arc::clone(&palette);
+        let shell = shell.clone();
+        tokio::spawn(async move {
+            let stdio = tokio::io::join(tokio::io::stdin(), tokio::io::stdout());
+            if let Err(error) = handle_client(stdio, sessions, events, meta, palette, shell).await {
+                eprintln!("pigeon-host: stdio client gone: {error}");
+            }
+        });
+    }
 
     loop {
         let (stream, _) = match listener.accept().await {
@@ -237,14 +276,17 @@ struct ClientState {
     delta_ok: bool,
 }
 
-async fn handle_client(
-    stream: UnixStream,
+async fn handle_client<S>(
+    stream: S,
     sessions: Sessions,
     events: broadcast::Sender<Event>,
     meta: Meta,
     palette: PaletteSlot,
     shell: String,
-) -> Result<(), String> {
+) -> Result<(), String>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
     let client_id = NEXT_CLIENT.fetch_add(1, Ordering::Relaxed);
     let result = client_loop(
         stream, &sessions, &events, &meta, &palette, &shell, client_id,
@@ -257,16 +299,19 @@ async fn handle_client(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn client_loop(
-    stream: UnixStream,
+async fn client_loop<S>(
+    stream: S,
     sessions: &Sessions,
     events: &broadcast::Sender<Event>,
     meta: &Meta,
     palette: &PaletteSlot,
     shell: &str,
     client_id: u32,
-) -> Result<(), String> {
-    let (mut reader, mut writer) = stream.into_split();
+) -> Result<(), String>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let (mut reader, mut writer) = tokio::io::split(stream);
     let mut inbox = Vec::new();
     let mut subscribed = events.subscribe();
     let mut state = ClientState {
@@ -1206,15 +1251,32 @@ fn flush(pane: &mut PaneState, events: &broadcast::Sender<Event>) {
     }
 }
 
-async fn send(
-    writer: &mut tokio::net::unix::OwnedWriteHalf,
-    message: &Message,
-) -> Result<(), String> {
+async fn send<S>(writer: &mut tokio::io::WriteHalf<S>, message: &Message) -> Result<(), String>
+where
+    S: AsyncWrite + Unpin,
+{
     let frame = proto::encode_frame(message).map_err(|error| format!("encode: {error}"))?;
     writer
         .write_all(&frame)
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    // tokio's stdout is buffered; without this a `--stdio` client would wait for a frame
+    // that is still sitting in the writer.
+    writer.flush().await.map_err(|error| error.to_string())
+}
+
+/// Bridges stdin/stdout to a running host. Frames are opaque bytes here on purpose: the
+/// bridge must not care which protocol version the two ends agreed on.
+async fn proxy(socket: &std::path::Path) -> Result<(), String> {
+    let stream = UnixStream::connect(socket)
+        .await
+        .map_err(|error| format!("cannot reach {}: {error}", socket.display()))?;
+    let mut stdio = tokio::io::join(tokio::io::stdin(), tokio::io::stdout());
+    let mut stream = stream;
+    tokio::io::copy_bidirectional(&mut stdio, &mut stream)
+        .await
+        .map_err(|error| format!("proxy failed: {error}"))?;
+    Ok(())
 }
 
 fn type_tag(buf: &[u8]) -> Option<String> {

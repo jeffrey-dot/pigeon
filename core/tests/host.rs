@@ -39,8 +39,8 @@ fn start_host() -> Host {
     start_host_with(quiet.to_str().expect("utf8"))
 }
 
-fn start_host_with(program: &str) -> Host {
-    // Tests run in parallel: pid + counter + clock keeps socket paths unique.
+/// Tests run in parallel: pid + counter + clock keeps socket paths unique.
+fn unique_socket() -> String {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let counter = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let stamp = std::time::SystemTime::now()
@@ -50,6 +50,11 @@ fn start_host_with(program: &str) -> Host {
     let unique = format!("pigeon-test-{}-{counter}-{stamp}", std::process::id());
     let socket = format!("/tmp/{unique}.sock");
     let _ = std::fs::remove_file(&socket);
+    socket
+}
+
+fn start_host_with(program: &str) -> Host {
+    let socket = unique_socket();
     let child = Command::new(env!("CARGO_BIN_EXE_pigeon-host"))
         .args(["--socket", &socket, "--shell", program])
         .stdout(Stdio::null())
@@ -72,29 +77,95 @@ fn start_host_with(program: &str) -> Host {
     panic!("host never created its socket");
 }
 
+/// A host started the way a remote one is: `--stdio` serves this process's stdio and keeps
+/// the socket for later `--proxy` clients (docs/remote.md §2).
+fn start_stdio_host() -> (Host, Client) {
+    let quiet = script("#!/bin/sh\nexec env PS1= /bin/sh -i\n");
+    let socket = unique_socket();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_pigeon-host"))
+        .args([
+            "--stdio",
+            "--socket",
+            &socket,
+            "--shell",
+            quiet.to_str().expect("utf8"),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(if std::env::var_os("PIGEON_DEBUG").is_some() {
+            Stdio::inherit()
+        } else {
+            Stdio::null()
+        })
+        .spawn()
+        .expect("spawn pigeon-host --stdio");
+    let stdin = child.stdin.take().expect("stdin");
+    let stdout = child.stdout.take().expect("stdout");
+    let host = Host {
+        child,
+        socket: socket.clone(),
+    };
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if std::path::Path::new(&host.socket).exists() {
+            return (host, Client::new(Box::new(stdout), Box::new(stdin)));
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    panic!("host never created its socket");
+}
+
+/// Kills a helper process (the proxy) when the test ends.
+struct Guard(Child);
+
+impl Drop for Guard {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 struct Client {
-    stream: UnixStream,
+    writer: Box<dyn Write + Send>,
+    /// Bytes the transport delivered; a thread reads them so both a socket and a child's
+    /// pipe can be driven the same way (a pipe has no read timeout to fall back on).
+    incoming: std::sync::mpsc::Receiver<Vec<u8>>,
     buffer: Vec<u8>,
     /// Last snapshot grid, kept so a timeout can show what the pane actually said.
     last_screen: String,
 }
 
 impl Client {
-    fn connect(socket: &str) -> Self {
-        let stream = UnixStream::connect(socket).expect("connect");
-        stream
-            .set_read_timeout(Some(Duration::from_secs(15)))
-            .expect("timeout");
+    fn new(mut reader: Box<dyn Read + Send>, writer: Box<dyn Write + Send>) -> Self {
+        let (tx, incoming) = std::sync::mpsc::channel();
+        std::thread::spawn(move || loop {
+            let mut chunk = [0u8; 4096];
+            match reader.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(count) => {
+                    if tx.send(chunk[..count].to_vec()).is_err() {
+                        break;
+                    }
+                }
+            }
+        });
         Self {
-            stream,
+            writer,
+            incoming,
             buffer: Vec::new(),
             last_screen: String::new(),
         }
     }
 
+    fn connect(socket: &str) -> Self {
+        let stream = UnixStream::connect(socket).expect("connect");
+        let writer = stream.try_clone().expect("clone the socket for writing");
+        Self::new(Box::new(stream), Box::new(writer))
+    }
+
     fn send(&mut self, message: &Message) {
         let frame = proto::encode_frame(message).expect("encode");
-        self.stream.write_all(&frame).expect("write");
+        self.writer.write_all(&frame).expect("write");
     }
 
     /// Reads until a message matching `want` arrives, ignoring the rest.
@@ -109,18 +180,13 @@ impl Client {
                 "timed out waiting for a message; last screen:\n{}",
                 self.last_screen
             );
-            let mut chunk = [0u8; 4096];
-            match self.stream.read(&mut chunk) {
-                Ok(0) => panic!("host closed the connection"),
-                Ok(count) => self.buffer.extend_from_slice(&chunk[..count]),
-                Err(error)
-                    if error.kind() == std::io::ErrorKind::WouldBlock
-                        || error.kind() == std::io::ErrorKind::TimedOut =>
-                {
-                    // Nothing yet; the loop deadline decides when to give up.
-                    continue;
+            match self.incoming.recv_timeout(Duration::from_millis(20)) {
+                Ok(chunk) => self.buffer.extend_from_slice(&chunk),
+                // Nothing yet; the loop deadline decides when to give up.
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    panic!("host closed the connection")
                 }
-                Err(error) => panic!("read failed: {error}"),
             }
         }
     }
@@ -383,7 +449,7 @@ fn unknown_message_gets_unsupported_and_the_connection_survives() {
     ciborium::into_writer(&payload, &mut body).expect("encode");
     let mut frame = (body.len() as u32).to_le_bytes().to_vec();
     frame.extend_from_slice(&body);
-    client.stream.write_all(&frame).expect("write");
+    client.writer.write_all(&frame).expect("write");
 
     let reply = client.wait_for(|m| matches!(m, Message::Unsupported { .. }));
     let Message::Unsupported { t_of } = reply else {
@@ -507,6 +573,58 @@ fn pty_size(client: &mut Client, pane: u32) -> String {
         })
         .unwrap_or_default()
         .to_owned()
+}
+
+/// `--stdio`: the client on this process's stdin/stdout is a normal client, and the socket
+/// the same process binds stays usable — that is how a remote host outlives the window that
+/// started it.
+#[test]
+fn stdio_mode_serves_a_client_and_keeps_the_socket_for_later() {
+    let _serial = one_at_a_time();
+    let (host, mut client) = start_stdio_host();
+    hello(&mut client);
+    let pane = attach_first(&mut client);
+
+    // The socket sees the session the stdio client created.
+    let mut later = Client::connect(&host.socket);
+    hello(&mut later);
+    later.send(&Message::Sessions { items: Vec::new() });
+    let Message::Sessions { items } = later.wait_for(|m| matches!(m, Message::Sessions { .. }))
+    else {
+        unreachable!()
+    };
+    assert!(
+        items.iter().any(|session| session.panes.contains(&pane)),
+        "the session created over stdio is visible on the socket: {items:?}"
+    );
+}
+
+/// `--proxy`: the ssh bridge forwards the frames untouched, so the host behind it is
+/// indistinguishable from a local one.
+#[test]
+fn proxy_mode_bridges_stdio_to_a_running_host() {
+    let _serial = one_at_a_time();
+    let host = start_host();
+    let mut proxy = Command::new(env!("CARGO_BIN_EXE_pigeon-host"))
+        .args(["--proxy", "--socket", &host.socket])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn pigeon-host --proxy");
+    let stdin = proxy.stdin.take().expect("stdin");
+    let stdout = proxy.stdout.take().expect("stdout");
+    let _guard = Guard(proxy);
+    let mut client = Client::new(Box::new(stdout), Box::new(stdin));
+
+    hello(&mut client);
+    let pane = attach_first(&mut client);
+    // The command is echoed, so wait for its *result*: 6 * 7 shows up only as output.
+    client.send(&Message::Keys {
+        pane_id: pane,
+        bytes: b"echo $((6*7))\r".to_vec(),
+    });
+    wait_for_pane_text(&mut client, pane, "42");
 }
 
 /// Protocol §6 `smallest`: two windows of different sizes get the smaller box, and both
