@@ -65,16 +65,31 @@ final class PaneView: NSView {
         syncGrid()
     }
 
+    /// The grid a view of `bounds` can hold, or `nil` when it has no usable size yet.
+    ///
+    /// Pure so the rule is testable: a view that has not been laid out must never report a
+    /// grid. Forwarding a degenerate size to the host resizes the terminal to 2×1 and throws
+    /// its screen away, and an idle TUI never repaints — the pane would stay blank for good.
+    static func gridSize(
+        for bounds: CGSize,
+        cellSize: CGSize = CoreTextRenderer.cellSize()
+    ) -> (cols: UInt16, rows: UInt16)? {
+        guard cellSize.width > 0, cellSize.height > 0 else { return nil }
+        let columns = Int(bounds.width / cellSize.width)
+        let lines = Int(bounds.height / cellSize.height)
+        guard columns >= 2, lines >= 1,
+              columns <= Int(UInt16.max), lines <= Int(UInt16.max)
+        else { return nil }
+        return (UInt16(columns), UInt16(lines))
+    }
+
     func syncGrid() {
-        let size = CoreTextRenderer.cellSize()
-        let newCols = UInt16(max(Int(bounds.width / size.width), 2))
-        let newRows = UInt16(max(Int(bounds.height / size.height), 1))
         // Only the *requested* size changes here. `cols`/`rows` describe the
         // cells we hold, and those must keep matching until the host answers
         // with a new snapshot — otherwise the renderer walks off the grid.
-        guard (newCols, newRows) != reported else { return }
-        reported = (newCols, newRows)
-        onResize?(newCols, newRows)
+        guard let grid = Self.gridSize(for: bounds.size), grid != reported else { return }
+        reported = grid
+        onResize?(grid.cols, grid.rows)
     }
 
     func apply(snapshot: UnsafePointer<PgSnapshot>) {
@@ -116,8 +131,22 @@ final class PaneView: NSView {
             let first = cells.prefix(40).map { cell -> Character in
                 Unicode.Scalar(cell.codepoint).map(Character.init) ?? " "
             }
+            // Blank-pane diagnosis: how many cells carry a glyph, and the last such row.
+            let filled = cells.reduce(into: 0) { count, cell in
+                if cell.codepoint != 0, cell.codepoint != 32 { count += 1 }
+            }
+            var lastRow = -1
+            if cols > 0 {
+                for row in stride(from: rows - 1, through: 0, by: -1) {
+                    let slice = cells[row * cols ..< min((row + 1) * cols, cells.count)]
+                    if slice.contains(where: { $0.codepoint != 0 && $0.codepoint != 32 }) {
+                        lastRow = row
+                        break
+                    }
+                }
+            }
             FileHandle.standardError.write(
-                Data("pigeon: grid pane=\(paneID ?? 0) \(cols)x\(rows) cursor=\(cursor.x),\(cursor.y) row0=\(String(first))\n".utf8)
+                Data("pigeon: grid pane=\(paneID ?? 0) \(cols)x\(rows) cursor=\(cursor.x),\(cursor.y) filled=\(filled) lastRow=\(lastRow) row0=\(String(first))\n".utf8)
             )
         }
         needsDisplay = true

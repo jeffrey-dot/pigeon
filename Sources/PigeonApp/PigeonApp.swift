@@ -118,16 +118,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             container.trailingAnchor.constraint(equalTo: contentBox.trailingAnchor),
             container.bottomAnchor.constraint(equalTo: contentBox.bottomAnchor),
         ])
-        let cardBody = NSStackView(views: [header, contentBox])
-        cardBody.orientation = .vertical
-        cardBody.spacing = 0
-        card.addSubview(cardBody)
-        cardBody.translatesAutoresizingMaskIntoConstraints = false
+        // Explicit constraints instead of a stack view: the content box has no intrinsic
+        // height, so a vertical stack gave it zero and the terminal never got a size.
+        card.addSubview(header)
+        card.addSubview(contentBox)
+        contentBox.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            cardBody.topAnchor.constraint(equalTo: card.topAnchor),
-            cardBody.leadingAnchor.constraint(equalTo: card.leadingAnchor),
-            cardBody.trailingAnchor.constraint(equalTo: card.trailingAnchor),
-            cardBody.bottomAnchor.constraint(equalTo: card.bottomAnchor),
+            header.topAnchor.constraint(equalTo: card.topAnchor),
+            header.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            contentBox.topAnchor.constraint(equalTo: header.bottomAnchor),
+            contentBox.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            contentBox.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            contentBox.bottomAnchor.constraint(equalTo: card.bottomAnchor),
         ])
         // The gutter around the card is the sidebar's surface, so the card looks lifted.
         let gutter = SidebarBackgroundView()
@@ -260,6 +263,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }, type: PG_MSG_HELLO)
     }
 
+    private func debugLog(_ text: String) {
+        guard ProcessInfo.processInfo.environment["PIGEON_DEBUG"] != nil else { return }
+        FileHandle.standardError.write(Data("pigeon: \(text)\n".utf8))
+    }
+
     private func requestSessions() {
         send({ _ in }, type: PG_MSG_SESSIONS)
     }
@@ -271,8 +279,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }, type: PG_MSG_NEW_SESSION)
     }
 
-    private func sendAttach(_ pane: UInt32) {
-        guard !haveSnapshot.contains(pane), requested.insert(pane).inserted else { return }
+    /// Attaching is also how the host learns which session this window follows: it switches
+    /// `state.session` to that session and replies with its layout + snapshot. The startup pass
+    /// attaches every session (for the sidebar's status), so selecting a session has to force
+    /// a re-attach — otherwise the host keeps following whichever session it attached last and
+    /// the window never receives the selected session's layout.
+    private func sendAttach(_ pane: UInt32, force: Bool = false) {
+        guard pane != 0 else { return }
+        if !force, haveSnapshot.contains(pane) || !requested.insert(pane).inserted { return }
         send({ message in
             Wire.set(message, u32: "id", requestID())
             Wire.set(message, u32: "pane_id", pane)
@@ -342,9 +356,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func select(_ id: Int) {
         guard let row = rows[id] else { return }
+        debugLog("select id=\(id) activePane=\(row.activePane) panes=\(row.panes)")
         selectedSession = id
         focusedPane = row.activePane
-        for pane in row.panes { sendAttach(pane) }
+        for pane in row.panes { sendAttach(pane, force: true) }
         send({ message in Wire.set(message, u32: "pane_id", row.activePane) }, type: PG_MSG_FOCUS)
         if var current = rows[id] {
             current.unread = 0
@@ -490,6 +505,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case PG_MSG_LAYOUT:
             guard let model = LayoutModel(message: message) else { break }
             let sessionID = Int(Wire.u32(message, "session_id"))
+            debugLog("layout session=\(sessionID) selected=\(selectedSession.map(String.init) ?? "-") panes=\(model.panes.map(\.id))")
             if var row = rows[sessionID] {
                 if model.focus != 0 { row.activePane = model.focus }
                 rows[sessionID] = row

@@ -130,6 +130,24 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
    从来不会更新它，于是界面上写着“Idle”，时间其实是这一行刚出现的时间。改为 `SidebarSession.reported`
    （来自 `status.seq > 0`）：没有记录就不画徽标、不画时间。
 
+10. **卡片里的终端容器算出零高度**：卡片改成 `header + 内容` 的垂直 `NSStackView` 后，`contentBox` 没有固有高度，
+   栈把它排成 0 —— 终端视图拿不到尺寸，pane 里只有卡片底色。修法：改成显式约束（header 贴顶固定 40pt，
+    内容接在 header 下方撑满），终端内容再在卡片内左缩 32pt。证据：修前日志里有 `grid pane=2 2x1 cursor=0,0`。
+11. **`syncGrid()` 把退化尺寸发给宿主，导致整屏内容被 resize 丢弃**：`PaneView.syncGrid()` 原来是
+    `max(2, width/cols)`，视图还没布局时也会上报 **2×1**；宿主据此把该 pane 的终端 resize 到 2×1，
+    内容就此丢掉。重排回来的尺寸只是“格子变大”，**不会把旧内容变回来**；纯 shell 会因 SIGWINCH 重画提示符，
+    而空闲的 TUI（这里的 `pi`）不会重绘，于是 `π - core` 那个 pane 一直空白、光标停在第 30 行。
+    证据：`grid pane=2 97x36 cursor=0,30 filled=0 lastRow=-1`（整屏 0 个字形），同一时刻 `pane=1 filled=26`；
+    手动把窗口缩小再放大触发 SIGWINCH 后恢复成 `filled=1421 lastRow=35`。修法：判定抽成纯函数
+    `PaneView.gridSize(for:cellSize:)`，`<2` 列 / `<1` 行 / 零 cellSize 一律返回 `nil`，不上报；
+    `PaneGridTests` 有四个反例 + 一个正例。
+12. **点侧栏行不切换右栏内容**：协议里 `attach` 同时是“这个窗口跟随哪个 session”的声明（宿主收到后把
+    `state.session` 切过去，并回推 `layout` + `snapshot`）。客户端启动时给每个 session 的活跃 pane 都 attach
+    （为了侧栏状态），宿主最后跟的是**最后 attach 的那个**；而 `sendAttach` 有“attached 过就不再发”的去重，
+    点别的行时什么都没发出去 → 没有该 session 的 `layout`，右栏保持原样。证据：修前只有 `select id=3`，
+    没有对应的 `layout session=3`。修法：`sendAttach(_:force:)`，`select()` 对目标 session 强制重 attach；
+    修后日志成对出现 —— `select id=3 activePane=3 panes=[3]` → `layout session=3 selected=3 panes=[3]`。
+
 ## 5. 未验
 
 | 项 | 说明 |
