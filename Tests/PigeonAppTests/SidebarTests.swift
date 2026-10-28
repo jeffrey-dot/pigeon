@@ -170,6 +170,17 @@ final class SidebarOrderingTests: XCTestCase {
         XCTAssertEqual(SidebarModel.ageText(for: shared, now: now), "2× latest")
     }
 
+    func testAGroupIsPinnedWhenTheSessionAppears() {
+        // The first cwd decides the group; a later `cd` must not move the row.
+        XCTAssertEqual(Grouping.pinnedGroup(existing: "api", cwd: "/Users/x/dev/y"), "api")
+        XCTAssertEqual(Grouping.pinnedGroup(existing: nil, cwd: "/Users/x/dev"), "dev")
+        XCTAssertEqual(Grouping.pinnedGroup(existing: "", cwd: "/home/x"), "~")
+        XCTAssertEqual(Grouping.pinnedGroup(existing: nil, cwd: ""), "~")
+        XCTAssertEqual(
+            Grouping.pinnedGroup(existing: nil, cwd: "/home/x/proj/src", gitRoot: "/home/x/proj"),
+            "proj", "a git root still names the group when the session first appears")
+    }
+
     func testHomeDirectoriesBecomeTildeOnEveryPlatform() {
         XCTAssertEqual(Grouping.groupName(forCwd: "/Users/jeffrey"), "~")
         XCTAssertEqual(Grouping.groupName(forCwd: "/home/jeffrey"), "~")

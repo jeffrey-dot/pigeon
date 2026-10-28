@@ -18,6 +18,18 @@ public enum Grouping {
         return lastComponent(cwd)
     }
 
+    /// The group a session belongs to: decided **once**, when the session first appears, and
+    /// left alone afterwards. `cd` must never move a session between the user's groups.
+    public static func pinnedGroup(
+        existing: String?, cwd: String, gitRoot: String? = nil
+    ) -> String {
+        if let existing, !existing.isEmpty {
+            return existing
+        }
+        guard !cwd.isEmpty else { return "~" }
+        return groupName(forCwd: cwd, gitRoot: gitRoot)
+    }
+
     /// `/Users/jeffrey`, `/home/jeffrey`, or a bare `~`.
     public static func isHome(_ path: String) -> Bool {
         let trimmed = path.hasSuffix("/") && path.count > 1

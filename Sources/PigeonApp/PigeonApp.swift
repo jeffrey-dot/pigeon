@@ -20,11 +20,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var clients: Int = 1
         /// Where the session lives; `local` for the host on this machine.
         var host: String = "local"
-
-        var group: String {
-            guard !cwd.isEmpty else { return "~" }
-            return Grouping.groupName(forCwd: cwd, gitRoot: GitRoot.find(cwd: cwd))
-        }
+        /// The user's group, fixed when the session first appeared (`Grouping.pinnedGroup`):
+        /// a `cd` later must not reshuffle the sidebar.
+        var group: String = ""
     }
 
     private var window: NSWindow!
@@ -958,13 +956,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func refreshSidebar() {
         let raw = SidebarModel.sections(sidebarSessions(), order: state.order)
-        let sections = raw.map { section -> (group: String, sessions: [SidebarSession]) in
-            var name = state.renamedGroups[section.group] ?? section.group
-            // The machine's connection state rides on its heading: there is no machine list.
-            if let host = section.sessions.first?.host, host != "local", host == connectingHost {
-                name += " · connecting"
-            }
-            return (group: name, sessions: section.sessions)
+        let sections = raw.map { section in
+            // The heading is the user's group name (plus the machine on remote ones); it must
+            // not gain markers or directory names as the session moves around.
+            (group: state.renamedGroups[section.group] ?? section.group, sessions: section.sessions)
         }
         if ProcessInfo.processInfo.environment["PIGEON_DEBUG"] != nil {
             let needs = SidebarModel.needsYou(sidebarSessions())
@@ -1140,7 +1135,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 lastSeen: previous?.lastSeen ?? Date(),
                 sizeSource: previous?.sizeSource ?? "",
                 clients: previous?.clients ?? 1,
-                host: previous?.host ?? remote?.host ?? "local"
+                host: activeHost,
+                group: Grouping.pinnedGroup(
+                    existing: previous?.group,
+                    cwd: Wire.string(info.cwd),
+                    gitRoot: GitRoot.find(cwd: Wire.string(info.cwd)))
             )
         }
         rows = updated
