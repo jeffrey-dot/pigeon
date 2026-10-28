@@ -191,14 +191,14 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 
 ## 6. CI（GitHub Actions，真跑）
 
-HEAD `9f77d41`（OSC 4/10/11 回答 + 默认深色板 + 侧栏新造型 + 颜色查询只留一条 E2E）的 CI 五作业 success：
+HEAD `bb91fc6`（OSC 4/10/11 回答 + 默认深色板 + 侧栏新造型 + 两条可重放的颜色查询用例）的 CI 五作业 success：
 
-<https://github.com/jeffrey-dot/pigeon/actions/runs/40708106094>
+<https://github.com/jeffrey-dot/pigeon/actions/runs/40710749705>
 
 | 作业 | 结果 |
 |---|---|
 | `docs` | success（相对链接检查） |
-| `rust (ubuntu-latest)` | success（`cargo test` **73 + 11 + 22 = 106 passed**） |
+| `rust (ubuntu-latest)` | success（`cargo test` **73 + 11 + 23 = 107 passed**） |
 | `rust (macos-latest)` | success |
 | `header` | success（cbindgen `diff -u` 为空） |
 | `swift` | success（`swift test` **55 passed**） |
@@ -208,14 +208,18 @@ HEAD `9f77d41`（OSC 4/10/11 回答 + 默认深色板 + 侧栏新造型 + 颜色
 ```sh
 cargo fmt --check                                  # 通过
 cargo clippy --all-targets -- -D warnings          # 通过
-cargo test                                         # 73 + 11 + 22 = 106 passed
+cargo test                                         # 73 + 11 + 23 = 107 passed
 swift build && swift test                          # Build complete / 55 passed
 cargo build --release --bin pigeon-host            # 1,250,800 B（1.19 MiB ≤ 8 MiB）
-cbindgen … --output /tmp/pg9.h && diff -q …        # header: no diff
+cbindgen … --output /tmp/pgA.h && diff -q …        # header: no diff
 ```
 
-颜色查询的唯一端到端用例（0.3s，真宿主 + 真 PTY，shell 自己发 `OSC 11;?` 并打印答复）：
-`a_pane_asks_for_its_background_and_the_host_answers` → 断言 `rgb:0505/0505/0505`（内置 harp 深色板）。
+颜色查询的两条可重放用例（都真宿主 + 真 PTY，无脚本文件、无 TUI）：
+- `a_pane_asks_for_its_background_and_the_host_answers`（0.3s）：空宿主 → 建会话 → shell 自己发
+  `OSC 11;?` 并打印，断言内置深色板 `rgb:0505/0505/0505`。
+- `appearance_reaches_existing_panes_and_a_malformed_one_keeps_the_previous`（1.0s）：发 `appearance`
+  → 已存在的 pane 再问得到 `rgb:ffff/ffff/ffff`；发空 `appearance` → 仍亮色（保留上一次）；
+  `Sessions` 里 session/pane 数不变（未重建）。
 
 历史红记录（避免误读）：`61239d3` 的 `rust (macos-latest)` 因既有用例
 `acked_status_is_not_replayed_after_reconnect` 的 `sleep(200ms)` 抢跑（已改成消息顺序屏障）；
