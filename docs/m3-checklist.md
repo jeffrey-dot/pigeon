@@ -107,7 +107,7 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 |---|---|
 | 协议 | `appearance { fg, bg, ansi[16] }`（c→s，全字段可选）；`docs/protocol.md` §3；往返/缺字段/错长度三条用例在 `core/src/proto/mod.rs` 的测试里 |
 | VT 层 | `colour_queries_are_answered_from_the_client_palette`（`]11;?` → `rgb:ffff/ffff/ffff`、`]10;?` → `rgb:1111/1111/1111`、`]4;1;?` → `rgb:c3c3/0707/7171`）、`colour_queries_stay_silent_without_a_palette`、`cursor_colour_and_unknown_queries_are_not_answered` |
-| 宿主 | 不再用“起宿主 + 真 PTY 跑探针脚本”的端到端用例（慢且抖）：答复的正确性由上面 VT 层单测逐字节钉住，宿主的职责只是把 `Palette` 交给 pane；`Palette::from_rgb` 的长度/缺字段校验与 `Cmd::SetPalette` 分发由 `pigeon-host` 的既有宿主用例回归（不新增探针） |
+| 宿主 | 只保留**一条**端到端用例 `a_pane_asks_for_its_background_and_the_host_answers`：真宿主 + 真 PTY，shell 自己发 `OSC 11;?`、读回 25 字节并打印，断言拿到内置 harp 深色板的 `rgb:0505/0505/0505`（0.3s，不起脚本、不跑 TUI）。其余情形由 VT 层四条单测逐字节覆盖 |
 | 客户端 | `appearance sent fg=111111 bg=ffffff`（`PIGEON_DEBUG` 日志）；启动后一次，此后每次外观切换（⌥⌘A 三态循环 / 系统外观变化，走同一条 `effectiveAppearance` KVO）再发一次 —— 脚本实测三次切换把计数从 1 推到 4 |
 | 缺省 | 客户端还没说话时，宿主用 harp 内置深色板回答（`Palette::default_dark()`，`#050505` / `#ffffff` + `DARK_MODE_*`）；`appearance` 缺字段或色值不是 16 个则保留原答复、不 panic，用例 `colour_queries_fall_back_to_harps_dark_theme`、`a_malformed_appearance_keeps_the_previous_palette` |
 | 对比度兜底 | 协议生效后客户端不再改 TUI 自己选的色：`TerminalPalette.readable` 的阈值降到 **1.2:1**，只拦真正看不见的色（`testTheFloorOnlyRescuesInvisibleText` 断言 harp 亮色黄 `#F3E430` 原样通过） |

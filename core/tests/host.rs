@@ -1213,3 +1213,38 @@ fn clearing_a_status_broadcasts_idle() {
     );
     assert!(matches!(idle, Message::Status { state, .. } if state == "idle"));
 }
+
+/// The one end-to-end case for colour queries: a real host, a real PTY, no TUI and no script
+/// file — the shell itself asks `OSC 11;?` and prints the answer it gets back.
+#[test]
+fn a_pane_asks_for_its_background_and_the_host_answers() {
+    let _serial = one_at_a_time();
+    let host = start_host();
+    let mut client = Client::connect(&host.socket);
+    hello(&mut client);
+    client.send(&Message::NewSession {
+        id: 1,
+        cwd: None,
+        shell: None,
+        env: None,
+    });
+    let Message::Created { pane_id, .. } =
+        client.wait_for(|m| matches!(m, Message::Created { .. }))
+    else {
+        unreachable!()
+    };
+    client.send(&Message::Attach {
+        id: 2,
+        pane_id,
+        size_policy: None,
+    });
+    let _ = snapshot(&mut client);
+    // Query, read the 25-byte reply, print it with the escapes visible (`cat -v`).
+    client.send(&Message::Keys {
+        pane_id,
+        bytes: b"printf '\\033]11;?\\033\\\\'; IFS= read -r -n 25 -t 5 r; printf 'R[%s]' \"$r\" | cat -v\n"
+            .to_vec(),
+    });
+    // No `appearance` was sent: the host answers with its built-in harp dark theme.
+    wait_for_pane_text(&mut client, pane_id, "rgb:0505/0505/0505");
+}
