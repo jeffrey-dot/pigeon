@@ -257,7 +257,7 @@ M0–M1 可以直接复用现有代码：内核的对账语料（来自 tmux 阶
 
 ## 11. 已知缺口
 
-M3 落地后仍在的洞。
+M2 落地后仍在的洞（M2 的验收记录见 `docs/m2-checklist.md`）。
 
 **已关闭**：
 
@@ -265,22 +265,22 @@ M3 落地后仍在的洞。
 |---|---|
 | M0 文档层：`core/`、`Package.swift`、生成的头文件、`cbindgen.toml`、`Tests/`、C ABI 编解码 | 全部落地，见 `docs/m0-checklist.md` |
 | 布局只有单 pane | `core/src/layout/` 的布局树 + `pg_layout_*` 全实现；宿主每 pane 独立 PTY/actor；客户端按 `PgRect` 分屏 |
-| `zoom_pane` / `unzoom` 未实现 | 协议按规范回 `unsupported` 且不断开（解码与宿主各有用例）；UI 见下表 |
-| 多客户端尺寸策略未实现 | 单客户端下由 pane rect 反推会话 box；多客户端的 `size_state` 仍留给 M2 |
-| 程序的颜色查询（OSC 4/10/11） | 客户端通过 `appearance` 把当前色板交给宿主，宿主用 `Event::ColorRequest` 的 formatter 回 `rgb:rrrr/gggg/bbbb`；TUI（pi 等）因此能自己选亮/深主题 | 见 `docs/protocol.md` §3 与 `core/tests/host.rs` 的 `appearance_reaches_existing_panes_and_a_malformed_one_keeps_the_previous` |
+| 滚动回看（翻页） | 客户端持有 offset（未动 ABI）：`PaneView` 存 `history` + `displayOffset`，滚轮（触控板像素累积）、非 alt 屏的 PageUp/PageDown、右侧滚动条、offset>0 时隐藏光标、输入回底；回看前重新 `attach` 取最新历史并冻结该屏，避免流式输出撕开历史/屏幕接缝。宿主侧 `history_window` 按单帧预算裁旧留新 |
+| VT 对账（`tools/vt-parity`） | `run.sh` + `core/examples/vt-dump`：同一段字节喂内核与 tmux `capture-pane` 逐行比较，8 条语料（basic/cursor/erase/wide/scroll-region/alt-screen/insert-delete/wrap）全 ok；`--record` 重录 golden；顺带修掉 tab 占位符漏进快照的真 bug |
+| `zoom_pane` / `unzoom` | 布局树 `zoom` 字段 + 宿主两个 handler + `layout.zoom` 下发；客户端 ⌘⇧↩ 切换、兄弟 pane 隐藏但保活（unzoom 立即还原嵌套比例）；`pg_msg_layout_zoom` 进 C ABI |
+| 多客户端尺寸策略与 `size_state` | 宿主实现 `latest`/`smallest`/`locked`（策略由首个 `attach` 决定、`locked` 只认 owner、`latest` 跟最后一个 focus/keys），每次尺寸变化广播 `size_state{pane_id, cols, rows, source, clients}`；`hello_ack.client_id` 也换成真实的每连接 id。侧栏在 age 位显示 `2× latest`。见 `docs/m2-checklist.md` |
+| 程序的颜色查询（OSC 4/10/11） | 客户端通过 `appearance` 把当前色板交给宿主，宿主用 `Event::ColorRequest` 的 formatter 回 `rgb:rrrr/gggg/bbbb`；TUI（pi 等）因此能自己选亮/深主题；见 `docs/protocol.md` §3 与 `core/tests/host.rs` 的 `appearance_reaches_existing_panes_and_a_malformed_one_keeps_the_previous` |
 | 侧栏（M3） | 已落地：`SidebarModel`/`Grouping`（git 根）+ 侧栏、OSC 7501 `status` 广播 + `ack_status`、OSC 7/标题、未读/needs-you、⌘J/⌘T/⌘⇧W、右键菜单、**行标题=应用名 / 分组可改名 / 不折叠**、排序持久化；视觉按 harp 源码对齐：`docs/ui.md` §7 是从 harp（`/tmp/harp`，AGPL/MIT，只取数值不取代码）提取的色值/尺寸/字号规格表；行高 30、行圆角 8、组头 11.5/橙色 `N need you`、`SIDEBAR #e8e8eb/#232326`、透明标题栏 + 内嵌红绿灯、右栏是一张大卡片（10pt 圆角、0.5pt 描边、投影、三面 8pt 外缩）、40pt 右栏头部，全部是动态色（浅/深各一套）；截图见 `docs/m3-checklist.md` §2.1 的 light/dark 两套 |
 
 **仍在**：
 
 | 缺口 | 现状 | 何时关闭 |
 |---|---|---|
-| `zoom_pane` / `unzoom` 的 UI | 宿主与协议都回 `unsupported`，客户端未绑定快捷键 | M2 |
 | 悬停 `×` 关闭 / 透明标题栏 | `docs/ui.md` §2.1/§2.3 写了，未实现：关闭走右键菜单或 `⌘⇧W`；红绿灯仍在原生标题栏 | 改窗口 chrome（`titlebarAppearsTransparent`）时 |
 | 未上报 session 的相对时间 | 没有 OSC 7501 记录的 session 行尾留空，不拿创建时间冒充“最后活动时间” | 宿主能上报 pane 活动时间时（M4） |
-| `tools/vt-parity/run.sh` 与 golden 语料未建 | 靠 `core/tests/` 的确定性用例兜底 | M2 接真实程序对账时 |
 | OSC 8 超链接被丢弃 | `PgCell.hyperlink_id` 恒为 0，`cell[4]` 不上线 | 需要按链接跳转时 |
-| 滚动回看（翻页） | 内核有 `history`（默认 1 万行），协商 `scrollback` 后 `snapshot.history` 也已下发，但客户端 `PaneView.apply` 只拷 `screen` 把 `history` 丢掉；没有 `scrollWheel`、没有 display offset，PageUp/PageDown 走 `KeyEncoder` 发给 PTY（那是让 less/vim 自己翻页，不是终端回看）；offset 归属（客户端 view 状态 vs 内核新增 `pg_pane_scroll`）也还没定 | M2，见 §7 验收 |
-| DECSTBM 滚动区恒等于整屏 | `alacritty_terminal` 不暴露 `scroll_region` | M2 画滚动条时；只影响滚动条位置提示，不影响回看本身 |
+| 回看上限是 1000 行，不是 1 万行 | 宿主 `SCROLLBACK = 1000`；1 万行 × 80 列 ≈ 12MB，超过单帧 8MB 上限，`attach` 会被 `history_window` 裁到放得下的最新若干行 | 协议加分块历史（或改成宿主侧 offset）时；见 `docs/m2-checklist.md` §3 |
+| DECSTBM 滚动区恒等于整屏 | `alacritty_terminal` 不暴露 `scroll_region` | 需要按滚动区（而非历史位置）画提示时；回看用的滚动条已按 `history` 位置绘制，不依赖它 |
 | Swift 客户端不协商 `delta` | 只收 `snapshot`（协议 §5 允许） | 做性能时开启增量 |
 | IME 候选窗未实现 | 走 AppKit 默认 `keyDown` | M6 |
 | `zstd` 能力只定义了帧内 tag | 阈值、何时启用未定 | M4 远端实测后 |
