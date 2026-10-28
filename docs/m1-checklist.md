@@ -68,4 +68,18 @@ screenshots in docs/images/m1: dragged.jpg reopen.jpg split-2.jpg split-3.jpg sp
 | `zoom_pane` / `unzoom` | 协议按规范回 `unsupported`，UI 未做（见 `docs/plan.md` §11） |
 | 分隔线拖动的“手感” | 只验证了拖拽会改变比例并重排，没有做最小宽度下的主观体验 |
 | 侧栏 / SSH / IME | M3 / M4 / M6 |
-| Ubuntu 实跑 | 由 CI 的 `rust (ubuntu-latest)` 覆盖（见下） |
+| Ubuntu 实跑 | 已由 CI 覆盖，见 §5 |
+
+## 5. CI（GitHub Actions，真跑）
+
+推送 `6637f5c` 后 CI 一次通过：
+
+<https://github.com/jeffrey-dot/pigeon/actions/runs/40635575813>
+
+| 作业 | 结果 | 关键输出 |
+|---|---|---|
+| `docs` | success | 文档相对链接检查 `links ok` |
+| `rust (ubuntu-latest)` | success | `cargo test` **63 + 11 + 12 = 86 passed**（含多 pane 宿主端到端） |
+| `rust (macos-latest)` | success | 同上 |
+| `header` | success | `cbindgen` 生成后 `diff -u` 为空 |
+| `swift` | success | `cargo build` → `swift build` → `swift test` **22 passed** |
