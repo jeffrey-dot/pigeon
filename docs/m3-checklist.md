@@ -68,3 +68,17 @@ state file: …/config/sidebar.json (43 bytes)
 | **拖拽排序的 GUI 证据** | AppKit 的拖拽会话不会由合成鼠标事件（cliclick/CGEvent）启动，脚本里 `pasteboardWriterForRow` 从未被调用。排序与持久化本身有单测（`SidebarModel.sections(order:)`、`SidebarStore` 往返），`acceptDrop → onReorder → store.save` 也已接线；但仍需人手拖一次才算真验 |
 | 输入法 / 手速 | M6 |
 | SSH / 多主机分组 | M4 |
+
+## 5. CI（GitHub Actions，真跑）
+
+代码提交 `fb03a2c` 的 CI 一次通过（五作业 success）：
+
+<https://github.com/jeffrey-dot/pigeon/actions/runs/40642337669>
+
+| 作业 | 结果 |
+|---|---|
+| `docs` | success（相对链接检查 `links ok`） |
+| `rust (ubuntu-latest)` | success（`cargo test` **66 + 11 + 18 = 95 passed**） |
+| `rust (macos-latest)` | success |
+| `header` | success（cbindgen `diff -u` 为空） |
+| `swift` | success（`swift test` **28 passed**） |
