@@ -50,6 +50,7 @@ state file: …/config/sidebar.json (43 bytes)
 | 右键菜单（关闭 / 标记已读 / 重命名） | ![menu](images/m3/menu.jpg) |
 | 折叠分组（写入 `sidebar.json` 的 `collapsed`） | ![collapsed](images/m3/collapsed.jpg) |
 | 关窗重开：分组、未读、折叠原样回来 | ![reopen](images/m3/reopen.jpg) |
+| ⌘⇧W 关闭整个 session | 手验：按下后宿主的 shell 数 `3 → 2`（菜单项与右键“Close Session”走同一条 `closeSession`） |
 | **人手拖拽排序**（脚本无法驱动 AppKit 拖拽会话） | 用户手动拖动一行后，`/tmp/pigeon-m3-manual/config/sidebar.json` 变成 `{"order":[1,3,2],"collapsed":[],"renamed":{}}`：排序写入了磁盘，且下次启动按这个顺序渲染 |
 
 ## 3. 这轮抓到的真 bug（都已修）
