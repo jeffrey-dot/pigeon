@@ -160,7 +160,14 @@ impl AlacrittyTerm {
                 let cell = &grid[Point::new(line, Column(col))];
                 let (attrs, width) = attributes(cell.flags);
                 Cell {
-                    codepoint: cell.c as u32,
+                    // alacritty stores a tab in the first blank cell of a tab stop (its own
+                    // renderer reads that as "blank"). A client would try to draw the tab
+                    // glyph, so the boundary hands out a plain space instead.
+                    codepoint: if cell.c < ' ' {
+                        ' ' as u32
+                    } else {
+                        cell.c as u32
+                    },
                     fg: color_to_u32(cell.fg, colors),
                     bg: color_to_u32(cell.bg, colors),
                     attrs,

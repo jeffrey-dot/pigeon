@@ -321,6 +321,22 @@ mod tests {
     }
 
     #[test]
+    fn a_tab_advances_to_the_next_stop_without_writing_a_glyph() {
+        let mut t = term();
+        t.feed(b"a\tb");
+        let row = &t.snapshot().screen[0];
+        let text: String = row
+            .iter()
+            .map(|cell| char::from_u32(cell.codepoint).unwrap_or(' '))
+            .collect();
+        assert_eq!(
+            text.trim_end(),
+            format!("a{}b", " ".repeat(7)).as_str(),
+            "tab is blank cells up to the stop, not a glyph the client would have to draw"
+        );
+    }
+
+    #[test]
     fn scrolled_output_lands_in_history_oldest_first() {
         let mut t = term();
         for line in 1..=10 {
