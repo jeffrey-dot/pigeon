@@ -2,8 +2,7 @@
 //!
 //! One tokio runtime, one task per pane (that task is the only owner of the
 //! pane's terminal state), one task per client. A client disconnecting only drops
-//! its task — the PTY and the pane state keep running, which is the point of
-//! pigeon.
+//! its task — the PTYs and the layout keep running, which is the point of pigeon.
 
 use std::collections::HashMap;
 use std::fs::Permissions;
@@ -11,6 +10,7 @@ use std::io::{Read, Write};
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
@@ -21,7 +21,8 @@ use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
 use tokio::time::{interval, MissedTickBehavior};
 
 use pigeon_core::error::PgError;
-use pigeon_core::proto::{self, Message, PROTO_VERSION};
+use pigeon_core::layout::{Axis, Layout, LayoutNode};
+use pigeon_core::proto::{self, Message, Node, SplitAxis, SplitNode, PROTO_VERSION};
 use pigeon_core::session::PaneState;
 
 /// Capabilities this build offers (protocol §5).
@@ -30,20 +31,25 @@ const SCROLLBACK: usize = 1000;
 const DEFAULT_COLS: u16 = 80;
 const DEFAULT_ROWS: u16 = 24;
 
-type Sessions = Arc<Mutex<HashMap<u32, Handle>>>;
+/// Pane ids are unique for the whole process, not per session.
+static NEXT_PANE: AtomicU32 = AtomicU32::new(1);
+
+/// One session: one layout tree plus the panes its leaves point at.
+struct Session {
+    layout: Layout,
+    panes: HashMap<u32, mpsc::Sender<Cmd>>,
+    /// The session box in cells, derived from whichever pane last reported.
+    cols: u16,
+    rows: u16,
+}
+
+type Sessions = Arc<Mutex<HashMap<u32, Session>>>;
 
 #[derive(Clone)]
 enum Event {
     Delta { pane_id: u32, message: Message },
     Exited { pane_id: u32, code: i32 },
-}
-
-impl Event {
-    fn pane_id(&self) -> u32 {
-        match self {
-            Self::Delta { pane_id, .. } | Self::Exited { pane_id, .. } => *pane_id,
-        }
-    }
+    Layout { session_id: u32, message: Message },
 }
 
 enum Cmd {
@@ -55,10 +61,6 @@ enum Cmd {
         history: bool,
         reply: oneshot::Sender<Message>,
     },
-}
-
-struct Handle {
-    cmd: mpsc::Sender<Cmd>,
 }
 
 fn main() -> ExitCode {
@@ -131,6 +133,7 @@ async fn run() -> Result<(), String> {
 #[derive(Default)]
 struct ClientState {
     greeted: bool,
+    /// `(pane, negotiated delta)` for the pane this client is watching.
     attached: Option<(u32, bool)>,
 }
 
@@ -194,14 +197,29 @@ async fn handle_client(
             }
             event = subscribed.recv() => {
                 let Ok(event) = event else { continue };
-                if state.attached.map(|(pane, _)| pane) != Some(event.pane_id()) {
-                    continue;
-                }
                 match event {
+                    Event::Layout { session_id, message } => {
+                        let watching = match state.attached {
+                            Some((pane, _)) => {
+                                let map = sessions.lock().await;
+                                map.get(&session_id)
+                                    .is_some_and(|session| session.panes.contains_key(&pane))
+                            }
+                            None => false,
+                        };
+                        if watching {
+                            send(&mut writer, &message).await?;
+                        }
+                    }
                     Event::Exited { pane_id, code } => {
-                        send(&mut writer, &Message::PaneExited { pane_id, code }).await?;
+                        if state.attached.map(|(pane, _)| pane) == Some(pane_id) {
+                            send(&mut writer, &Message::PaneExited { pane_id, code }).await?;
+                        }
                     }
                     Event::Delta { pane_id, message } => {
+                        if state.attached.map(|(pane, _)| pane) != Some(pane_id) {
+                            continue;
+                        }
                         let delta_ok = state.attached.map(|(_, delta)| delta).unwrap_or(false);
                         if delta_ok {
                             send(&mut writer, &message).await?;
@@ -216,17 +234,78 @@ async fn handle_client(
 }
 
 async fn snapshot_of(sessions: &Sessions, pane_id: u32, history: bool) -> Option<Message> {
+    let sender = sender_of(sessions, pane_id).await?;
     let (tx, rx) = oneshot::channel();
-    {
-        let handles = sessions.lock().await;
-        handles
-            .get(&pane_id)?
-            .cmd
-            .send(Cmd::Snapshot { history, reply: tx })
-            .await
-            .ok()?;
-    }
+    sender
+        .send(Cmd::Snapshot { history, reply: tx })
+        .await
+        .ok()?;
     rx.await.ok()
+}
+
+async fn sender_of(sessions: &Sessions, pane_id: u32) -> Option<mpsc::Sender<Cmd>> {
+    let map = sessions.lock().await;
+    map.values()
+        .find_map(|session| session.panes.get(&pane_id).cloned())
+}
+
+fn session_of(map: &HashMap<u32, Session>, pane_id: u32) -> Option<u32> {
+    map.iter()
+        .find(|(_, session)| session.panes.contains_key(&pane_id))
+        .map(|(id, _)| *id)
+}
+
+fn layout_message(session_id: u32, session: &Session) -> Message {
+    Message::Layout {
+        session_id,
+        tree: session
+            .layout
+            .describe()
+            .map(to_proto_tree)
+            .unwrap_or(Node::Leaf { leaf: 0 }),
+        zoom: None,
+        focus: session.layout.focused(),
+    }
+}
+
+fn to_proto_tree(node: LayoutNode) -> Node {
+    match node {
+        LayoutNode::Leaf(pane) => Node::Leaf { leaf: pane },
+        LayoutNode::Split {
+            id,
+            axis,
+            ratio,
+            a,
+            b,
+        } => Node::Split {
+            split: SplitNode {
+                id,
+                axis: match axis {
+                    Axis::Vertical => SplitAxis::Vertical,
+                    Axis::Horizontal => SplitAxis::Horizontal,
+                },
+                ratio,
+                a: Box::new(to_proto_tree(*a)),
+                b: Box::new(to_proto_tree(*b)),
+            },
+        },
+    }
+}
+
+/// Re-fits every pane to its rect and tells clients what the tree looks like.
+fn apply_layout(session_id: u32, session: &mut Session, events: &broadcast::Sender<Event>) {
+    for (pane_id, rect) in session.layout.rects() {
+        let cols = ((rect.w * f32::from(session.cols)).round() as u16).max(2);
+        let rows = ((rect.h * f32::from(session.rows)).round() as u16).max(1);
+        if let Some(sender) = session.panes.get(&pane_id) {
+            // try_send: never block while holding the sessions lock.
+            let _ = sender.try_send(Cmd::Resize(cols, rows));
+        }
+    }
+    let _ = events.send(Event::Layout {
+        session_id,
+        message: layout_message(session_id, session),
+    });
 }
 
 async fn dispatch(
@@ -270,19 +349,20 @@ async fn dispatch(
                 client_id: 1,
             })
         }
-        Message::Sessions { .. } => Some(Message::Sessions {
-            items: sessions
-                .lock()
-                .await
-                .keys()
-                .map(|pane_id| proto::SessionInfo {
-                    session_id: *pane_id,
-                    title: format!("pane {pane_id}"),
-                    cwd: String::new(),
-                    panes: vec![*pane_id],
-                })
-                .collect(),
-        }),
+        Message::Sessions { .. } => {
+            let map = sessions.lock().await;
+            Some(Message::Sessions {
+                items: map
+                    .iter()
+                    .map(|(session_id, session)| proto::SessionInfo {
+                        session_id: *session_id,
+                        title: format!("session {session_id}"),
+                        cwd: String::new(),
+                        panes: session.layout.pane_ids(),
+                    })
+                    .collect(),
+            })
+        }
         Message::NewSession {
             id,
             cwd,
@@ -290,35 +370,154 @@ async fn dispatch(
             ..
         } => {
             let shell = requested.unwrap_or_else(|| shell.to_owned());
-            match spawn_session(sessions, events, &shell, cwd).await {
-                Some(pane_id) => Some(Message::Created {
-                    id,
-                    session_id: pane_id,
-                    pane_id,
-                }),
-                None => Some(Message::Error {
+            let Some((pane_id, sender)) =
+                spawn_pane(events, &shell, cwd, DEFAULT_COLS, DEFAULT_ROWS)
+            else {
+                return Some(Message::Error {
                     code: "internal".into(),
                     detail: "cannot spawn the shell".into(),
                     id: Some(id),
-                }),
-            }
+                });
+            };
+            let mut panes = HashMap::new();
+            panes.insert(pane_id, sender);
+            let session = Session {
+                layout: Layout::new(pane_id),
+                panes,
+                cols: DEFAULT_COLS,
+                rows: DEFAULT_ROWS,
+            };
+            sessions.lock().await.insert(pane_id, session);
+            Some(Message::Created {
+                id,
+                session_id: pane_id,
+                pane_id,
+            })
         }
         Message::Attach { id, pane_id, .. } => {
-            let delta_ok = state.attached.map(|(_, delta)| delta).unwrap_or(false);
-            match snapshot_of(sessions, pane_id, true).await {
-                Some(snapshot) => {
-                    state.attached = Some((pane_id, delta_ok));
-                    Some(snapshot)
-                }
-                None => Some(Message::Error {
+            let session_id = {
+                let map = sessions.lock().await;
+                session_of(&map, pane_id)
+            };
+            let Some(session_id) = session_id else {
+                return Some(Message::Error {
                     code: "no_such_pane".into(),
                     detail: format!("pane {pane_id}"),
                     id: Some(id),
-                }),
+                });
+            };
+            let Some(snapshot) = snapshot_of(sessions, pane_id, true).await else {
+                return Some(Message::Error {
+                    code: "no_such_pane".into(),
+                    detail: format!("pane {pane_id}"),
+                    id: Some(id),
+                });
+            };
+            let delta_ok = state.attached.map(|(_, delta)| delta).unwrap_or(false);
+            state.attached = Some((pane_id, delta_ok));
+            // The tree follows the snapshot, so a reconnecting window redraws
+            // the same split geometry.
+            {
+                let map = sessions.lock().await;
+                if let Some(session) = map.get(&session_id) {
+                    let _ = events.send(Event::Layout {
+                        session_id,
+                        message: layout_message(session_id, session),
+                    });
+                }
             }
+            Some(snapshot)
+        }
+        Message::SplitPane {
+            id,
+            pane_id,
+            axis,
+            ratio,
+        } => {
+            let axis = match axis {
+                SplitAxis::Vertical => Axis::Vertical,
+                SplitAxis::Horizontal => Axis::Horizontal,
+            };
+            let mut map = sessions.lock().await;
+            let Some(session_id) = session_of(&map, pane_id) else {
+                return Some(Message::Error {
+                    code: "no_such_pane".into(),
+                    detail: format!("pane {pane_id}"),
+                    id: Some(id),
+                });
+            };
+            let session = map.get_mut(&session_id)?;
+            let (cols, rows) = match axis {
+                Axis::Vertical => ((session.cols / 2).max(2), session.rows),
+                Axis::Horizontal => (session.cols, (session.rows / 2).max(1)),
+            };
+            let Some((new_pane, sender)) = spawn_pane(events, shell, None, cols, rows) else {
+                return Some(Message::Error {
+                    code: "internal".into(),
+                    detail: "cannot spawn the shell".into(),
+                    id: Some(id),
+                });
+            };
+            if session
+                .layout
+                .split(pane_id, new_pane, axis, ratio, session.cols, session.rows)
+                .is_err()
+            {
+                return Some(Message::Error {
+                    code: "no_such_pane".into(),
+                    detail: format!("pane {pane_id}"),
+                    id: Some(id),
+                });
+            }
+            session.panes.insert(new_pane, sender);
+            // The new pane takes focus, like every terminal's split.
+            session.layout.focus(new_pane);
+            apply_layout(session_id, session, events);
+            None
+        }
+        Message::ResizeSplit {
+            id,
+            split_id,
+            ratio,
+        } => {
+            let mut map = sessions.lock().await;
+            let Some((session_id, session)) = map
+                .iter_mut()
+                .find(|(_, session)| session.layout.split_of_any(split_id))
+            else {
+                return Some(Message::Error {
+                    code: "bad_request".into(),
+                    detail: format!("split {split_id}"),
+                    id: Some(id),
+                });
+            };
+            if session
+                .layout
+                .set_ratio(split_id, ratio, session.cols, session.rows)
+                .is_err()
+            {
+                return Some(Message::Error {
+                    code: "bad_request".into(),
+                    detail: format!("split {split_id}"),
+                    id: Some(id),
+                });
+            }
+            let session_id = *session_id;
+            apply_layout(session_id, session, events);
+            None
+        }
+        Message::Focus { pane_id } => {
+            let mut map = sessions.lock().await;
+            let session_id = session_of(&map, pane_id)?;
+            let session = map.get_mut(&session_id)?;
+            session.layout.focus(pane_id);
+            apply_layout(session_id, session, events);
+            None
         }
         Message::Keys { pane_id, bytes } => {
-            forward(sessions, pane_id, Cmd::Input(bytes)).await;
+            if let Some(sender) = sender_of(sessions, pane_id).await {
+                let _ = sender.send(Cmd::Input(bytes)).await;
+            }
             None
         }
         Message::ResizePane {
@@ -326,39 +525,69 @@ async fn dispatch(
             cols,
             rows,
         } => {
-            forward(sessions, pane_id, Cmd::Resize(cols, rows)).await;
+            let mut map = sessions.lock().await;
+            if let Some(session_id) = session_of(&map, pane_id) {
+                if let Some(session) = map.get_mut(&session_id) {
+                    // Derive the session box from the pane's own rect.
+                    if let Some((_, rect)) = session
+                        .layout
+                        .rects()
+                        .into_iter()
+                        .find(|(id, _)| *id == pane_id)
+                    {
+                        if rect.w > 0.0 {
+                            session.cols = ((f32::from(cols) / rect.w).round() as u16).max(2);
+                        }
+                        if rect.h > 0.0 {
+                            session.rows = ((f32::from(rows) / rect.h).round() as u16).max(1);
+                        }
+                    }
+                }
+                if let Some(sender) = map
+                    .get(&session_id)
+                    .and_then(|session| session.panes.get(&pane_id))
+                    .cloned()
+                {
+                    drop(map);
+                    let _ = sender.send(Cmd::Resize(cols, rows)).await;
+                }
+            }
             None
         }
         Message::ClosePane { pane_id, .. } => {
-            // Close means close: terminate the child and drop the pane.
-            forward(sessions, pane_id, Cmd::Kill).await;
-            sessions.lock().await.remove(&pane_id);
+            let mut map = sessions.lock().await;
+            let session_id = session_of(&map, pane_id)?;
+            let session = map.get_mut(&session_id)?;
+            if let Some(sender) = session.panes.remove(&pane_id) {
+                let _ = sender.try_send(Cmd::Kill);
+            }
+            let _ = session.layout.close(pane_id);
+            if session.layout.is_empty() {
+                map.remove(&session_id);
+            } else {
+                apply_layout(session_id, session, events);
+            }
             None
         }
         Message::Ping { ts } => Some(Message::Pong { ts }),
-        // Client-to-server messages outside the M0 subset.
+        // `zoom_pane` / `unzoom` are not implemented in M1 (protocol rule 2).
         other => Some(Message::Unsupported {
             t_of: other.name().to_owned(),
         }),
     }
 }
 
-async fn forward(sessions: &Sessions, pane_id: u32, cmd: Cmd) {
-    let handles = sessions.lock().await;
-    if let Some(handle) = handles.get(&pane_id) {
-        let _ = handle.cmd.send(cmd).await;
-    }
-}
-
-async fn spawn_session(
-    sessions: &Sessions,
+/// Spawns a shell in a fresh PTY and starts its actor.
+fn spawn_pane(
     events: &broadcast::Sender<Event>,
     shell: &str,
     cwd: Option<String>,
-) -> Option<u32> {
+    cols: u16,
+    rows: u16,
+) -> Option<(u32, mpsc::Sender<Cmd>)> {
     let size = PtySize {
-        rows: DEFAULT_ROWS,
-        cols: DEFAULT_COLS,
+        rows,
+        cols,
         pixel_width: 0,
         pixel_height: 0,
     };
@@ -412,17 +641,11 @@ async fn spawn_session(
         }
     });
 
+    let pane_id = NEXT_PANE.fetch_add(1, Ordering::Relaxed);
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<Cmd>(64);
-    let pane_id = {
-        let mut handles = sessions.lock().await;
-        let pane_id = handles.keys().max().copied().unwrap_or(0) + 1;
-        handles.insert(pane_id, Handle { cmd: cmd_tx });
-        pane_id
-    };
-
     let events = events.clone();
     tokio::spawn(async move {
-        let mut pane = PaneState::new(pane_id, DEFAULT_COLS, DEFAULT_ROWS, SCROLLBACK);
+        let mut pane = PaneState::new(pane_id, cols, rows, SCROLLBACK);
         let mut child = child;
         let mut ticker = interval(Duration::from_millis(150));
         ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -431,16 +654,11 @@ async fn spawn_session(
             tokio::select! {
                 command = cmd_rx.recv(), if commands_open => {
                     let Some(command) = command else {
-                        // The session was dropped: stop taking commands but keep
-                        // running until the child is reaped, so `pane_exited`
-                        // still reaches the remaining clients.
                         commands_open = false;
                         continue;
                     };
                     match command {
                         Cmd::Input(bytes) => {
-                            // Keystrokes go to the child; the echo comes back
-                            // through the PTY reader and is fed there.
                             let _ = write_tx.send(bytes);
                         }
                         Cmd::Resize(cols, rows) => {
@@ -475,7 +693,6 @@ async fn spawn_session(
                 }
                 chunk = pty_rx.recv() => {
                     let Some(chunk) = chunk else {
-                        // PTY gone: report the real exit code, then stop.
                         let code = child
                             .wait()
                             .map(|status| status.exit_code() as i32)
@@ -495,7 +712,7 @@ async fn spawn_session(
         }
     });
 
-    Some(pane_id)
+    Some((pane_id, cmd_tx))
 }
 
 fn flush(pane: &mut PaneState, events: &broadcast::Sender<Event>) {

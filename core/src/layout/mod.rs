@@ -222,6 +222,18 @@ impl Layout {
         out
     }
 
+    /// Whether this tree contains `split_id`.
+    pub fn split_of_any(&self, split_id: SplitId) -> bool {
+        self.root
+            .as_ref()
+            .is_some_and(|root| has_split(root, split_id))
+    }
+
+    /// A public mirror of the tree, for hosts that need to describe it.
+    pub fn describe(&self) -> Option<LayoutNode> {
+        self.root.as_ref().map(describe_node)
+    }
+
     /// The deepest split on the path to `pane` — the divider that resizes it.
     pub fn split_of(&self, pane: PaneId) -> Option<SplitId> {
         self.root
@@ -265,6 +277,45 @@ fn clamp_ratio(ratio: f32, axis: Axis, cols: u16, rows: u16, min_cols: u16, min_
     }
     let min_fraction = (minimum / total).min(0.5);
     ratio.clamp(min_fraction, 1.0 - min_fraction)
+}
+
+pub enum LayoutNode {
+    Leaf(PaneId),
+    Split {
+        id: SplitId,
+        axis: Axis,
+        ratio: f32,
+        a: Box<LayoutNode>,
+        b: Box<LayoutNode>,
+    },
+}
+
+fn describe_node(node: &Node) -> LayoutNode {
+    match node {
+        Node::Leaf(id) => LayoutNode::Leaf(*id),
+        Node::Split {
+            id,
+            axis,
+            ratio,
+            a,
+            b,
+        } => LayoutNode::Split {
+            id: *id,
+            axis: *axis,
+            ratio: *ratio,
+            a: Box::new(describe_node(a)),
+            b: Box::new(describe_node(b)),
+        },
+    }
+}
+
+fn has_split(node: &Node, split_id: SplitId) -> bool {
+    match node {
+        Node::Leaf(_) => false,
+        Node::Split { id, a, b, .. } => {
+            *id == split_id || has_split(a, split_id) || has_split(b, split_id)
+        }
+    }
 }
 
 fn contains(node: &Node, pane: PaneId) -> bool {

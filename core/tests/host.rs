@@ -475,6 +475,7 @@ fn attach_first(client: &mut Client) -> u32 {
         size_policy: None,
     });
     let _ = snapshot(client);
+    let _ = wait_for_layout(client, |_| true);
     pane_id
 }
 
@@ -609,4 +610,206 @@ fn close_pane_terminates_the_child() {
         "a closed pane must not be listed"
     );
     let _ = std::fs::remove_file(&pane);
+}
+
+// ---------------------------------------------------------------- M1 split
+
+fn splits_of(tree: &proto::Node) -> Vec<(u32, proto::SplitAxis, f32)> {
+    let mut out = Vec::new();
+    fn walk(node: &proto::Node, out: &mut Vec<(u32, proto::SplitAxis, f32)>) {
+        if let proto::Node::Split { split } = node {
+            out.push((split.id, split.axis, split.ratio));
+            walk(&split.a, out);
+            walk(&split.b, out);
+        }
+    }
+    walk(tree, &mut out);
+    out
+}
+
+fn leaves_of(tree: &proto::Node) -> Vec<u32> {
+    let mut out = Vec::new();
+    tree.leaves(&mut out);
+    out
+}
+
+fn tree_of(message: &Message) -> &proto::Node {
+    match message {
+        Message::Layout { tree, .. } => tree,
+        _ => panic!("expected a layout"),
+    }
+}
+
+/// Waits for a layout that satisfies `want`, skipping stale broadcasts
+/// (every attach re-sends the tree).
+fn wait_for_layout(client: &mut Client, want: impl Fn(&Message) -> bool) -> Message {
+    client.wait_for(|m| matches!(m, Message::Layout { .. }) && want(m))
+}
+
+/// Splits `pane` and returns (new pane id, layout message).
+fn split(
+    client: &mut Client,
+    pane: u32,
+    axis: proto::SplitAxis,
+    ratio: f32,
+    expected_leaves: usize,
+) -> (u32, Message) {
+    client.send(&Message::SplitPane {
+        id: 70,
+        pane_id: pane,
+        axis,
+        ratio,
+    });
+    let layout = wait_for_layout(client, |m| leaves_of(tree_of(m)).len() == expected_leaves);
+    let leaves = leaves_of(tree_of(&layout));
+    let new_pane = *leaves.last().expect("a leaf");
+    (new_pane, layout)
+}
+
+#[test]
+fn split_makes_three_live_panes() {
+    let _serial = one_at_a_time();
+    let host = start_host();
+    let mut client = Client::connect(&host.socket);
+    hello(&mut client);
+    let first = attach_first(&mut client);
+
+    let (second, layout) = split(&mut client, first, proto::SplitAxis::Vertical, 0.5, 2);
+    let Message::Layout { tree, focus, .. } = &layout else {
+        unreachable!()
+    };
+    assert_eq!(leaves_of(tree), vec![first, second]);
+    assert_eq!(splits_of(tree)[0].1, proto::SplitAxis::Vertical);
+    assert_eq!(*focus, Some(second), "the new pane takes focus");
+
+    let (third, layout) = split(&mut client, second, proto::SplitAxis::Horizontal, 0.4, 3);
+    let Message::Layout { tree, .. } = &layout else {
+        unreachable!()
+    };
+    assert_eq!(leaves_of(tree), vec![first, second, third]);
+    assert_eq!(splits_of(tree).len(), 2, "nested tree with two dividers");
+    assert_eq!(splits_of(tree)[1].1, proto::SplitAxis::Horizontal);
+
+    // Every pane has its own live shell: each echoes its own marker.
+    for pane in [first, second, third] {
+        client.send(&Message::Attach {
+            id: 71,
+            pane_id: pane,
+            size_policy: None,
+        });
+        let _ = snapshot(&mut client);
+        client.send(&Message::Keys {
+            pane_id: pane,
+            bytes: format!("echo pane-{pane}\r").into_bytes(),
+        });
+        wait_for_text(&mut client, &format!("pane-{pane}"));
+    }
+}
+
+#[test]
+fn three_panes_survive_a_disconnect_and_restore_layout_and_screens() {
+    let _serial = one_at_a_time();
+    let host = start_host();
+    let mut client = Client::connect(&host.socket);
+    hello(&mut client);
+    let first = attach_first(&mut client);
+    let (second, _) = split(&mut client, first, proto::SplitAxis::Vertical, 0.5, 2);
+    let (third, _) = split(&mut client, second, proto::SplitAxis::Horizontal, 0.5, 3);
+
+    // Put a distinct marker in each pane, then record its stable snapshot.
+    let mut before = Vec::new();
+    for pane in [first, second, third] {
+        client.send(&Message::Attach {
+            id: 80,
+            pane_id: pane,
+            size_policy: None,
+        });
+        let _ = snapshot(&mut client);
+        client.send(&Message::Keys {
+            pane_id: pane,
+            bytes: format!("echo alive-{pane}\r").into_bytes(),
+        });
+        wait_for_text(&mut client, &format!("alive-{pane}"));
+        before.push((pane, comparable(&stable_snapshot(&mut client, pane))));
+    }
+
+    let layout_before = {
+        client.send(&Message::Focus { pane_id: second });
+        wait_for_layout(
+            &mut client,
+            |m| matches!(m, Message::Layout { focus: Some(f), .. } if *f == second),
+        )
+    };
+
+    drop(client); // "the window closes"
+    std::thread::sleep(Duration::from_millis(300));
+
+    let mut after = Client::connect(&host.socket);
+    hello(&mut after);
+    // The tree comes back with the first attach; the host keeps it per session.
+    after.send(&Message::Attach {
+        id: 81,
+        pane_id: first,
+        size_policy: None,
+    });
+    let _ = snapshot(&mut after);
+    let layout_after = after.wait_for(|m| matches!(m, Message::Layout { .. }));
+
+    let Message::Layout {
+        tree: tree_before,
+        focus: focus_before,
+        ..
+    } = &layout_before
+    else {
+        unreachable!()
+    };
+    let Message::Layout {
+        tree: tree_after,
+        focus: focus_after,
+        ..
+    } = &layout_after
+    else {
+        unreachable!()
+    };
+    assert_eq!(
+        leaves_of(tree_before),
+        vec![first, second, third],
+        "order survives"
+    );
+    assert_eq!(leaves_of(tree_after), leaves_of(tree_before));
+    assert_eq!(
+        splits_of(tree_after),
+        splits_of(tree_before),
+        "ratios survive"
+    );
+    assert_eq!(focus_after, focus_before, "focus survives");
+
+    for (pane, screen_before) in before {
+        after.send(&Message::Attach {
+            id: 82,
+            pane_id: pane,
+            size_policy: None,
+        });
+        let now = comparable(&stable_snapshot(&mut after, pane));
+        assert_eq!(now, screen_before, "pane {pane} restored cell for cell");
+    }
+}
+
+#[test]
+fn closing_a_pane_merges_it_into_the_sibling() {
+    let _serial = one_at_a_time();
+    let host = start_host();
+    let mut client = Client::connect(&host.socket);
+    hello(&mut client);
+    let first = attach_first(&mut client);
+    let (second, _) = split(&mut client, first, proto::SplitAxis::Vertical, 0.5, 2);
+
+    client.send(&Message::ClosePane {
+        id: 90,
+        pane_id: second,
+    });
+    let merged = wait_for_layout(&mut client, |m| leaves_of(tree_of(m)) == vec![first]);
+    let tree = tree_of(&merged);
+    assert_eq!(leaves_of(tree), vec![first], "the survivor fills the box");
+    assert!(splits_of(tree).is_empty(), "no divider left");
 }
