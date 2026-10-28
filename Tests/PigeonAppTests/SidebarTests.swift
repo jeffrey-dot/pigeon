@@ -116,6 +116,14 @@ final class SidebarOrderingTests: XCTestCase {
         XCTAssertEqual(SidebarModel.subtitle(status: .idle, since: now, now: now), "Idle · now")
     }
 
+    func testSameNamedSessionsInOneGroupAreNumbered() {
+        let sessions = (1...3).map { id in
+            SidebarSession(id: id, title: "zsh", group: "pigeon", status: .idle)
+        }
+        let rows = SidebarModel.sections(sessions).first!.sessions.map(\.title)
+        XCTAssertEqual(rows, ["zsh", "zsh 2", "zsh 3"])
+    }
+
     func testGroupNamesCapitalizeOnlyTheFirstCharacter() {
         XCTAssertEqual(SidebarModel.displayGroupName("atlas"), "Atlas")
         XCTAssertEqual(SidebarModel.displayGroupName("my app"), "My app")

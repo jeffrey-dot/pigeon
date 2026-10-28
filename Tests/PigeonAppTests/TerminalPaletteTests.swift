@@ -36,9 +36,12 @@ final class TerminalPaletteTests: XCTestCase {
     func testTheFloorOnlyRescuesInvisibleText() {
         let white = NSColor.white
         let washed = NSColor(srgbRed: 0xe6 / 255, green: 0xe6 / 255, blue: 0xe6 / 255, alpha: 1)
+        // Neutral text gets body-text contrast: a shell prompt painted `SGR 37` (`#E0E0E0` in
+        // harp's light palette) must become readable on the white card.
         let lifted = TerminalPalette.readable(washed, on: white)
-        XCTAssertGreaterThanOrEqual(contrast(lifted, white), 1.19, "invisible grey must clear 1.2:1")
-        XCTAssertLessThan(contrast(lifted, white), 3.0, "but it must not be repainted as body text")
+        XCTAssertGreaterThanOrEqual(contrast(lifted, white), 4.4, "neutral text must clear 4.5:1")
+        let ansiWhite = NSColor(srgbRed: 0xE0 / 255, green: 0xE0 / 255, blue: 0xE0 / 255, alpha: 1)
+        XCTAssertGreaterThanOrEqual(contrast(TerminalPalette.readable(ansiWhite, on: white), white), 4.4)
 
         let nearBlack = NSColor(srgbRed: 0x05 / 255, green: 0x05 / 255, blue: 0x05 / 255, alpha: 1)
         let dim = NSColor(srgbRed: 0x0a / 255, green: 0x0a / 255, blue: 0x0a / 255, alpha: 1)
@@ -46,12 +49,11 @@ final class TerminalPaletteTests: XCTestCase {
 
         // A theme's own colours are left alone: harp's bright yellow is ~1.25:1 on white and
         // still recognisably yellow, so it must not be swapped for a grey.
-        let yellow = NSColor(srgbRed: 0xF3 / 255, green: 0xE4 / 255, blue: 0x30 / 255, alpha: 1)
-        let keptYellow = TerminalPalette.readable(yellow, on: white).usingColorSpace(.sRGB)!
-        XCTAssertGreaterThan(keptYellow.redComponent, 0.9)
-        XCTAssertGreaterThan(keptYellow.greenComponent, 0.85)
+        let yellow = NSColor(srgbRed: 0xA8 / 255, green: 0x9C / 255, blue: 0x14 / 255, alpha: 1)
+        XCTAssertEqual(TerminalPalette.readable(yellow, on: white), yellow.usingColorSpace(.sRGB))
 
-        let midGrey = NSColor(srgbRed: 0x8a / 255, green: 0x8a / 255, blue: 0x8a / 255, alpha: 1)
+        // Already past 4.5:1, so it must pass through untouched.
+        let midGrey = NSColor(srgbRed: 0x6b / 255, green: 0x6b / 255, blue: 0x6b / 255, alpha: 1)
         XCTAssertEqual(TerminalPalette.readable(midGrey, on: white), midGrey.usingColorSpace(.sRGB))
     }
 
@@ -62,7 +64,12 @@ final class TerminalPaletteTests: XCTestCase {
 
     private func luminance(_ color: NSColor) -> CGFloat {
         let srgb = color.usingColorSpace(.sRGB) ?? color
-        return 0.2126 * srgb.redComponent + 0.7152 * srgb.greenComponent + 0.0722 * srgb.blueComponent
+        func linear(_ channel: CGFloat) -> CGFloat {
+            channel <= 0.04045 ? channel / 12.92 : pow((channel + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * linear(srgb.redComponent)
+            + 0.7152 * linear(srgb.greenComponent)
+            + 0.0722 * linear(srgb.blueComponent)
     }
 
     /// The host answers `OSC 4/10/11` from these values, so the message must carry the same

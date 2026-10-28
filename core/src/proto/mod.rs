@@ -191,6 +191,9 @@ pub enum Message {
         detail: String,
     },
     Sessions {
+        /// Empty in a client request (`pg_msg_new(PG_MSG_SESSIONS)` + encode); the host always
+        /// answers with the full list.
+        #[serde(default)]
         items: Vec<SessionInfo>,
     },
     NewSession {

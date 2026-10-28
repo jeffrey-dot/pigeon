@@ -123,7 +123,10 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
 
     @objc private func toggleSidebarClicked() { onToggleSidebar?() }
 
-    @objc private func newSessionClicked() { onNewSession?() }
+    @objc private func newSessionClicked() {
+        FileHandle.standardError.write(Data("pigeon: + clicked\n".utf8))
+        onNewSession?()
+    }
 
     func update(sections: [(group: String, sessions: [SidebarSession])], selected: Int?) {
         suppressSelection = true

@@ -65,7 +65,7 @@ final class HostClient {
 
     func send(_ message: OpaquePointer) {
         guard let frame = Wire.frame(message) else {
-            NSLog("pigeon: refusing to send an incomplete message")
+            NSLog("pigeon: refusing to send an incomplete message type=\(Wire.type(message).rawValue)")
             return
         }
         frame.withUnsafeBytes { raw in

@@ -1013,4 +1013,14 @@ mod tests {
         assert_eq!(PG_CORE_ABI_VERSION, 1);
         let _ = std::mem::size_of::<PgStatus>();
     }
+
+    #[test]
+    fn a_bare_sessions_message_is_a_valid_request() {
+        // The client asks for the session list with a `sessions` message that carries no items.
+        // Before `#[serde(default)]` on `items` this encoded to nothing, so the sidebar stayed
+        // stale until the next launch.
+        let msg = pg_msg_new(PgMsgType::PG_MSG_SESSIONS);
+        assert!(pg_msg_encoded_len(msg) > 0, "a request needs no items");
+        pg_msg_free(msg);
+    }
 }

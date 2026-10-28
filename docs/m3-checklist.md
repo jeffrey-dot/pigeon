@@ -7,12 +7,12 @@
 ```sh
 cargo fmt --check                                  # 通过
 cargo clippy --all-targets -- -D warnings          # 通过
-cargo test                                         # 72 单元 + 11 ABI + 25 宿主 = 108 passed
+cargo test                                         # 73 单元 + 11 ABI + 25 宿主 = 109 passed
 cargo build --release --bin pigeon-host            # 1,250,800 B（1.19 MiB ≤ 8 MiB）
 cbindgen --config core/cbindgen.toml --crate pigeon-core \
          --output /tmp/pg.h core                   # 与 include/pigeon_core.h 无差异
 cargo build --lib --no-default-features            # 通过（库本体不引用 tokio/portable-pty）
-swift build && swift test                          # 通过 / 54 passed
+swift build && swift test                          # 通过 / 55 passed
 ```
 
 新增覆盖：
@@ -164,6 +164,17 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
     点别的行时什么都没发出去 → 没有该 session 的 `layout`，右栏保持原样。证据：修前只有 `select id=3`，
     没有对应的 `layout session=3`。修法：`sendAttach(_:force:)`，`select()` 对目标 session 强制重 attach；
     修后日志成对出现 —— `select id=3 activePane=3 panes=[3]` → `layout session=3 selected=3 panes=[3]`。
+
+13. **点侧栏 `+` 不刷新列表**：`requestSessions()` 编的是一条不带 `items` 的 `sessions` 请求，而协议里
+    `items` 是必填 → FFI 编码失败（`refusing to send an incomplete message type=4`），请求根本没发出去，
+    新 session 要等重启（hello 时宿主主动推列表）才出现。修法：`Message::Sessions.items` 加 `#[serde(default)]`，
+    并把“空 `sessions` 请求能编码出字节”钉成用例 `a_bare_sessions_message_is_a_valid_request`。
+14. **Ctrl-D / `exit` 不关闭 session**：客户端的 `PG_MSG_PANE_EXITED` 分支原来是 `break`（忽略）。
+    先改成“本地删行 + 请求列表”，行又回来了 —— 因为协议规定 pane 退出后记录保留到 `close_pane`（§3.2）。
+    最终改成 `pane_exited → closeSession(id)`：发 `close_pane`、删行、再刷新列表，宿主才会真正忘掉它。
+15. **同一组的同名行分不清**：多个 `zsh` 会话同组时行标题完全一样，看着像同一个 session（其实 sid 不同）。
+    `SidebarModel.disambiguated` 给同组内重名的行加序号（`zsh`、`zsh 2`、`zsh 3`），用例
+    `testSameNamedSessionsInOneGroupAreNumbered`。
 
 ## 5. 未验
 

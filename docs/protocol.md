@@ -47,7 +47,7 @@
 
 | 方向 | 消息 | 必选字段 | 可选字段 | 说明 |
 |---|---|---|---|---|
-| s→c | `sessions` | `items: [{session_id: u32, title: str, cwd: str, panes: [u32]}]` | `active_pane: u32`, `active_title: str`（每个 item 内的可选字段） | 连接建立后的首次全量列表；标题/cwd 变化时宿主会重新下发整张列表；`active_pane` 是 layout 里的焦点，`active_title` 来自 OSC 0/2 |
+| s→c | `sessions` | `items: [{session_id: u32, title: str, cwd: str, panes: [u32]}]`（c→s 的请求里可以省略，视为空数组） | `active_pane: u32`, `active_title: str`（每个 item 内的可选字段） | 连接建立后的首次全量列表；标题/cwd 变化时宿主会重新下发整张列表；`active_pane` 是 layout 里的焦点，`active_title` 来自 OSC 0/2 |
 | c→s | `new_session` | `id: u32` | `cwd: str`, `shell: str`, `env: {str: str}` | `env` 与宿主环境合并，同名覆盖 |
 | s→c | `created` | `id: u32`, `session_id: u32`, `pane_id: u32` | — | `id` 回显请求的 `id` |
 | c→s | `close_pane` | `id: u32`, `pane_id: u32` | — | 关闭 pane 及其进程组（SIGHUP → SIGKILL） |

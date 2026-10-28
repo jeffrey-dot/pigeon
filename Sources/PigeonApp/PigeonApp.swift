@@ -554,7 +554,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case PG_MSG_STATUS:
             applyStatus(message)
         case PG_MSG_PANE_EXITED:
-            break
+            // The shell is gone (`exit`, Ctrl-D, a crash). The host keeps an exited pane until
+            // `close_pane`, so dropping the row locally is not enough — closing the session is
+            // what makes the host forget it, otherwise the next `sessions` refresh re-adds it.
+            let pane = Wire.u32(message, "pane_id")
+            guard let id = rows.first(where: { $0.value.panes.contains(pane) })?.key else { break }
+            debugLog("pane exited pane=\(pane) -> closing session \(id)")
+            closeSession(id)
         case PG_MSG_HELLO_ERROR:
             NSLog("pigeon: handshake rejected: \(Wire.string(message, "detail"))")
         case PG_MSG_ERROR:
@@ -603,7 +609,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for row in rows.values { sendAttach(row.activePane) }
         if let selectedSession, let row = rows[selectedSession] {
             focusedPane = row.activePane
-            for pane in row.panes { sendAttach(pane) }
+            // Force the selected session's panes: `attach` is what makes the host follow this
+            // session and reply with its layout + snapshot. Without it a fresh launch shows an
+            // empty pane until the first click (which selects the already-selected row).
+            for pane in row.panes { sendAttach(pane, force: true) }
+            send({ message in Wire.set(message, u32: "pane_id", row.activePane) }, type: PG_MSG_FOCUS)
         }
         refreshSidebar()
     }

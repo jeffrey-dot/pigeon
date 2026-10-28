@@ -35,25 +35,36 @@ enum TerminalPalette {
         return table[index % 8]
     }
 
-    /// WCAG relative luminance (gamma-encoded approximation, enough for a floor).
+    /// WCAG relative luminance: sRGB channels are linearised first, otherwise mid-greys look
+    /// far darker than they are and a 4.5:1 floor would repaint readable text.
     private static func luminance(_ color: NSColor) -> CGFloat {
         let srgb = color.usingColorSpace(.sRGB) ?? color
-        return 0.2126 * srgb.redComponent + 0.7152 * srgb.greenComponent + 0.0722 * srgb.blueComponent
+        func linear(_ channel: CGFloat) -> CGFloat {
+            channel <= 0.04045 ? channel / 12.92 : pow((channel + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * linear(srgb.redComponent)
+            + 0.7152 * linear(srgb.greenComponent)
+            + 0.0722 * linear(srgb.blueComponent)
     }
 
     private static func contrast(_ a: CGFloat, _ b: CGFloat) -> CGFloat {
         (max(a, b) + 0.05) / (min(a, b) + 0.05)
     }
 
-    /// A last-resort safety net for text that would be invisible (`#e6e6e6` on `#ffffff`).
+    /// Keeps text readable without destroying a theme's colours.
     ///
-    /// The real fix is the protocol: the host now answers the program's `OSC 4/10/11` queries
-    /// with the client palette, so a TUI picks its own light/dark theme and its colours are
-    /// already readable. Re-colouring those would destroy the theme (yellow collapsing to
-    /// olive), so only colours below 1.2:1 are nudged — everything else is drawn as sent.
-    static func readable(_ color: NSColor, on background: NSColor, minimumRatio: CGFloat = 1.2) -> NSColor {
+    /// Two different problems, two thresholds:
+    /// * **Neutral** colours (greys, and "white"/"black" from a TUI's dark-canvas palette) carry
+    ///   no hue to preserve, so they are lifted to a real 4.5:1 — that is what makes a shell
+    ///   prompt painted with `SGR 37` legible on the light card.
+    /// * **Coloured** text is the theme's identity; only colours below 1.2:1 (invisible) are
+    ///   nudged, otherwise the hue survives untouched.
+    static func readable(_ color: NSColor, on background: NSColor) -> NSColor {
         let fg = color.usingColorSpace(.sRGB) ?? color
         let bg = background.usingColorSpace(.sRGB) ?? background
+        let spread = max(fg.redComponent, max(fg.greenComponent, fg.blueComponent))
+            - min(fg.redComponent, min(fg.greenComponent, fg.blueComponent))
+        let minimumRatio: CGFloat = spread < 0.12 ? 4.5 : 1.2
         let bgLum = luminance(bg)
         if contrast(luminance(fg), bgLum) >= minimumRatio { return fg }
 
