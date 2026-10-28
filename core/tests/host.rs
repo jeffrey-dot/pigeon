@@ -1158,7 +1158,10 @@ fn acked_status_is_not_replayed_after_reconnect() {
         unreachable!()
     };
     client.send(&Message::AckStatus { pane_id: pane, seq });
-    std::thread::sleep(Duration::from_millis(200));
+    // The host answers messages in order, so the reply to `sessions` means the ack has been
+    // applied before this connection goes away (a fixed sleep raced under load).
+    client.send(&Message::Sessions { items: Vec::new() });
+    client.wait_for(|m| matches!(m, Message::Sessions { .. }));
     drop(client);
 
     let mut again = Client::connect(&host.socket);
@@ -1169,11 +1172,22 @@ fn acked_status_is_not_replayed_after_reconnect() {
         size_policy: None,
     });
     let _ = snapshot(&mut again);
-    std::thread::sleep(Duration::from_millis(300));
+    // A second attach replays `latest_status` before its snapshot, so this window is
+    // deterministic: if the acked record came back it would arrive before this snapshot.
+    again.send(&Message::Attach {
+        id: 141,
+        pane_id: pane,
+        size_policy: None,
+    });
+    let replayed = std::cell::Cell::new(false);
+    again.wait_for(|message| {
+        if matches!(message, Message::Status { state, .. } if state == "done") {
+            replayed.set(true);
+        }
+        matches!(message, Message::Snapshot { .. })
+    });
     assert!(
-        again
-            .drain(&|m| matches!(m, Message::Status { state, .. } if state == "done"))
-            .is_none(),
+        !replayed.get(),
         "an acked record must not come back after a reconnect"
     );
 }
