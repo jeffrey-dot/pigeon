@@ -106,7 +106,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         header.heightAnchor.constraint(equalToConstant: SidebarMetrics.cardHeaderHeight).isActive = true
         // The card: header on top, terminal below, one rounded surface inset from the window.
         let card = CardView()
-        let cardBody = NSStackView(views: [header, container])
+        // harp pads the terminal inside the card 32pt from the left, under the header's name
+        // (`FRAMED_CARD_CONTENT_LEFT_PADDING`), so tmux text lines up with the title above it.
+        let contentBox = NSView()
+        contentBox.addSubview(container)
+        container.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            container.leadingAnchor.constraint(
+                equalTo: contentBox.leadingAnchor, constant: SidebarMetrics.cardContentLeftPadding),
+            container.topAnchor.constraint(equalTo: contentBox.topAnchor),
+            container.trailingAnchor.constraint(equalTo: contentBox.trailingAnchor),
+            container.bottomAnchor.constraint(equalTo: contentBox.bottomAnchor),
+        ])
+        let cardBody = NSStackView(views: [header, contentBox])
         cardBody.orientation = .vertical
         cardBody.spacing = 0
         card.addSubview(cardBody)
@@ -185,6 +197,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let sessionMenu = NSMenu(title: "Session")
         sessionMenu.addItem(withTitle: "Next Needs You", action: #selector(nextNeedsYou(_:)), keyEquivalent: "j")
         sessionMenu.addItem(withTitle: "New Session", action: #selector(newSession(_:)), keyEquivalent: "t")
+        if ProcessInfo.processInfo.environment["PIGEON_DEBUG"] != nil {
+            // Screenshot runs flip the appearance inside one process, which is the same path
+            // AppKit takes when the user switches the system appearance.
+            let toggle = NSMenuItem(
+                title: "Toggle Appearance", action: #selector(toggleAppearance(_:)), keyEquivalent: "a")
+            toggle.keyEquivalentModifierMask = [.command, .option]
+            toggle.target = self
+            sessionMenu.addItem(toggle)
+        }
         let close = NSMenuItem(title: "Close Session", action: #selector(closeSelectedSession(_:)), keyEquivalent: "W")
         sessionMenu.addItem(close)
         for item in sessionMenu.items { item.target = self }
@@ -442,6 +463,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ? SidebarModel.subtitle(status: row.status, since: row.lastSeen)
                 : ""
         )
+    }
+
+    @objc private func toggleAppearance(_ sender: Any?) {
+        let dark = NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        NSApp.appearance = NSAppearance(named: dark ? .aqua : .darkAqua)
     }
 
     @objc private func toggleSidebar(_ sender: Any?) {

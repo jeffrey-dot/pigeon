@@ -34,17 +34,16 @@ swift build && swift test                          # 通过 / 40 passed
 sessions created: 4
 sidebar (light): sidebar sessions=4 needs=2
 sidebar width: sidebar width=272
-apps: sessions apps=1:sh 2:sh 3:done.sh 4:blocked.sh
+apps: sessions apps=1:sh 2:beta 3:done.sh 4:blocked.sh
+hot switch: dark + light captured from one process
 Cmd-J focus messages: 0 -> 1 (ack: 1)
-selected before close: selected=2
+selected before close: selected=4
 Cmd-Shift-W Close Session: close_pane 0 -> 1
 sessions after Cmd-T: 5
-drag: first attempt did not register, retrying
-order: [2, 1, 3, 4]
-reopened: sidebar sessions=4 needs=1
+order: [2, 1, 3, 5]
+reopened: sidebar sessions=4 needs=0
 state file: …/config/sidebar.json (89 bytes)
-sidebar (dark): sidebar sessions=4 needs=1
-titles: sessions apps=1:sh 3:done.sh 4:blocked.sh 5:sh
+sidebar (dark): sidebar sessions=4 needs=0
 ```
 
 `order: [2, 3, 1, 4]` 是脚本把 `A` 组的第 1 行拖到 `C` 组那一行（[reordered-light](images/m3/reordered-light.jpg) 里 `A` 组两行对调），
@@ -67,7 +66,7 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 | 组头项目名 + 条数 | `VT:9123` 11.5 Semibold `SECTION_NAME`；`VT:10092` 11.5 `SECTION_COUNT`；首字母大写 | 同名 token；`A 2` / `B 1` / `C 1` | [sidebar-light](images/m3/sidebar-light.jpg) |
 | 组头 `needs you` | `VT:10101` 12pt `NEEDS_TEXT`；单数 `1 needs you`、复数 `N need you` | `SidebarTheme.needsLabel` 同文案同色 | [sidebar-light](images/m3/sidebar-light.jpg)（B、C 组） |
 | 行高 / 行距 | `VT:9118` 30、`VT:9117` 1 | `rowHeight 30` + `intercellSpacing 1` | [sidebar-light](images/m3/sidebar-light.jpg) |
-| 组间距 | `VT:9122` 组头 28 + `VT:9116` 间距 14 | 组行高度 42（标签靠底部，上方留 14 空档） | [sidebar-light](images/m3/sidebar-light.jpg)（B/C 组上方的空档） |
+| 组间距 | `VT:9115` 间距 14 + `VT:9122` 组头 28 | 组行 42：14pt 空档在**上**、标签占下面 28pt（组头与首个行之间为 0） | [sidebar-light](images/m3/sidebar-light.jpg)（B/C 组上方的空档） |
 | 行圆角 / 选中 | `VT:9121` 8、`VT:9205` `WHITE`、`SELECTED_EDGE` 0.5、`SELECTED_SHADOW` | `SidebarRowView` 自绘胶囊：8pt、动态色、0.5pt 描边、投影；`selectionHighlightStyle = .none` | [sidebar-light](images/m3/sidebar-light.jpg) / [sidebar-dark](images/m3/sidebar-dark.jpg) |
 | 悬停 | `VT:9210` `HOVER` 黑 5% / 白 6% | `SidebarRowView` 的 tracking area 用同一 token；脚本把指针移到行上再截 | [hover-light](images/m3/hover-light.jpg) |
 | 行内缩进 / 右列 | `VT:10031` 左 12 / 右 8，`VT:9114` 列表左右 10 | 标题左 22pt、状态图标右缘 18pt、元素间距 8pt | [sidebar-light](images/m3/sidebar-light.jpg) |
@@ -76,10 +75,10 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 | 状态图标 | `VT:9544-9604` 15pt 字形 / 16pt 槽；needs 用 `ICON_NEEDS_RING`/`ICON_NEEDS_DOT`（`VT:9222-9223`） | SF Symbols：`circle.dashed` / `exclamationmark.circle` / `checkmark.circle.fill` / `checkmark` / 无；needs 用 `iconNeedsRing`（浅 `#c98314`、深 `#e8a33d`） | [sidebar-light](images/m3/sidebar-light.jpg) / [jump-light](images/m3/jump-light.jpg) |
 | 未读 | `VT:9849` 标题 Semibold + 实心 done 盘 | 同上，加 `docs/ui.md` §2.1 要求的行首 5pt 圆点（harp 没有这个点） | [sidebar-light](images/m3/sidebar-light.jpg)（`done.sh` 行） |
 | 顶部按钮 | `VT:10146-10162` 28×28、圆角 7、图标 17、`GRAY`、悬停 `HOVER` 填充 | `SidebarHeaderButton`：28×28、自绘 7pt 圆角悬停填充、图标 17、右对齐 14pt | [sidebar-light](images/m3/sidebar-light.jpg) |
-| 右栏头部 | `VT:9125` 40pt、12.5 Semibold `INK` + 12.5 `GRAY` 路径（行首截断）+ 12 `GRAY` 状态、左 32 / 右 20、0.5 `DIVIDER` | `SessionHeaderView` 同值；侧栏收起时左内边距 84（`VT:9127`） | [sidebar-light](images/m3/sidebar-light.jpg) / [jump-light](images/m3/jump-light.jpg) |
+| 右栏头部 | `VT:9125` 40pt、12.5 Semibold `INK` + 12.5 `GRAY` 路径（行首截断）+ 12 `GRAY` 状态、左 32 / 右 20、0.5 `DIVIDER` | `SessionHeaderView` 同值；下边线是 0.5pt `DividerView`（`cardDivider` `#3a3a3c`），侧栏收起时左内边距 84（`VT:9127`） | [sidebar-light](images/m3/sidebar-light.jpg) / [jump-light](images/m3/jump-light.jpg) |
 | 空态 | harp 没有 | `docs/ui.md` §2.3：“No sessions yet” + New Session | [empty-light](images/m3/empty-light.jpg) / [empty-dark](images/m3/empty-dark.jpg) |
-| 右栏卡片 | `view.rs:579` 圆角 10；`view.rs:22245` 0.5pt `CARD_EDGE`；`view.rs:22247` `CARD_SHADOW` 投影（下移 4、模糊 16）；`view.rs:22258-22262` 上/右/下各 8pt 外缩 | `CardView`：内层 `cornerRadius 10` + `masksToBounds`（防终端底色破角）、外层投影，上/右/下各 8pt，左边贴分隔线；卡片底色 = 终端背景，头部用卡片上的浅色 ink | [sidebar-light](images/m3/sidebar-light.jpg) / [jump-light](images/m3/jump-light.jpg) |
-| 外观切换 | — | 全部动态色；同一个 view 依次用 `.aqua`/`.darkAqua` 渲染的断言在 `SidebarRenderingTests`（侧栏底色 + 未读点），`CardView` 在 `viewDidChangeEffectiveAppearance` 里重解析 layer 色 | [sidebar-light](images/m3/sidebar-light.jpg) vs [sidebar-dark](images/m3/sidebar-dark.jpg) |
+| 右栏卡片 | `view.rs:579` 圆角 10；`view.rs:22245` 0.5pt `CARD_EDGE`；`view.rs:22247` `CARD_SHADOW` 投影（下移 4、模糊 16）；`view.rs:22258-22262` 上/右/下各 8pt 外缩 | `CardView`：内层 `cornerRadius 10` + `masksToBounds`（防终端底色破角）、外层投影，上/右/下各 8pt，左边贴分隔线；终端内容再左缩 32pt；卡片底色 = 终端背景，头部用卡片上的浅色 ink | [sidebar-light](images/m3/sidebar-light.jpg) / [jump-light](images/m3/jump-light.jpg) |
+| 外观切换 | — | 脚本在**同一个进程**里按 ⌥⌘A 触发 `NSApp.appearance` 翻转（`PIGEON_DEBUG` 下的调试菜单项），前后各截一张；`CardView` 在 `viewDidChangeEffectiveAppearance` 里重解析 layer 色，侧栏/未读点由 `SidebarRenderingTests` 断言 | [hot-switch-dark](images/m3/hot-switch-dark.jpg) → [hot-switch-light](images/m3/hot-switch-light.jpg) |
 
 ## 3. 产品调整（用户要求，2026-10-28）
 
@@ -122,7 +121,6 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 | ~~右键 Close Session~~ | 已稳定：`close_pane 0 -> 1` |
 | 悬停 `×` 关闭 | ui.md §2.1 提到，未实现；关闭走右键菜单 / ⌘⇧W |
 | 相对时间的“最后输出时间” | 未上报的行留空（§4.9）。harp 用终端最后一条命令的时间（`VT:9410` `age_from`），我们要宿主上报 pane 活动才做得到（M4） |
-| 悬停胶囊 | `SidebarRowView` 有 tracking area 和 `HOVER` token，但脚本不模拟鼠标悬停，没有截图证据 |
 | harp 的玻璃材质模糊 | 只取 `SIDEBAR` 不透明底色，不叠 `GLASS_BLUR_RADIUS` 30（自绘窗口背景，AppKit 下用系统材质，见 `docs/ui.md` §7.5） |
 | 输入法 / 手速 | M6 |
 | SSH / 多主机分组 | M4 |

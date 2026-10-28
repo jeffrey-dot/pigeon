@@ -46,13 +46,14 @@ sleep 1
 # `KINDS` is the row list: group `g`, session `s`.
 KINDS="gssgsgs"
 # `.fullSizeContentView` puts the content at the window's top edge, so the list starts at
-# the sidebar header (56) plus its top padding (4) — no 28pt titlebar offset.
+# the sidebar header (56) plus its top padding (4) — no 28pt titlebar offset. `OY` is the
+# window's screen origin, and clicks are screen coordinates.
 ROW_TOP=$((56 + 4))
 row_y() {
         python3 -c "
 kinds = '$KINDS'
 h = {'g': 42, 's': 31}
-y = $ROW_TOP
+y = $OY + $ROW_TOP
 for k in kinds[:$1]:
     y += h[k]
 print(y + h[kinds[$1]] // 2)
@@ -85,8 +86,12 @@ sleep 1
 # --- sessions -------------------------------------------------------------------------
 cargo run --quiet --manifest-path core/Cargo.toml --example keys -- \
         --socket "$R/pigeon.sock" --new-session /tmp/pigeon/a >/dev/null 2>&1
+# Second session in the same project sets its own OSC 0 title, so the two rows of group A
+# are distinguishable in the before/after drag screenshots.
+printf '#!/bin/sh\nprintf "\\033]0;beta\\007"\nexec /bin/sh\n' >"$R/beta.sh"
+chmod +x "$R/beta.sh"
 cargo run --quiet --manifest-path core/Cargo.toml --example keys -- \
-        --socket "$R/pigeon.sock" --new-session /tmp/pigeon/a >/dev/null 2>&1
+        --socket "$R/pigeon.sock" --new-session /tmp/pigeon/a --shell "$R/beta.sh" >/dev/null 2>&1
 # A done session that nobody is looking at: unread dot + filled check.
 printf '#!/bin/sh\nsleep 2\nprintf "\\033]7501;state=done\\007"\nexec /bin/sh\n' >"$R/done.sh"
 chmod +x "$R/done.sh"
@@ -106,6 +111,23 @@ echo "sidebar (light): $(grep -o 'sidebar sessions=[0-9]* needs=[0-9]*' "$R/app-
 echo "sidebar width: $(grep -o 'sidebar width=[0-9]*' "$R/app-light.log" | tail -1)"
 echo "apps: $(grep -o 'sessions apps=[^"]*' "$R/app-light.log" | tail -1)"
 
+# Hover the second row: the pill under the pointer is part of the comparison table.
+cliclick m:150,$(row_y 2)
+sleep 1
+shoot "$OUT/hover-light.jpg"
+cliclick m:150,560
+sleep 0.5
+
+# Hot appearance switch inside the same process: the debug menu item flips NSApp.appearance,
+# which is the path AppKit takes when the user changes the system appearance.
+key a "command down, option down"
+sleep 1
+shoot "$OUT/hot-switch-dark.jpg"
+key a "command down, option down"
+sleep 1
+shoot "$OUT/hot-switch-light.jpg"
+echo "hot switch: dark + light captured from one process"
+
 before=$(grep -c 'pigeon-host: <- focus' "$R/host.log")
 key j "command down"
 sleep 1
@@ -113,20 +135,15 @@ after=$(grep -c 'pigeon-host: <- focus' "$R/host.log")
 echo "Cmd-J focus messages: $before -> $after (ack: $(grep -c 'pigeon-host: <- ack_status' "$R/host.log"))"
 shoot "$OUT/jump-light.jpg"
 
-# Drag session 1 below session 2 inside group A: the drop handler inserts the dragged
-# session at the target's index, and the target must be a session in a later group.
-
-# The menu itself is visual evidence; closing goes through ⌘⇧W (same `closeSession`),
-# which does not depend on where a synthetic click lands in a menu.
+# The menu itself is the visual evidence; closing then goes through ⌘⇧W, which calls the
+# same `closeSession` and does not depend on where a synthetic click lands inside a menu.
 cliclick rc:100,$(row_y 2) w:600
 sleep 1
 shoot "$OUT/menu-light.jpg"
-# Leave the menu without picking anything, then close through ⌘⇧W: both paths call the
-# same `closeSession`, and the shortcut does not depend on menu placement.
 cliclick c:600,420
 sleep 1
 before=$(grep -c 'pigeon-host: <- close_pane' "$R/host.log")
-cliclick c:150,$(row_y 2)
+cliclick c:150,$(row_y 6)
 sleep 1
 echo "selected before close: $(grep -o 'selected=[0-9-]*' "$R/app-light.log" | tail -1)"
 osa -e 'tell application "System Events" to keystroke "W" using {command down, shift down}'
@@ -144,17 +161,19 @@ key t "command down"
 sleep 2
 echo "sessions after Cmd-T: $(grep -c 'pigeon-host: <- new_session' "$R/host.log")"
 
-# Drag session 2 onto session 1 (a real drag has to cross the table's threshold with
-# several moves). Dropping on a session inserts at that session's index, so this swaps
-# the two rows inside group A.
+# Drag in a fresh app: earlier clicks leave the pointer somewhere else and AppKit's drag
+# session takes its position from the last mouse location, which made the drop land wrong.
+kill "$APP_PID" 2>/dev/null
+sleep 1
+launch light
 drag_rows() {
-        cliclick dd:100,$(row_y 2)
-        sleep 0.3
-        cliclick dm:100,$(($(row_y 2) - 14))
-        sleep 0.2
-        cliclick dm:100,$(row_y 1)
-        sleep 0.3
-        cliclick du:100,$(row_y 1)
+        local from to
+        from=$(row_y 1)
+        to=$(row_y 4)
+        # Drag `sh` onto `done.sh`: the handler inserts at the target's index, which lands
+        # `sh` after `beta` in the persisted order — a visible swap inside group A.
+        cliclick m:150,$from w:300 dd:100,$from w:300 dm:100,$((from + 16)) w:250 \
+                dm:100,$((from + 90)) w:250 dm:100,$to w:400 du:100,$to
         sleep 1
 }
 drag_rows
@@ -165,9 +184,6 @@ fi
 shoot "$OUT/reordered-light.jpg"
 echo "order: $(sidebar_state order)"
 
-# A drag session runs its own modal loop inside AppKit: keep it last, so a stuck drag
-# cannot swallow the clicks and keys that produce the rest of the evidence.
-
 kill "$APP_PID" 2>/dev/null
 sleep 1
 launch light
@@ -176,12 +192,6 @@ echo "reopened: $(grep -o 'sidebar sessions=[0-9]* needs=[0-9]*' "$R/app-light.l
 echo "state file: $CONFIG/sidebar.json ($(wc -c <"$CONFIG/sidebar.json" 2>/dev/null || echo 0) bytes)"
 kill "$APP_PID" 2>/dev/null
 sleep 1
-
-# Hover one row so the hover pill is on the record too.
-cliclick m:150,$(row_y 2)
-sleep 1
-shoot "$OUT/hover-light.jpg"
-cliclick m:150,500
 
 # --- dark: the same list, for the palette half of the comparison table -----------------
 launch dark

@@ -161,14 +161,14 @@ Pane(id, title, status, status_at, kind, msg)   # 直接来自 OSC 7501 记录
 
 | 项 | 出处 | harp 取值 | pigeon 取值（目标） |
 |---|---|---|---|
-| 侧栏宽度 | `VT:9111` `SIDEBAR_WIDTH` | 272（可拖） | 默认 272，夹 200–360 |
-| 侧栏顶部 header 高（红绿灯那一行） | `VT:9112` `HEADER_HEIGHT` | 56 | 56（红绿灯内嵌 + 右侧两个按钮） |
-| 列表左右留白 | `VT:9114` `LIST_SIDE_PADDING` | 10 | 10 |
-| 列表顶部留白 | `VT:9115` `LIST_TOP_PADDING` | 4 | 4 |
-| 分组之间 | `VT:9116` `SECTION_GAP` | 14 | 14 |
-| 行之间 | `VT:9117` `ROW_GAP` | 1 | 1 |
-| 行高 | `VT:9118` `ROW_HEIGHT` | 30 | 30 |
-| 行圆角 | `VT:9121` `ROW_RADIUS` | 8 | 8（选中/悬停/拖动都是这一个半径） |
+| 侧栏宽度 | `VT:9110` `SIDEBAR_WIDTH` | 272（可拖） | 默认 272，夹 200–360 |
+| 侧栏顶部 header 高（红绿灯那一行） | `VT:9111` `HEADER_HEIGHT` | 56 | 56（红绿灯内嵌 + 右侧两个按钮） |
+| 列表左右留白 | `VT:9113` `LIST_SIDE_PADDING` | 10 | 10 |
+| 列表顶部留白 | `VT:9114` `LIST_TOP_PADDING` | 4 | 4 |
+| 分组之间 | `VT:9115` `SECTION_GAP` | 14 | 14 |
+| 行之间 | `VT:9116` `ROW_GAP` | 1 | 1 |
+| 行高 | `VT:9117` `ROW_HEIGHT` | 30 | 30 |
+| 行圆角 | `VT:9120` `ROW_RADIUS` | 8 | 8（选中/悬停/拖动都是这一个半径） |
 | 行内边距 | `VT:10031`（行）`VT:2983`（正文行） | 左 12 / 右 8 | 左 12 / 右 8 |
 | 行内元素间距 | `VT:9827` `row_line` spacing | 8 | 8 |
 | 组头高 | `VT:9122` `SECTION_HEADER_HEIGHT` | 28 | 28 |
@@ -177,14 +177,14 @@ Pane(id, title, status, status_at, kind, msg)   # 直接来自 OSC 7501 记录
 | 顶部按钮 | `VT:10146-10162` | 28×28、圆角 7、图标 17、悬停 `HOVER` 填充 | 28×28、圆角 7、图标 17、`SidebarHeaderButton` 自绘悬停填充 |
 | 右栏头部高 | `VT:9125` `CARD_HEADER_HEIGHT` | 40 | 40 |
 | 右栏头部左右留白 | `VT:9127-9128` `CARD_HEADER_PAD_OPEN/CLOSED`、`VT:10945` | 左 32（侧栏开）/ 84（侧栏关），右 20 | 左 32 / 右 20 |
-| 右栏头部下边线 | `VT:10945` `Border::new(0.5)` + `DIVIDER` | 0.5pt | 0.5pt |
-| 窗口红绿灯区 | `TL:64` `TrafficLightData{width:64, side:Left}` | 左侧 64 宽 | 左侧 64 宽（原生红绿灯内嵌） |
+| 右栏头部下边线 | `VT:10945` `Border::new(0.5)` + `DIVIDER` | 0.5pt / `#3a3a3c`（卡片是深色） | 0.5pt，`cardDivider` 固定 `#3a3a3c`（卡片底色固定是终端背景，不能用跟随外观的 `DIVIDER`） |
+| 窗口红绿灯区 | `TL:74` `TrafficLightData{width:64, side:Left}` | 左侧 64 宽 | 左侧 64 宽（原生红绿灯内嵌） |
 | 右栏卡片圆角 | `view.rs:579` `FRAMED_CARD_CORNER_RADIUS` | 10 | 10（`CardView` 内层 `cornerCurve = .continuous`） |
 | 右栏卡片外缩 | `view.rs:22258-22262` `inset_framed_card()` | 上/右/下各 8，左边贴分隔线 | 同上（8pt 缝露出侧栏底色） |
 | 右栏卡片描边 | `view.rs:22245` `Border::all(0.5)` + `CARD_EDGE` | 0.5 | 0.5（`cardEdge`） |
 | 右栏卡片投影 | `view.rs:22247-22252` `css_shadow(CARD_SHADOW, 4., 16.)` | 下移 4、模糊 16 | 下移 4、模糊 16（`cardShadow`，`shadowRadius = 8`） |
 | 卡片内容左内边距 | `view.rs:585` `FRAMED_CARD_CONTENT_LEFT_PADDING` | 32 | 32（头部与终端内容） |
-| 侧栏底部 footer | `VT:9113` `FOOTER_HEIGHT` | 44 | 不做（pigeon 没有 harp 的 footer，见 §6） |
+| 侧栏底部 footer | `VT:9112` `FOOTER_HEIGHT` | 44 | 不做（pigeon 没有 harp 的 footer，见 §6） |
 
 ### 7.2 颜色（浅 / 深）
 
@@ -201,18 +201,18 @@ Pane(id, title, status, status_at, kind, msg)   # 直接来自 OSC 7501 记录
 | `ICON_NEEDS_RING` / `ICON_NEEDS_DOT` | 行内“等待”状态图标（`VT:9222-9223`，使用处 `VT:9583/9588`） | `#c98314` / `#e8a33d` | `#e8a33d` / `#f0b35c` |
 | `needs_you_color()` | 等待行的相对时间（`VT:4447`，固定值不经主题） | `#e8a33d` | `#e8a33d` |
 | `ICON_STRONG` | working 弧、未读 done 实心盘 | `#3a3a3c` | `#e5e5ea` |
-| `ICON_ON_FILL` | 实心盘里被抠掉的勾 | `#ffffff` | `#1c1c1e` |
+| `ICON_ON_FILL` | 实心盘里被抠掉的勾 | `#ffffff` | `#1c1c1e` | harp 有，pigeon 不用：`checkmark.circle.fill` 自带反色 |
 | `RING` | 已读 done 的勾、idle 月亮 | `#a1a1a6` | `#636366` |
-| `TRACK` | working 的转圈轨道 | `#e0e0e4` | `#3a3a3e` |
+| `TRACK` | working 的转圈轨道 | `#e0e0e4` | `#3a3a3e` | harp 有，pigeon 不用：working 用一个 SF Symbol |
 | `WHITE` | 选中行底色 | `#ffffff` | `#3a3a3d` |
 | `QUIET_SELECTED` | 窗口失焦时的选中底色 | `#f4f4f5` | `#2f2f32` |
 | `HOVER` | 悬停底色 | 黑 5%（alpha 13） | 白 6%（alpha 15） |
 | `SELECTED_EDGE` | 选中行 0.5pt 描边 | 黑 8% | 白 10% |
 | `SELECTED_SHADOW` | 选中行投影 | 黑 6% | 黑 25% |
-| `DIVIDER` | 右栏头部下边线 | `#ececef` | `#3a3a3c` |
+| `DIVIDER` | 右栏头部下边线 | `#ececef` | `#3a3a3c` | harp 有；pigeon 用固定深色 `cardDivider`（卡片底色恒为终端背景），不用这个随外观走的 token |
 | `SIDEBAR` | 侧栏不透明底色 | `#e8e8eb` | `#232326` |
 | `GLASS_TINT` | 侧栏材质上的半透明罩（`sidebar_fill()`） | `rgba(250,250,252,140)` | `rgba(30,30,32,140)` |
-| `BADGE_TEXT` | needs-you 角标文字 | `#3a2300` | `#3a2300` |
+| `BADGE_TEXT` | 顶部按钮角标文字 | `#3a2300` | `#3a2300` | harp 有，pigeon 不用：没有角标 |
 | `CARD_EDGE` | 右栏卡片 0.5pt 描边（`view.rs:22245`） | 黑 10%（alpha 26） | 白 10%（alpha 26） |
 | `CARD_SHADOW` | 右栏卡片投影（`view.rs:22247`） | 黑 5%（alpha 13） | 黑 25%（alpha 64） |
 
@@ -221,7 +221,7 @@ Pane(id, title, status, status_at, kind, msg)   # 直接来自 OSC 7501 记录
 | 项 | 出处 | harp 取值 | pigeon 取值（目标） |
 |---|---|---|---|
 | 字体 | `VT:9239-9260` `load_font()` | `.AppleSystemUIFont`（SF Pro Text） | `.systemFont`（同一个字体） |
-| 行标题 | `VT:9120` `ROW_TITLE_SIZE`、`VT:9849` | 13，未读 Semibold | 13，未读 Semibold |
+| 行标题 | `VT:9119` `ROW_TITLE_SIZE`、`VT:9849` | 13，未读 Semibold | 13，未读 Semibold |
 | 行时间 | `VT:8568` 10pt；颜色 `VT:8564` → `needs_you_color()` `#E8A33D`（等待）否则 `SUB` | 10pt；blocked 行用 `needsAccent` `#E8A33D`，其余 `GRAY`/`SUB` | 10pt，同上 |
 | 组头项目名 | `VT:9123` `SECTION_TITLE_SIZE`、`VT:10130` | 11.5 Semibold，首字母大写 | 11.5 Semibold，首字母大写 |
 | 组头条数 | `VT:10092` | 11.5 Normal | 11.5 Normal |
@@ -247,5 +247,5 @@ Pane(id, title, status, status_at, kind, msg)   # 直接来自 OSC 7501 记录
 ### 7.5 取用范围
 
 - **照搬**：7.1 全部尺寸、7.2 全部 token、7.3 字号字重、7.4 语义与颜色。
-- **不照搬**：harp 的 `MENU_*`、`LIFTED_*`（拖动悬浮副本）、`CARD_*`（分组卡片）、footer、玻璃材质模糊（`GLASS_BLUR_RADIUS`）——这些是它自绘 UI 的专属部件，pigeon 用系统菜单/系统材质替代或不做。
+- **不照搬**：harp 的 `MENU_*`、`LIFTED_*`（拖动时的悬浮副本）、分组卡片（`TabGroup` 的卡面）、footer、玻璃材质模糊（`GLASS_BLUR_RADIUS`）——这些是它自绘 UI 的专属部件；而**右栏的卡片本身是照搬的**（`CARD_EDGE`/`CARD_SHADOW`/圆角/外缩，见 §7.1 那 6 行）。
 - **色值落地方式**：7.2 的每个 token 在 pigeon 里写成 `NSColor(name:dynamicProvider:)`（浅/深各一支），保证切换系统外观即时生效。

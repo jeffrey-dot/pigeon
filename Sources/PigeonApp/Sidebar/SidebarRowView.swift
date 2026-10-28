@@ -46,7 +46,7 @@ final class SidebarRowView: NSTableRowView {
         if isSelected && isEmphasized {
             NSGraphicsContext.saveGraphicsState()
             let shadow = NSShadow()
-            shadow.shadowColor = SidebarTheme.selectedEdge
+            shadow.shadowColor = SidebarTheme.selectedShadow
             shadow.shadowBlurRadius = 2
             shadow.shadowOffset = NSSize(width: 0, height: -1)
             shadow.set()

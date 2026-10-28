@@ -6,7 +6,7 @@ final class SessionHeaderView: NSView {
     private let title = NSTextField(labelWithString: "")
     private let path = NSTextField(labelWithString: "")
     private let state = NSTextField(labelWithString: "")
-    private let divider = NSBox()
+    private let divider = DividerView()
     private var titleLeading: NSLayoutConstraint!
 
     override init(frame: NSRect) {
@@ -42,7 +42,6 @@ final class SessionHeaderView: NSView {
         state.font = .systemFont(ofSize: SidebarMetrics.cardStateSize)
         state.textColor = SidebarTheme.cardGray
         state.alignment = .right
-        divider.boxType = .separator
 
         for label in [title, path, state] {
             addSubview(label)
@@ -67,7 +66,7 @@ final class SessionHeaderView: NSView {
             divider.leadingAnchor.constraint(equalTo: leadingAnchor),
             divider.trailingAnchor.constraint(equalTo: trailingAnchor),
             divider.bottomAnchor.constraint(equalTo: bottomAnchor),
-            divider.heightAnchor.constraint(equalToConstant: SidebarMetrics.dividerWidth),
+            divider.heightAnchor.constraint(equalToConstant: SidebarMetrics.cardEdgeWidth),
         ])
     }
 }

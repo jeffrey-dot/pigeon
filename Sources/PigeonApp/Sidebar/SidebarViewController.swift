@@ -82,7 +82,10 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
             headerControlsCenter,
             buttons.trailingAnchor.constraint(
                 equalTo: root.trailingAnchor, constant: -SidebarMetrics.headerPadRight),
-            scroll.topAnchor.constraint(equalTo: buttons.bottomAnchor),
+            // The header is a fixed 56pt band (harp's HEADER_HEIGHT); the chips sit on the
+            // traffic-light row inside it, and the list always starts below the band.
+            scroll.topAnchor.constraint(
+                equalTo: root.topAnchor, constant: SidebarMetrics.headerHeight),
             scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor),
@@ -212,8 +215,11 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
             title.leadingAnchor.constraint(
                 equalTo: view.leadingAnchor,
                 constant: SidebarMetrics.listSidePadding + SidebarMetrics.sectionInsetLeft),
-            title.bottomAnchor.constraint(
-                equalTo: view.bottomAnchor, constant: -SidebarMetrics.sectionHeaderHeight / 2),
+            // SECTION_GAP sits between sections, so the label fills the *lower* 28pt of the
+            // 42pt row and the 14pt breathing space stays above it.
+            title.centerYAnchor.constraint(
+                equalTo: view.topAnchor,
+                constant: SidebarMetrics.sectionGap + SidebarMetrics.sectionHeaderHeight / 2),
             total.leadingAnchor.constraint(
                 equalTo: title.trailingAnchor, constant: SidebarMetrics.sectionSpacing),
             total.firstBaselineAnchor.constraint(equalTo: title.firstBaselineAnchor),
