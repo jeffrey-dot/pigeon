@@ -264,6 +264,8 @@ fn normalized(message: &Message) -> Message {
             screen,
             history,
             links,
+            history_len: None,
+            offset: None,
         },
         other => other,
     }
@@ -816,7 +818,7 @@ fn scroll_reaches_ten_thousand_lines_of_history() {
     });
 
     // A live snapshot may still be in flight, so wait for one that actually looks back.
-    let wait_top = |client: &mut Client, below: u32| -> u32 {
+    let wait_top = |client: &mut Client, below: u32| -> (u32, Option<u32>, Option<u32>) {
         let message = client.wait_for(|message| match message {
             Message::Snapshot { screen, .. } => rows_text(screen)
                 .lines()
@@ -824,13 +826,23 @@ fn scroll_reaches_ten_thousand_lines_of_history() {
                 .is_some_and(|top| top < below),
             _ => false,
         });
-        let Message::Snapshot { screen, .. } = &message else {
+        let Message::Snapshot {
+            screen,
+            history_len,
+            offset,
+            ..
+        } = &message
+        else {
             unreachable!()
         };
-        rows_text(screen)
-            .lines()
-            .find_map(|line| line.trim().parse::<u32>().ok())
-            .unwrap_or_default()
+        (
+            rows_text(screen)
+                .lines()
+                .find_map(|line| line.trim().parse::<u32>().ok())
+                .unwrap_or_default(),
+            *history_len,
+            *offset,
+        )
     };
 
     // 5000 lines back from the live screen (line 20000) lands near 15000, not at the top.
@@ -838,7 +850,14 @@ fn scroll_reaches_ten_thousand_lines_of_history() {
         pane_id: pane,
         offset: -5000,
     });
-    let at_15k = wait_top(&mut client, 19_950);
+    let (at_15k, total, at) = wait_top(&mut client, 19_950);
+    // The indicator needs both numbers: how long the backlog is and where this view sits.
+    assert_eq!(
+        total,
+        Some(10_000),
+        "the host reports the whole 10k backlog, not just the visible slice"
+    );
+    assert_eq!(at, Some(5_000), "and the offset it actually applied");
     // The viewport top moves up by exactly the requested lines: live top ~19977 − 5000.
     assert!(
         (14_970..=14_990).contains(&at_15k),
@@ -850,7 +869,12 @@ fn scroll_reaches_ten_thousand_lines_of_history() {
         pane_id: pane,
         offset: -20_000,
     });
-    let oldest = wait_top(&mut client, 10_100);
+    let (oldest, _, clamped) = wait_top(&mut client, 10_100);
+    assert_eq!(
+        clamped,
+        Some(10_000),
+        "scrolling past the top clamps to the backlog"
+    );
     // 20000 lines fed, 24 still on screen, 10000 kept as backlog: oldest ~9977.
     assert!(
         (9_960..=9_990).contains(&oldest),

@@ -35,6 +35,19 @@ final class HostRecoveryTests: XCTestCase {
         XCTAssertEqual(HostRecovery.plan(hasRemote: false), .local)
     }
 
+    /// A network drop is not a crashed local socket: the remote probe has to keep trying for
+    /// far longer than the local restart loop (the M4 acceptance is a 30 s outage).
+    func testTheRemoteBudgetOutlastsTheLocalOne() {
+        XCTAssertTrue(HostRecovery.canRetryRemote(after: 0))
+        XCTAssertTrue(
+            HostRecovery.canRetryRemote(after: HostRecovery.attempts),
+            "the local budget is used up long before the remote one")
+        XCTAssertTrue(HostRecovery.canRetryRemote(after: HostRecovery.remoteAttempts - 1))
+        XCTAssertFalse(HostRecovery.canRetryRemote(after: HostRecovery.remoteAttempts))
+        let window = Double(HostRecovery.remoteAttempts) * HostRecovery.remoteRetryDelay
+        XCTAssertGreaterThanOrEqual(window, 30, "must outlast the 30 s outage it is for")
+    }
+
     func testTheHelpTextNamesTheRealCommand() {
         XCTAssertTrue(HostRecovery.startCommand.contains("--bin pigeon-host"))
     }

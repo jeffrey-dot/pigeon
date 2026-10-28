@@ -255,6 +255,13 @@ pub enum Message {
         history: Option<Vec<Vec<Cell>>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         links: Option<Vec<Link>>,
+        /// Lines of scrollback the pane holds; only sent with a `scroll` answer, so the
+        /// client can draw where it is in the history (protocol §3.3).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        history_len: Option<u32>,
+        /// How far back that answer is scrolled (0 = live screen).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        offset: Option<u32>,
     },
     Delta {
         pane_id: u32,
@@ -620,6 +627,8 @@ mod tests {
                     id: 9,
                     uri: "https://example.com".into(),
                 }]),
+                history_len: Some(1000),
+                offset: Some(5),
             },
             Message::Delta {
                 pane_id: 1,
@@ -829,6 +838,8 @@ mod tests {
             screen: vec![big],
             history: None,
             links: None,
+            history_len: None,
+            offset: None,
         };
         assert_eq!(encode_frame(&message), Err(PgError::Overflow));
     }

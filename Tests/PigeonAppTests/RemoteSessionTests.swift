@@ -203,6 +203,24 @@ final class RemoteSessionTests: XCTestCase {
         XCTAssertNotNil(outcome.client)
     }
 
+    /// The reconnect path must not fall back to plain ssh: that would replace a persistent
+    /// session with one that dies with the window, silently.
+    func testDegradingCanBeRefusedOutright() {
+        let session = RemoteSession(
+            host: "far",
+            run: { _ in HostInstaller.Result(status: 0, output: "", error: "") },
+            spawn: { _ in
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/false")
+                try process.run()
+                return process
+            }
+        )
+        XCTAssertThrowsError(try session.connect(allowHost: false, allowDegraded: false)) { error in
+            XCTAssertTrue("\(error)".contains("no pigeon-host"), "got \(error)")
+        }
+    }
+
     /// Mode C over real ssh: the process is spawned and the window is told what it costs.
     /// The rendering itself is covered by the local VT tests above; driving the ssh pty
     /// through this test runner proved unreliable (see `docs/m2-checklist.md`-style notes in

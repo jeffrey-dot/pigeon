@@ -33,6 +33,9 @@ public struct SidebarSession: Equatable {
     public var clients: Int
     /// The machine this session lives on (`local` for the socket next to us).
     public var host: String
+    /// Replaces the age text when the row is a machine rather than a session
+    /// (`connected` / `connecting` / `offline`).
+    public var statusText: String?
 
     public init(
         id: Int,
@@ -46,7 +49,8 @@ public struct SidebarSession: Equatable {
         reported: Bool = false,
         sizeSource: String = "",
         clients: Int = 1,
-        host: String = "local"
+        host: String = "local",
+        statusText: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -60,6 +64,7 @@ public struct SidebarSession: Equatable {
         self.sizeSource = sizeSource
         self.clients = clients
         self.host = host
+        self.statusText = statusText
     }
 }
 
@@ -92,6 +97,54 @@ public enum SidebarModel {
             }
             return (group: group, sessions: rows)
         }
+    }
+
+    /// One row per machine, under a `Machines` heading, so the sidebar shows where a session
+    /// lives even when that machine is not the one connected right now (`docs/remote.md` §4).
+    /// Ids are negative: sessions use positive ids, so a click is unambiguous.
+    public static let machinesGroup = "Machines"
+
+    public static func hostRows(
+        hosts: [String],
+        connected: String?,
+        connecting: String? = nil
+    ) -> [SidebarSession] {
+        func state(_ host: String?) -> String {
+            if let connecting, connecting == host { return "connecting" }
+            if connected == host { return "connected" }
+            return "offline"
+        }
+        var rows = [
+            SidebarSession(
+                id: -1,
+                title: "This Mac",
+                group: machinesGroup,
+                status: .idle,
+                host: "local",
+                statusText: state(nil)
+            )
+        ]
+        for (index, host) in hosts.enumerated() {
+            rows.append(
+                SidebarSession(
+                    id: -2 - index,
+                    title: host,
+                    group: machinesGroup,
+                    status: .idle,
+                    host: host,
+                    statusText: state(host)
+                ))
+        }
+        return rows
+    }
+
+    /// The host a negative row id points at (`nil` = This Mac), or nil for a session id.
+    public static func host(forRow id: Int, hosts: [String]) -> String?? {
+        guard id < 0 else { return nil }
+        if id == -1 { return .some(nil) }
+        let index = -2 - id
+        guard index >= 0, index < hosts.count else { return nil }
+        return .some(hosts[index])
     }
 
     /// The heading one row belongs under: the project alone on this machine, `host / project`
@@ -189,6 +242,9 @@ public enum SidebarModel {
     /// date we have is when the row appeared — not when the program last spoke.
     /// With more than one window attached it also names who owns the size (protocol §6).
     public static func ageText(for session: SidebarSession, now: Date = Date()) -> String {
+        if let statusText = session.statusText {
+            return statusText
+        }
         let age = session.reported ? relativeTime(session.lastSeen, now: now) : ""
         guard session.clients > 1 else { return age }
         let owner = "\(session.clients)× \(session.sizeSource)"

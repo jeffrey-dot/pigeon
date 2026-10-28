@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import PigeonCore
 
@@ -20,6 +21,10 @@ final class LocalSession {
     private var stdin: FileHandle?
 
     init() {
+        // A dead ssh child turns our next write into EPIPE. The default action for SIGPIPE is
+        // to kill the process — in a test run that looks like `signal 13`, in the app it is a
+        // crash. Writes are best-effort here, so ignore it and let the write fail instead.
+        signal(SIGPIPE, SIG_IGN)
         core = pg_core_new(nil)
         pane = pg_pane_new(core, nil)
     }
@@ -50,7 +55,8 @@ final class LocalSession {
     }
 
     func write(_ bytes: [UInt8]) {
-        stdin?.write(Data(bytes))
+        // The throwing API keeps a closed pipe from raising; `write(_:)` would abort.
+        try? stdin?.write(contentsOf: Data(bytes))
     }
 
     /// Feeds bytes straight into the VT — the same path the ssh reader takes.
@@ -79,7 +85,7 @@ final class LocalSession {
             pg_pane_respond(core, pane, raw.baseAddress, raw.count)
         }
         guard count > 0 else { return }
-        stdin?.write(Data(buffer[0..<count]))
+        try? stdin?.write(contentsOf: Data(buffer[0..<count]))
     }
 
     @discardableResult

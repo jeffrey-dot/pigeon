@@ -32,6 +32,10 @@ final class PaneView: NSView {
     var onScroll: ((Int) -> Void)?
     /// `scroll { offset: 0 }`: snap back to the live screen.
     var onScrollToBottom: (() -> Void)?
+    /// Where this view is in the scrollback, from the host's `scroll` answer: total history
+    /// lines and how far back the screen is. Both 0 means "nothing to show".
+    private(set) var scrollHistory = 0
+    private(set) var scrollOffset = 0
     private(set) var cursor = Cursor(x: 0, y: 0, visible: false)
 
     var onInput: (([UInt8]) -> Void)?
@@ -48,6 +52,37 @@ final class PaneView: NSView {
             )
         }
         CoreTextRenderer.draw(cells: cells, cols: cols, rows: rows, cursor: cursor, in: bounds)
+        drawScrollIndicator()
+    }
+
+    /// Applies the position reported by a `scroll` answer; `total == 0` hides the indicator.
+    func setScrollPosition(total: Int, offset: Int) {
+        scrollHistory = max(total, 0)
+        scrollOffset = min(max(offset, 0), scrollHistory)
+        needsDisplay = true
+    }
+
+    /// The indicator thumb in view coordinates, or nil when there is no history. Offset 0 is
+    /// the live screen, which is the bottom of the track.
+    static func scrollThumb(
+        bounds: CGRect, rows: Int, history: Int, offset: Int
+    ) -> CGRect? {
+        guard history > 0, rows > 0, bounds.height > 0, bounds.width > 8 else { return nil }
+        let width: CGFloat = 3
+        let visible = CGFloat(rows) / CGFloat(rows + history)
+        let height = max(bounds.height * visible, 18)
+        let travel = bounds.height - height
+        let progress = CGFloat(min(max(offset, 0), history)) / CGFloat(history)
+        return CGRect(
+            x: bounds.maxX - width - 2, y: travel * progress, width: width, height: height)
+    }
+
+    private func drawScrollIndicator() {
+        guard let thumb = Self.scrollThumb(
+            bounds: bounds, rows: rows, history: scrollHistory, offset: scrollOffset)
+        else { return }
+        NSColor.secondaryLabelColor.withAlphaComponent(0.45).setFill()
+        NSBezierPath(roundedRect: thumb, xRadius: 1.5, yRadius: 1.5).fill()
     }
 
     /// Wheel delta in whole lines; the sub-line remainder is carried to the next event so a
@@ -68,9 +103,23 @@ final class PaneView: NSView {
 
     private var wheelRemainder: CGFloat = 0
 
+    /// What one wheel event should ask the host for. The alternate screen has no history to
+    /// look at, so it asks for nothing and the wheel goes nowhere (like every terminal).
+    static func scrollRequest(
+        alt: Bool,
+        deltaY: CGFloat,
+        precise: Bool,
+        cellHeight: CGFloat,
+        remainder: CGFloat
+    ) -> (lines: Int, remainder: CGFloat) {
+        guard !alt else { return (0, remainder) }
+        return wheelLines(
+            deltaY: deltaY, precise: precise, cellHeight: cellHeight, remainder: remainder)
+    }
+
     override func scrollWheel(with event: NSEvent) {
-        guard !alt else { return }  // the alternate screen has no history to look at
-        let (lines, remainder) = Self.wheelLines(
+        let (lines, remainder) = Self.scrollRequest(
+            alt: alt,
             deltaY: event.scrollingDeltaY,
             precise: event.hasPreciseScrollingDeltas,
             cellHeight: CoreTextRenderer.cellSize().height,

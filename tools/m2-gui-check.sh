@@ -26,9 +26,30 @@ pass() { note "PASS  $*"; }
 bad() { note "FAIL  $*"; fail=1; }
 skip() { note "SKIP  $*"; }
 
-osa() { osascript "$@" >/dev/null 2>&1; }
 osa_out() { osascript "$@" 2>/dev/null; }
-key() { osa -e "tell application \"System Events\" to keystroke \"$1\" using {$2}"; }
+# Failures must be visible: a hidden osascript error once looked like "no Accessibility".
+keycode() {
+    local out
+    out=$(osascript -e "tell application \"System Events\" to key code $1 using {$2}" 2>&1) ||
+        { bad "System Events refused the keystroke: $out"; return 1; }
+    return 0
+}
+# The SwiftPM binary runs as "pigeon-bin", so address the process by pid instead of name.
+frontmost() {
+    local tries=0 pid
+    pid=$(pgrep -f "^$APP$" | head -1)
+    [ -n "$pid" ] || pid=$(pgrep -f "$APP" | head -1)
+    [ -n "$pid" ] || return 1
+    while [ "$tries" -lt 10 ]; do
+        osascript -e "tell application \"System Events\" to set frontmost of (first process whose unix id is $pid) to true" >/dev/null 2>&1
+        sleep 0.3
+        if [ "$(osascript -e "tell application \"System Events\" to get frontmost of (first process whose unix id is $pid)" 2>/dev/null)" = "true" ]; then
+            return 0
+        fi
+        tries=$((tries + 1))
+    done
+    return 1
+}
 wait_for() { # wait_for <seconds> <command...>
     local deadline=$((SECONDS + $1))
     shift
@@ -86,31 +107,28 @@ HOST_PID=$(pgrep -f 'pigeon-host' | head -1)
 LOG="$APP_LOG"
 
 # --- two: real keystrokes: split, zoom, unzoom ------------------------------------------
-osa -e 'tell application "System Events" to set frontmost of process "pigeon" to true'
-key d "command down"
-if wait_for 10 grep -q "<- split_pane" "$LOG"; then
-    pass "Cmd-D reached the host as split_pane"
+# The menu's zoom item is Cmd-Shift-Return (key code 36), not Cmd-Shift-D: that one is
+# "Split Top/Bottom" and would never produce a zoom_pane.
+if frontmost; then
+    pass "the window came to the front"
 else
-    skip "Cmd-D (needs Accessibility: System Events could not type)"
+    bad "the window never became frontmost; the keyboard steps cannot be trusted"
 fi
-key d "command down, shift down"
-if wait_for 10 grep -q "<- zoom_pane" "$LOG"; then
-    pass "Cmd-Shift-Return reached the host as zoom_pane"
-else
-    skip "Cmd-Shift-Return (needs Accessibility)"
-fi
-key d "command down, shift down"
-wait_for 10 grep -q "<- unzoom" "$LOG" && pass "Cmd-Shift-Return again sent unzoom" ||
-    skip "unzoom"
+keycode 2 "command down" && wait_for 10 grep -q "<- split_pane" "$LOG" &&
+    pass "Cmd-D reached the host as split_pane" ||
+    bad "Cmd-D did not produce split_pane"
+keycode 36 "command down, shift down" && wait_for 10 grep -q "<- zoom_pane" "$LOG" &&
+    pass "Cmd-Shift-Return reached the host as zoom_pane" ||
+    bad "Cmd-Shift-Return did not produce zoom_pane"
+keycode 36 "command down, shift down" && wait_for 10 grep -q "<- unzoom" "$LOG" &&
+    pass "Cmd-Shift-Return again sent unzoom" ||
+    bad "the second Cmd-Shift-Return did not produce unzoom"
 
 # --- three: PageUp asks the host to look back ------------------------------------------
-osa -e 'tell application "System Events" to key code 116'   # PageUp
-if wait_for 10 grep -q "<- scroll" "$LOG"; then
-    pass "PageUp reached the host as scroll"
-else
-    skip "PageUp (needs Accessibility)"
-fi
-osa -e 'tell application "System Events" to key code 121'   # PageDown
+keycode 116 "" && wait_for 10 grep -q "<- scroll" "$LOG" &&
+    pass "PageUp reached the host as scroll" ||
+    bad "PageUp did not produce a scroll message"
+keycode 121 "" || true   # PageDown
 note "scroll messages recorded in this run: $(grep -c '<- scroll' "$LOG")"
 
 note "--- host log (messages the GUI produced) ---"

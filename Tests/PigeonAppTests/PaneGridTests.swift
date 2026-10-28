@@ -26,6 +26,35 @@ final class PaneGridTests: XCTestCase {
 
     /// The pane no longer keeps history: it asks the host to look back, so the only rule
     /// left here is that an upward wheel becomes a "look back" request of the right size.
+    /// The alternate screen keeps no history, so the wheel must not even ask.
+    func testTheAlternateScreenAsksForNoScrolling() {
+        let request = PaneView.scrollRequest(
+            alt: true, deltaY: 18, precise: false, cellHeight: 18, remainder: 3)
+        XCTAssertEqual(request.lines, 0)
+        XCTAssertEqual(request.remainder, 3, "nothing consumed")
+        XCTAssertEqual(
+            PaneView.scrollRequest(alt: false, deltaY: 1, precise: false, cellHeight: 18, remainder: 0).lines,
+            1)
+    }
+
+    /// The indicator: at the bottom when live, at the top when fully scrolled back, and
+    /// absent when the pane has no history to show.
+    func testTheScrollThumbTracksTheHostsReportedPosition() {
+        let track = CGRect(x: 0, y: 0, width: 800, height: 400)
+        XCTAssertNil(PaneView.scrollThumb(bounds: track, rows: 24, history: 0, offset: 0))
+        let live = PaneView.scrollThumb(bounds: track, rows: 24, history: 1000, offset: 0)
+        XCTAssertEqual(live?.minY ?? -1, 0, accuracy: 0.5)
+        let top = PaneView.scrollThumb(bounds: track, rows: 24, history: 1000, offset: 1000)
+        XCTAssertEqual((top?.maxY ?? -1), track.height, accuracy: 0.5)
+        let middle = PaneView.scrollThumb(bounds: track, rows: 24, history: 1000, offset: 500)
+        XCTAssertGreaterThan(middle?.minY ?? -1, 0)
+        XCTAssertLessThan(middle?.maxY ?? 1, track.height)
+        // An offset beyond the history is clamped, not drawn off the track.
+        XCTAssertEqual(
+            PaneView.scrollThumb(bounds: track, rows: 24, history: 10, offset: 99)?.maxY ?? -1,
+            track.height, accuracy: 0.5)
+    }
+
     func testWheelDirectionBecomesAScrollRequest() {
         // A line-based wheel already reports lines; a precise (trackpad) one reports pixels.
         let up = PaneView.wheelLines(deltaY: 1, precise: false, cellHeight: 18, remainder: 0)

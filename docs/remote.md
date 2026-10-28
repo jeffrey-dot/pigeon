@@ -109,7 +109,8 @@ macOS 的 `cc` 会被当成链接器并拒继 musl 的 `-static`，所以必须�
 
 ## 4. 多主机与侧栏
 
-客户端实现：`Hosts` 菜单（每个已知主机带勾选、`Use This Mac`、`Connect to Host…` ⌘⇧O），
+客户端实现：侧栏顶部 `Machines` 分组（`This Mac` + 每台已知主机，行尾是 `connected`/`connecting`/`offline`，
+点一行就切过去），`Hosts` 菜单（每个已知主机带勾选、`Use This Mac`、`Connect to Host…` ⌘⇧O），
 列表与“上次连的是谁”存在 `~/.config/pigeon/hosts.json`（`HostsStore`），启动时自动回到上次的主机。
 一个窗口就是一条连接，切换主机先挂断再探测（A→B→C），侧栏按 `host / project` 分组。
 

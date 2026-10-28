@@ -7,6 +7,10 @@ public enum HostRecovery {
     public static let attempts = 3
     /// Gap between attempts: long enough for a restarting host, short enough to feel automatic.
     public static let retryDelay: TimeInterval = 1.0
+    /// A network drop is not a crashed local socket: keep re-probing ssh for about a minute
+    /// before handing the problem to the user (the M4 acceptance is a 30 s outage).
+    public static let remoteAttempts = 20
+    public static let remoteRetryDelay: TimeInterval = 1.5
 
     public enum State: Equatable {
         case connected
@@ -31,6 +35,11 @@ public enum HostRecovery {
     /// Whether another attempt is worth making after `attempt` failures.
     public static func canRetry(after attempt: Int) -> Bool {
         attempt < attempts
+    }
+
+    /// Same question for a remote probe, which needs a much longer budget.
+    public static func canRetryRemote(after attempt: Int) -> Bool {
+        attempt < remoteAttempts
     }
 
     /// What the user can do about it; `nil` while a retry is pending.

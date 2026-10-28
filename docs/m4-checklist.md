@@ -13,9 +13,9 @@ cargo build --release --bin pigeon-host            # 1,350,240 B（1.29 MiB ≤ 
 cargo build --lib --no-default-features            # 通过（库本体不引用 tokio/portable-pty）
 cbindgen --config core/cbindgen.toml --crate pigeon-core --output /tmp/pg-m4.h core   # 与 include/pigeon_core.h 无差异
 tools/vt-parity/run.sh                             # 8/8 ok（M2 的对账，M4 没动内核渲染）
-swift build && swift test                          # 92 executed / 5 skipped / 0 failures（远端用例默认 skip）
+swift build && swift test                          # 99 executed / 5 skipped / 0 failures（远端用例默认 skip）
 PIGEON_SSH_HOST=arch PIGEON_HOST_ARTIFACTS=$PWD/core/target/x86_64-unknown-linux-musl/release \
-  swift test                                       # 92 passed / 0 skipped（含 5 条真 ssh 用例，69.6s）
+  swift test                                       # 99 passed / 0 skipped，exit 0（含 5 条真 ssh 用例，70.2s）
 ```
 
 交叉产物（docs/remote.md §2）：
@@ -25,7 +25,7 @@ rustup target add x86_64-unknown-linux-musl
 cargo build --release --target x86_64-unknown-linux-musl \
   --config "target.x86_64-unknown-linux-musl.linker=$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/lib/rustlib/aarch64-apple-darwin/bin/rust-lld" \
   --manifest-path core/Cargo.toml --bin pigeon-host
-# → core/target/x86_64-unknown-linux-musl/release/pigeon-host  1,741,744 B  static-pie stripped
+# → core/target/x86_64-unknown-linux-musl/release/pigeon-host  1,744,848 B  static-pie stripped
 ```
 
 新增覆盖：
@@ -35,9 +35,9 @@ cargo build --release --target x86_64-unknown-linux-musl \
 | `--stdio` | `stdio_mode_serves_a_client_and_keeps_the_socket_for_later`：stdio 客户端建的会话，socket 客户端也能看到（同一进程两种入口） |
 | `--proxy` | `proxy_mode_bridges_stdio_to_a_running_host`：经代理跑 `echo $((6*7))`，真宿主回 `42` |
 | `--socket-path` | 客户端问二进制要默认 socket 路径，`ssh -L` 不再复刻这条规则 |
-| 多主机切换 | `HostsStoreTests` 3 条（列表 + 当前主机往返、损坏文件回退空表、默认路径/`PIGEON_CONFIG_DIR`）、`SidebarOrderingTests` 的 `groupLabel`/跨主机分组；菜单 `Hosts` 里每个主机带勾选、`Use This Mac`、`Connect to Host…`（⌘⇧O），选择后先断开旧连接再连新主机 |
+| 多主机侧栏 | 侧栏顶部 `Machines` 分组：`This Mac` + 每台已知主机各一行，行尾 `connected`/`connecting`/`offline`，点一行即切换（`SidebarModel.hostRows`/`host(forRow:hosts:)`，id 用负数与 session 区分）；`HostsStoreTests` 3 条（往返/损坏回退/默认路径）、`SidebarOrderingTests` 的 groupLabel、`Machines` 行与状态映射、跨主机分组；菜单 `Hosts` 带勾选、`Use This Mac`、`Connect to Host…`（⌘⇧O） |
 | 自动安装 | `HostInstallerTests` 10 条：平台↔产物匹配（绝不把 Linux x86_64 推向别的平台）、远端脚本先校验再 `mv`、缺 `sha256sum` 时退回 `shasum`、内容和哈希目录、二次连接不再上传、拒绝安装、未知平台、远端哈希不符；**1 条真 ssh E2E**（见下） |
-| 远端断线重连（窗口） | `HostRecovery.plan(hasRemote:)` 单测 + `PigeonApp.recover` 在远端模式下改走 `RemoteSession.connect()` 重新探测（本地模式仍是重启 socket 宿主）；引擎层的 30s 恢复有真 ssh E2E |
+| 远端断线重连（窗口） | `HostRecovery.plan(hasRemote:)` + `canRetryRemote`（20 次 × 1.5s ≈ 30s，远超本地 3×1s）；`PigeonApp.recover` 在远端模式以 `connect(allowDegraded: false)` 重新探测——**失败就重试，绝不悄悄退化成不持久的 C**；`RemoteSessionTests.testDegradingCanBeRefusedOutright` 卡住这条 |
 | 传输探测 | `RemoteSessionTests` 9 条：A→B→C 顺序、无宿主时退化并说明成本、A 用本地 `pigeon-host --stdio` 冒充远端跑通握手、C 的本地 VT 两条（直接喂字节 / 子进程管道 + 回调）、**3 条真 ssh**（bridge / 退回 ssh -L / 退化）+ **1 条 30s 断连恢复** |
 | 多主机侧栏 | `SidebarOrderingTests`：`groupLabel(host:project:)`、同一项目在两台机器上分属两组 |
 
@@ -46,17 +46,20 @@ cargo build --release --target x86_64-unknown-linux-musl \
 **自动安装**（`PIGEON_SSH_HOST=arch swift test --filter HostInstallerTests`）：
 
 ```text
-installed at /home/jeffrey/.pigeon/host/0fbc4c2b5d1ea8c6/pigeon-host (version 0fbc4c2b5d1ea8c6)
+installed at /home/jeffrey/.pigeon/host/<hash>/pigeon-host (version <hash>)
 Executed 10 tests, with 0 failures
 ```
+
+（版本目录名每次都是当次产物的内容哈希；实跑过的几次：`0fbc4c2b5d1ea8c6`、`317a3f57c95e71ee`、`906acb77a14fe912`，
+远端始终只留最新两个，下面是当时 `ls` 的输出，数字会随产物变化。）
 
 远端落点（`ssh arch 'sh -c "ls -1 ~/.pigeon; ls -1 ~/.pigeon/host; ..."'`）：
 
 ```text
 host
 ---
-0fbc4c2b5d1ea8c6
-49237f4a1d316461
+<newest>
+<previous>
 ---
 -rwxr-xr-x 1723313  /home/jeffrey/.pigeon/host/0fbc4c2b5d1ea8c6/pigeon-host
 -rwxr-xr-x 1723312  /home/jeffrey/.pigeon/host/49237f4a1d316461/pigeon-host
@@ -116,6 +119,7 @@ testRealSshDropKeepsTheRemoteSessionAndItsScreen ... passed (40.0s)
 | 退化模式（C）的窗口尺寸 | 本地 VT 会 resize | 远端 pty 尺寸仍是 ssh 分配的 80×24（客户端没有本地 pty 去转发 `TIOCSWINSZ`），见 plan §11 |
 | C 模式的 xctest 渲染断言 | 本地 VT 两条单测 + 手工 ssh 记录 | xctest 里把 ssh 的 pty 管道喂给 `LocalSession` 时读线程 25s 拿不到数据（本地子进程正常），原因未定位；不愿为它造假 |
 | 真的关掉 `AllowStreamLocalForwarding` 的主机 | 用拒绝 `--proxy` 模拟 A 失败 | 一台能改 sshd 配置的主机 |
+| EPIPE 把测试进程打死 | 退化模式的 ssh 子进程先死时，写它的 stdin 会触发 `SIGPIPE`，`swift test` 以 `signal 13` / exit 1 结束 | `LocalSession` 忽略 `SIGPIPE` 并改用 `try? write(contentsOf:)`；现在全量 ssh 用例 `exit 0` |
 | 远端大文件/慢网 | 1.7MB 单文件流式传输 | 200ms 延迟下的体感、断点续传（没有做，失败了重传） |
 | `zstd` 帧内 tag | 只有定义 | 远端实测后决定阈值 |
 

@@ -31,6 +31,8 @@ public struct HostInstaller {
         case unsupportedPlatform(String)
         case noArtifact(String)
         case rejected(String)
+        /// The remote could not be reached as a `pigeon-host` at all (degraded mode refused).
+        case noHost(String)
 
         public var description: String {
             switch self {
@@ -38,6 +40,7 @@ public struct HostInstaller {
             case let .unsupportedPlatform(platform): return "no pigeon-host build for \(platform)"
             case let .noArtifact(platform): return "no local pigeon-host binary for \(platform)"
             case let .rejected(detail): return "remote refused the install: \(detail)"
+            case let .noHost(detail): return "no pigeon-host on the remote: \(detail)"
             }
         }
     }

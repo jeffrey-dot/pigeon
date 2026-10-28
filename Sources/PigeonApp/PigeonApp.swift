@@ -60,6 +60,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var state = SidebarState()
     private let hostsStore = HostsStore()
     private var hosts = HostsState()
+    /// Set while a remote probe runs, so the sidebar row says `connecting` rather than
+    /// `offline` (docs/remote.md §4 asks for the status on the host, not only in a banner).
+    private var connectingHost: String?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // `PIGEON_APPEARANCE=light|dark|system` pins the app's appearance for the screenshot
@@ -301,12 +304,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startRemote(_ host: String) {
         let session = RemoteSession(host: host)
         remote = session
+        connectingHost = host
+        refreshSidebar()
         DispatchQueue.global(qos: .userInitiated).async {
             do {
                 let outcome = try session.connect()
                 DispatchQueue.main.async { [weak self] in self?.apply(outcome) }
             } catch {
                 DispatchQueue.main.async { [weak self] in
+                    self?.connectingHost = nil
+                    self?.refreshSidebar()
                     self?.showStopped("cannot reach \(host): \(error)")
                 }
             }
@@ -315,6 +322,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func apply(_ outcome: RemoteSession.Outcome) {
         debugLog("remote transport=\(outcome.transport.rawValue) host=\(remote?.host ?? "-")")
+        connectingHost = nil
+        refreshSidebar()
         if let client = outcome.client {
             wire(client)
             return
@@ -399,15 +408,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func recover(_ reason: String) {
-        guard HostRecovery.canRetry(after: recoveryAttempt) else {
+        let remote = self.remote != nil
+        let allowed = remote
+            ? HostRecovery.canRetryRemote(after: recoveryAttempt)
+            : HostRecovery.canRetry(after: recoveryAttempt)
+        guard allowed else {
             showStopped(reason)
             return
         }
         recoveryAttempt += 1
         show(hostStatus: .reconnecting(attempt: recoveryAttempt))
-        DispatchQueue.main.asyncAfter(deadline: .now() + HostRecovery.retryDelay) { [weak self] in
+        let delay = remote ? HostRecovery.remoteRetryDelay : HostRecovery.retryDelay
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self else { return }
-            if HostRecovery.plan(hasRemote: self.remote != nil) == .remote {
+            if remote {
                 self.reconnectRemote(reason)
                 return
             }
@@ -429,7 +443,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let session = remote else { return }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             do {
-                let outcome = try session.connect()
+                // Never silently fall back to plain ssh here: that would replace the
+                // persistent session with one that dies with the window.
+                let outcome = try session.connect(allowDegraded: false)
                 DispatchQueue.main.async { self?.apply(outcome) }
             } catch {
                 DispatchQueue.main.async { [weak self] in
@@ -610,6 +626,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - sessions
 
     private func select(_ id: Int) {
+        if id < 0 {
+            // A `Machines` row: switch to that host (or back to this Mac).
+            guard let target = SidebarModel.host(forRow: id, hosts: hosts.hosts) else { return }
+            switchTo(host: target)
+            return
+        }
         guard let row = rows[id] else { return }
         debugLog("select id=\(id) activePane=\(row.activePane) panes=\(row.panes)")
         selectedSession = id
@@ -753,8 +775,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func sidebarSessions() -> [SidebarSession] {
+        // Machines first: one row per known host, so "where does this session live" and
+        // "switch to that machine" are the same list the sessions are grouped in.
+        var sessions = SidebarModel.hostRows(
+            hosts: hosts.hosts,
+            connected: hosts.current,
+            connecting: connectingHost)
         // Dictionary order is random; sort by id so groups keep first-seen order across launches.
-        rows.values.sorted { $0.id < $1.id }.map { row in
+        sessions += rows.values.sorted { $0.id < $1.id }.map { row in
             SidebarSession(
                 id: row.id,
                 title: row.app,
@@ -770,6 +798,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 host: row.host
             )
         }
+        return sessions
     }
 
     private func refreshSidebar() {
@@ -862,6 +891,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             focusedPane = focusedPane ?? pane
             if container.applySnapshot(snapshot) {
                 haveSnapshot.insert(pane)
+                // `scroll` answers carry where the view is; plain snapshots do not, and then
+                // the indicator stays hidden (both fields are 0).
+                container.paneView(pane)?.setScrollPosition(
+                    total: Int(Wire.u32(message, "history_len")),
+                    offset: Int(Wire.u32(message, "offset")))
             } else if let frame = Wire.frame(message) {
                 pendingSnapshots[pane] = frame
             }
@@ -1000,6 +1034,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             defer { pg_snapshot_free(snapshot) }
             if container.applySnapshot(snapshot) {
                 haveSnapshot.insert(pane)
+                // `scroll` answers carry where the view is; plain snapshots do not, and then
+                // the indicator stays hidden (both fields are 0).
+                container.paneView(pane)?.setScrollPosition(
+                    total: Int(Wire.u32(decoded, "history_len")),
+                    offset: Int(Wire.u32(decoded, "offset")))
                 pendingSnapshots.removeValue(forKey: pane)
             }
         }

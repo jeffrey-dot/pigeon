@@ -57,7 +57,15 @@ final class RemoteSession {
     }
 
     /// Tries every transport and returns the first that answers.
-    func connect(allowInstall: Bool = true, allowHost: Bool = true) throws -> Outcome {
+    ///
+    /// `allowDegraded: false` is the reconnect path: falling back to plain ssh there would
+    /// silently replace a persistent session with one that dies with the window, so a
+    /// failed probe has to stay a failure the caller can retry.
+    func connect(
+        allowInstall: Bool = true,
+        allowHost: Bool = true,
+        allowDegraded: Bool = true
+    ) throws -> Outcome {
         var why: [String] = []
         if allowHost {
             do {
@@ -84,6 +92,9 @@ final class RemoteSession {
             }
         } else {
             why.append("host binary disabled")
+        }
+        guard allowDegraded else {
+            throw HostInstaller.Failure.noHost(why.joined(separator: "; "))
         }
         let process = try spawn(["-tt", host])
         children.append(process)

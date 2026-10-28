@@ -112,12 +112,22 @@ impl PaneState {
     /// actually applied (clamped to the history there is).
     pub fn scroll_message(&mut self, offset: usize) -> (Message, usize) {
         let snapshot = self.term.snapshot();
-        let applied = offset.min(snapshot.history.len());
+        let total = snapshot.history.len();
+        let applied = offset.min(total);
         let view = snapshot.scrolled(applied);
-        (
-            message_from_snapshot(self.pane_id, self.next_seq(), &view, false),
-            applied,
-        )
+        let mut message = message_from_snapshot(self.pane_id, self.next_seq(), &view, false);
+        // The client draws its scroll indicator from these two numbers; they are only
+        // meaningful on a `scroll` answer, so they stay out of every other snapshot.
+        if let Message::Snapshot {
+            history_len,
+            offset: reported,
+            ..
+        } = &mut message
+        {
+            *history_len = Some(total.min(u32::MAX as usize) as u32);
+            *reported = Some(applied.min(u32::MAX as usize) as u32);
+        }
+        (message, applied)
     }
 
     /// Full picture for `attach`. `with_history` follows the negotiated
@@ -190,6 +200,9 @@ fn message_from_snapshot(
                 .collect()
         }),
         links: None,
+        // Only a `scroll` answer reports a view position; plain snapshots leave them out.
+        history_len: None,
+        offset: None,
     }
 }
 
@@ -432,6 +445,8 @@ mod tests {
                 .collect(),
             history: None,
             links: None,
+            history_len: None,
+            offset: None,
         };
         let payload = crate::proto::encode(&message).expect("encode");
         let decoded = crate::proto::decode(&payload).expect("decode");
