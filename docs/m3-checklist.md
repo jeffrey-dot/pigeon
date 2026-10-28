@@ -129,9 +129,9 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 
 ## 6. CI（GitHub Actions，真跑）
 
-代码提交 `1a23557`（harp 规格对齐）的 CI 一次通过（五作业 success）：
+代码提交 `b4252f2`（右栏卡片 + 审计修正）的 CI 五作业 success：
 
-<https://github.com/jeffrey-dot/pigeon/actions/runs/40653541600>
+<https://github.com/jeffrey-dot/pigeon/actions/runs/40657902538>
 
 | 作业 | 结果 |
 |---|---|
@@ -139,7 +139,10 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 | `rust (ubuntu-latest)` | success（`cargo test` **66 + 11 + 21 = 98 passed**） |
 | `rust (macos-latest)` | success |
 | `header` | success（cbindgen `diff -u` 为空） |
-| `swift` | success（`swift test` **38 passed**） |
+| `swift` | success（`swift test` **40 passed**） |
+
+之前的 `0480738` 曾在 `swift` 作业红过一次：`SidebarRenderingTests` 的未读点像素断言在 CI 的彩色配置下差 1
+（`[58,58,59]` vs `[58,58,60]`），已改成 ±2 容差；精确值仍由 `SidebarThemeTests` 钉住。
 
 本机同一提交的全量输出：
 
@@ -147,9 +150,9 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 cargo fmt --check                                  # 通过
 cargo clippy --all-targets -- -D warnings          # 通过
 cargo test                                         # 66 + 11 + 21 = 98 passed
-swift build && swift test                          # Build complete / 38 passed
+swift build && swift test                          # Build complete / 40 passed
 cargo build --release --bin pigeon-host            # 1,234,288 B（1.18 MiB ≤ 8 MiB）
 cargo build --lib --no-default-features            # 通过
 cbindgen … --output /tmp/pg2.h && diff -q …        # header: no diff
-tools/m3-gui-check.sh                              # 见 §2 的转录（浅/深两趟）
+tools/m3-gui-check.sh                              # 见 §2 的转录（浅/深两趟，窗口级截图）
 ```

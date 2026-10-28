@@ -213,6 +213,8 @@ Pane(id, title, status, status_at, kind, msg)   # 直接来自 OSC 7501 记录
 | `SIDEBAR` | 侧栏不透明底色 | `#e8e8eb` | `#232326` |
 | `GLASS_TINT` | 侧栏材质上的半透明罩（`sidebar_fill()`） | `rgba(250,250,252,140)` | `rgba(30,30,32,140)` |
 | `BADGE_TEXT` | needs-you 角标文字 | `#3a2300` | `#3a2300` |
+| `CARD_EDGE` | 右栏卡片 0.5pt 描边（`view.rs:22245`） | 黑 10%（alpha 26） | 白 10%（alpha 26） |
+| `CARD_SHADOW` | 右栏卡片投影（`view.rs:22247`） | 黑 5%（alpha 13） | 黑 25%（alpha 64） |
 
 ### 7.3 字号与字重
 
