@@ -99,8 +99,8 @@ impl Colour {
 /// The colours the connected client is showing, used to answer the application's
 /// `OSC 4` (palette) / `OSC 10` (foreground) / `OSC 11` (background) queries.
 ///
-/// Without one (a client that never sent `appearance`) the queries stay unanswered, which is
-/// exactly how the terminal behaved before.
+/// The host always has one (`Palette::default_dark()` until a client sends `appearance`); `None`
+/// means "no answer yet" and only happens if a caller explicitly clears it, e.g. a frozen term.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Palette {
     pub fg: Colour,

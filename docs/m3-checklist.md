@@ -7,12 +7,12 @@
 ```sh
 cargo fmt --check                                  # 通过
 cargo clippy --all-targets -- -D warnings          # 通过
-cargo test                                         # 66 单元 + 11 ABI + 21 宿主 = 98 passed
-cargo build --release --bin pigeon-host            # 1,234,288 B（1.18 MiB ≤ 8 MiB）
+cargo test                                         # 72 单元 + 11 ABI + 25 宿主 = 108 passed
+cargo build --release --bin pigeon-host            # 1,250,800 B（1.19 MiB ≤ 8 MiB）
 cbindgen --config core/cbindgen.toml --crate pigeon-core \
          --output /tmp/pg.h core                   # 与 include/pigeon_core.h 无差异
 cargo build --lib --no-default-features            # 通过（库本体不引用 tokio/portable-pty）
-swift build && swift test                          # 通过 / 44 passed
+swift build && swift test                          # 通过 / 54 passed
 ```
 
 新增覆盖：
@@ -35,10 +35,11 @@ sessions created: 4
 sidebar (light): sidebar sessions=4 needs=2
 sidebar width: sidebar width=272
 apps: sessions apps=1:sh 2:beta 3:done.sh 4:blocked.sh
-hot switch: dark + light captured from one process
-Cmd-J focus messages: 0 -> 1 (ack: 1)
+hot switch: appearance sent 1 -> 4 over 3 toggles
+appearance -> system appearance -> dark appearance -> light
+Cmd-J focus messages: 0 -> 1 (ack: 2)
 selected before close: selected=4
-Cmd-Shift-W Close Session: close_pane 0 -> 1
+menu Close Session: close_pane 0 -> 1
 sessions after Cmd-T: 5
 order (manual drag, see docs/m3-checklist.md §5): []
 reopened: sidebar sessions=4 needs=0

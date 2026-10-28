@@ -84,7 +84,7 @@
 
 | 方向 | 消息 | 必选字段 | 可选字段 | 说明 |
 |---|---|---|---|---|
-| c→s | `appearance` | — | `fg: u32`, `bg: u32`, `ansi: [u32]`（16 个 `0xRRGGBB`） | 客户端当前主题，供宿主回答程序发出的 `OSC 4/10/11` 颜色查询；字段全可选，不发送时宿主保持“不回答”的旧行为 |
+| c→s | `appearance` | — | `fg: u32`, `bg: u32`, `ansi: [u32]`（16 个 `0xRRGGBB`） | 客户端当前主题，供宿主回答程序发出的 `OSC 4/10/11` 颜色查询。**缺省值**：客户端还没发过时，宿主用内置的 harp 深色板（`#050505` / `#ffffff` + `DARK_MODE_*` 十六色）作答；`fg`/`bg` 缺失或 `ansi` 不是 16 个时，保留上一次的答复（不 panic、不猜） |
 | c→s | `keys` | `pane_id: u32`, `bytes: bstr` | — | 已编码好的终端字节（kitty protocol 或 legacy 由客户端决定） |
 | c→s | `mouse` | `pane_id: u32`, `kind: "down"\|"up"\|"move"\|"wheel"`, `x: u16`, `y: u16`, `button: u8`, `mods: u8` | — | `mods` 位：`1` shift、`2` alt、`4` ctrl |
 | c→s | `paste` | `pane_id: u32`, `text: str` | — | 宿主负责括号粘贴包装 |

@@ -732,7 +732,8 @@ async fn dispatch(
 }
 
 /// Spawns a shell in a fresh PTY and starts its actor.
-/// The palette a new pane should start with (`None` until a client sends `appearance`).
+/// The palette a new pane starts with: the last `appearance` the client sent, or harp's
+/// built-in dark theme before any client has spoken.
 fn current_palette(slot: &PaletteSlot) -> Option<Palette> {
     slot.lock().ok().and_then(|slot| *slot)
 }
@@ -808,8 +809,8 @@ fn spawn_pane(
     let meta = Arc::clone(meta);
     tokio::spawn(async move {
         let mut pane = PaneState::new(pane_id, cols, rows, SCROLLBACK);
-        // Colour queries asked before the client's theme was known are simply not answered;
-        // the next pane gets the palette at birth.
+        // Panes are born with the client's palette (or the default dark one), so a program's
+        // startup colour query is answered from the first byte.
         pane.set_palette(palette);
         let mut child = child;
         let mut ticker = interval(Duration::from_millis(150));
