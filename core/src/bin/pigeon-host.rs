@@ -698,6 +698,13 @@ async fn dispatch(
                     .map(|(session_id, session)| {
                         let active = session.layout.focused();
                         let info = active.and_then(|pane| meta.get(&pane));
+                        let raw_title = info.and_then(|info| info.title.clone());
+                        // A window title can be a program (`vim`) or a prompt (`~/dev`): only
+                        // the first is a name for the sidebar row.
+                        let program = raw_title
+                            .clone()
+                            .filter(|title| !looks_like_a_prompt(title))
+                            .unwrap_or_else(|| session.shell.clone());
                         proto::SessionInfo {
                             session_id: *session_id,
                             title: format!("session {session_id}"),
@@ -707,9 +714,9 @@ async fn dispatch(
                             panes: session.layout.pane_ids(),
                             active_pane: active,
                             active_title: Some(
-                                info.and_then(|info| info.title.clone())
-                                    .unwrap_or_else(|| session.shell.clone()),
+                                raw_title.clone().unwrap_or_else(|| session.shell.clone()),
                             ),
+                            active_program: Some(program),
                         }
                     })
                     .collect(),
@@ -1372,6 +1379,17 @@ fn default_socket_path() -> PathBuf {
         .filter(|text| !text.is_empty())
         .unwrap_or_else(|| "0".to_owned());
     PathBuf::from(format!("/tmp/pigeon-{uid}.sock"))
+}
+
+/// A shell prompt or a path is not a program name: fish titles its window `~/dev`, zsh sets
+/// the command, and the sidebar should read the same on both.
+fn looks_like_a_prompt(title: &str) -> bool {
+    let title = title.trim();
+    title.is_empty()
+        || title.contains('/')
+        || title.contains('~')
+        || title.contains('@')
+        || title.contains(':')
 }
 
 fn shell_label(path: &str) -> String {

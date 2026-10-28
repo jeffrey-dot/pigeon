@@ -905,6 +905,44 @@ fn scroll_reaches_ten_thousand_lines_of_history() {
     assert_eq!(code, "no_such_pane");
 }
 
+/// The sidebar row names the program, not whatever the shell puts in its window title: fish
+/// titles its window `~/dev`, zsh sets the command name. Same rule for every host.
+#[test]
+fn a_prompt_like_title_is_not_used_as_the_program_name() {
+    let _serial = one_at_a_time();
+    // A shell whose window title looks like a prompt, then an idle prompt.
+    let quiet = script("#!/bin/sh\nprintf '\\033]2;~/dev\\007'\nexec env PS1= /bin/sh -i\n");
+    let host = start_host_with(quiet.to_str().expect("utf8"));
+    let mut client = Client::connect(&host.socket);
+    hello(&mut client);
+    let pane = attach_first(&mut client);
+
+    let message = client.wait_for(|message| match message {
+        Message::Sessions { items } => items
+            .iter()
+            .any(|session| session.active_title.as_deref() == Some("~/dev")),
+        _ => false,
+    });
+    let Message::Sessions { items } = message else {
+        unreachable!()
+    };
+    let session = items
+        .iter()
+        .find(|session| session.panes.contains(&pane))
+        .expect("the session we attached to");
+    assert_eq!(
+        session.active_title.as_deref(),
+        Some("~/dev"),
+        "the raw title is kept"
+    );
+    let expected = quiet.file_name().unwrap().to_string_lossy().into_owned();
+    assert_eq!(
+        session.active_program.as_deref(),
+        Some(expected.as_str()),
+        "a path is not a program name: fall back to the shell"
+    );
+}
+
 /// Writes an executable shell script so a pane can run a program with arguments.
 fn script(body: &str) -> std::path::PathBuf {
     use std::os::unix::fs::PermissionsExt;

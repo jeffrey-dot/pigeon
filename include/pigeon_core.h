@@ -364,6 +364,11 @@ typedef struct PgSessionInfo {
      */
     uint32_t active_pane;
     struct PgStr active_title;
+    /**
+     * Program name for the sidebar (`vim`, `zsh`); falls back to the shell when the title
+     * is a prompt.
+     */
+    struct PgStr active_program;
 } PgSessionInfo;
 
 

@@ -947,6 +947,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return sessions
     }
 
+    /// The row's name: the program the host picked (`vim`, `zsh`), never a shell prompt —
+    /// the machine and directory are already on the row's group heading.
+    private func appName(info: PgSessionInfo, previous: Row?) -> String {
+        guard info.active_pane != 0 else { return previous?.app ?? "shell" }
+        let program = Wire.string(info.active_program)
+        if !program.isEmpty { return program }
+        return Wire.string(info.active_title)
+    }
+
     private func refreshSidebar() {
         let raw = SidebarModel.sections(sidebarSessions(), order: state.order)
         let sections = raw.map { section -> (group: String, sessions: [SidebarSession]) in
@@ -1123,7 +1132,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 panes: Array(panes.prefix(written)),
                 cwd: Wire.string(info.cwd),
                 activePane: info.active_pane != 0 ? info.active_pane : (previous?.activePane ?? panes[0]),
-                app: info.active_pane != 0 ? Wire.string(info.active_title) : (previous?.app ?? "shell"),
+                app: appName(info: info, previous: previous),
                 title: "session \(id)",
                 status: previous?.status ?? .idle,
                 seq: previous?.seq ?? 0,

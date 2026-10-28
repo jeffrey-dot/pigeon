@@ -692,6 +692,9 @@ pub struct PgSessionInfo {
     /// 0 when the session has no focused pane.
     pub active_pane: u32,
     pub active_title: PgStr,
+    /// Program name for the sidebar (`vim`, `zsh`); falls back to the shell when the title
+    /// is a prompt.
+    pub active_program: PgStr,
 }
 
 /// Sets a field to an array of numbers (e.g. `appearance.ansi`).
@@ -779,6 +782,7 @@ pub extern "C" fn pg_msg_session_at(
             pane_count: 0,
             active_pane: 0,
             active_title: empty_str(),
+            active_program: empty_str(),
         };
         for (key, value) in entries {
             let Value::Text(name) = key else { continue };
@@ -795,6 +799,7 @@ pub extern "C" fn pg_msg_session_at(
                     info.active_pane = u32::try_from(i128::from(*number)).unwrap_or(0);
                 }
                 ("active_title", Value::Text(text)) => info.active_title = str_view(text),
+                ("active_program", Value::Text(text)) => info.active_program = str_view(text),
                 _ => {}
             }
         }

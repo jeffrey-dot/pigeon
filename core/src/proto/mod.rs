@@ -55,6 +55,10 @@ pub struct SessionInfo {
     /// Title of that pane (OSC 0/2), so the sidebar can name the app.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_title: Option<String>,
+    /// What to *call* that pane in the sidebar: the title when it names a program, the shell
+    /// otherwise (fish titles its window `~/dev`, which is a path, not an app).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_program: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -526,6 +530,7 @@ mod tests {
                         panes: vec![1, 2],
                         active_pane: None,
                         active_title: None,
+                        active_program: None,
                     },
                     SessionInfo {
                         session_id: 2,
@@ -534,6 +539,7 @@ mod tests {
                         panes: vec![3],
                         active_pane: Some(3),
                         active_title: Some("vim".into()),
+                        active_program: Some("vim".into()),
                     },
                 ],
             },
