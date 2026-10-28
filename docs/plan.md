@@ -267,6 +267,7 @@ M2 落地后仍在的洞（M2 的验收记录见 `docs/m2-checklist.md`）。
 | 布局只有单 pane | `core/src/layout/` 的布局树 + `pg_layout_*` 全实现；宿主每 pane 独立 PTY/actor；客户端按 `PgRect` 分屏 |
 | 滚动回看（翻页） | 客户端持有 offset（未动 ABI）：`PaneView` 存 `history` + `displayOffset`，滚轮（触控板像素累积）、非 alt 屏的 PageUp/PageDown、右侧滚动条、offset>0 时隐藏光标、输入回底；回看前重新 `attach` 取最新历史并冻结该屏，避免流式输出撕开历史/屏幕接缝。宿主侧 `history_window` 按单帧预算裁旧留新 |
 | VT 对账（`tools/vt-parity`） | `run.sh` + `core/examples/vt-dump`：同一段字节喂内核与 tmux `capture-pane` 逐行比较，8 条语料（basic/cursor/erase/wide/scroll-region/alt-screen/insert-delete/wrap）全 ok；`--record` 重录 golden；顺带修掉 tab 占位符漏进快照的真 bug |
+| 远端（M4） | `pigeon-host --stdio`（ssh 通道 + socket 双入口）、`--proxy`（stdio↔socket 帧桥）、`--socket-path`；客户端 `HostInstaller`（uname 探测 → 平台匹配产物 → 内容哈希版本目录 → 远端校验后才上线 → 只留两版）与 `RemoteSession`（A `--proxy` / B `ssh -L` / C plain ssh + 客户端本地 VT 的 A→B→C 探测）；多主机侧栏分组 `host / project`。在 `ssh arch`（Linux x86_64、fish 登录 shell）上实跑：首传/命中/篡改拒绝、A、B 退化、30s 断连后 200 行逐行一致。见 `docs/m4-checklist.md` |
 | `zoom_pane` / `unzoom` | 布局树 `zoom` 字段 + 宿主两个 handler + `layout.zoom` 下发；客户端 ⌘⇧↩ 切换、兄弟 pane 隐藏但保活（unzoom 立即还原嵌套比例）；`pg_msg_layout_zoom` 进 C ABI |
 | 多客户端尺寸策略与 `size_state` | 宿主实现 `latest`/`smallest`/`locked`（策略由首个 `attach` 决定、`locked` 只认 owner、`latest` 跟最后一个 focus/keys），每次尺寸变化广播 `size_state{pane_id, cols, rows, source, clients}`；`hello_ack.client_id` 也换成真实的每连接 id。侧栏在 age 位显示 `2× latest`。见 `docs/m2-checklist.md` |
 | 程序的颜色查询（OSC 4/10/11） | 客户端通过 `appearance` 把当前色板交给宿主，宿主用 `Event::ColorRequest` 的 formatter 回 `rgb:rrrr/gggg/bbbb`；TUI（pi 等）因此能自己选亮/深主题；见 `docs/protocol.md` §3 与 `core/tests/host.rs` 的 `appearance_reaches_existing_panes_and_a_malformed_one_keeps_the_previous` |
@@ -277,13 +278,15 @@ M2 落地后仍在的洞（M2 的验收记录见 `docs/m2-checklist.md`）。
 | 缺口 | 现状 | 何时关闭 |
 |---|---|---|
 | 悬停 `×` 关闭 / 透明标题栏 | `docs/ui.md` §2.1/§2.3 写了，未实现：关闭走右键菜单或 `⌘⇧W`；红绿灯仍在原生标题栏 | 改窗口 chrome（`titlebarAppearsTransparent`）时 |
-| 未上报 session 的相对时间 | 没有 OSC 7501 记录的 session 行尾留空，不拿创建时间冒充“最后活动时间” | 宿主能上报 pane 活动时间时（M4） |
+| 未上报 session 的相对时间 | 没有 OSC 7501 记录的 session 行尾留空，不拿创建时间冒充“最后活动时间” | 宿主能上报 pane 活动时间时（未排期） |
 | OSC 8 超链接被丢弃 | `PgCell.hyperlink_id` 恒为 0，`cell[4]` 不上线 | 需要按链接跳转时 |
 | 回看上限是 1000 行，不是 1 万行 | 宿主 `SCROLLBACK = 1000`；1 万行 × 80 列 ≈ 12MB，超过单帧 8MB 上限，`attach` 会被 `history_window` 裁到放得下的最新若干行 | 协议加分块历史（或改成宿主侧 offset）时；见 `docs/m2-checklist.md` §3 |
 | DECSTBM 滚动区恒等于整屏 | `alacritty_terminal` 不暴露 `scroll_region` | 需要按滚动区（而非历史位置）画提示时；回看用的滚动条已按 `history` 位置绘制，不依赖它 |
+| 退化模式（C）的远端 pty 尺寸 | `ssh -tt` 的 pty 固定 80×24：客户端没有本地 pty 去转发 `TIOCSWINSZ`，窗口再大远端也只按 80 列换行 | 客户端给 ssh 子进程开一个本地 pty（`forkpty`）时 |
+| `PIGEON_REMOTE` 下的 GUI 断线重连 | 引擎层（`RemoteSession.connect()` 重新探测 A→B→C）有真 ssh E2E；`PigeonApp.hostLost` 仍只重连本地 socket | 把远端模式接进 `hostLost` 的恢复循环时；GUI 多主机也还没手测 |
 | Swift 客户端不协商 `delta` | 只收 `snapshot`（协议 §5 允许） | 做性能时开启增量 |
 | IME 候选窗未实现 | 走 AppKit 默认 `keyDown` | M6 |
-| `zstd` 能力只定义了帧内 tag | 阈值、何时启用未定 | M4 远端实测后 |
+| `zstd` 能力只定义了帧内 tag | 阈值、何时启用未定 | 需要压远端带宽时（M4 已在远端实跑过，但没有为此开工） |
 | CI 缺 `unsafe` / 平台 crate 的静态检查 | 现有：fmt / clippy / test / tokio+portable-pty 引用检查 / `--lib --no-default-features` / 体积 / 头文件 diff / swift | 加 `unsafe`/`cfg(target_os)` 检查时 |
 | PTY 走 `portable-pty` 而不是原始 fd | 为了让 `core/src`（除 `ffi/`）零 `unsafe` | 需要原始 fd 做特殊 ioctl 时 |
 | `swift test` 依赖完整 Xcode | `xcode-select` 指向 CLT 时需 `DEVELOPER_DIR` | 换 swift-testing 或写进 README |
