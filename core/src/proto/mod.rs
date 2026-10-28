@@ -125,8 +125,47 @@ impl<'de> Deserialize<'de> for Cell {
     }
 }
 
-/// Every message the M0 host and client speak. `t` carries the snake-case name.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Which way a split divides: `v` = side by side, `h` = stacked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SplitAxis {
+    #[serde(rename = "v")]
+    Vertical,
+    #[serde(rename = "h")]
+    Horizontal,
+}
+
+/// One node of the layout tree, exactly as `docs/protocol.md` §3.2 spells it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Node {
+    Leaf { leaf: u32 },
+    Split { split: SplitNode },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SplitNode {
+    pub id: u32,
+    pub axis: SplitAxis,
+    pub ratio: f32,
+    pub a: Box<Node>,
+    pub b: Box<Node>,
+}
+
+impl Node {
+    /// Leaves in tree order, left-to-right / top-to-bottom.
+    pub fn leaves(&self, out: &mut Vec<u32>) {
+        match self {
+            Self::Leaf { leaf } => out.push(*leaf),
+            Self::Split { split } => {
+                split.a.leaves(out);
+                split.b.leaves(out);
+            }
+        }
+    }
+}
+
+/// Every message the M1 host and client speak. `t` carries the snake-case name.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "t", rename_all = "snake_case")]
 pub enum Message {
     Hello {
@@ -165,6 +204,28 @@ pub enum Message {
     ClosePane {
         id: u32,
         pane_id: u32,
+    },
+    SplitPane {
+        id: u32,
+        pane_id: u32,
+        axis: SplitAxis,
+        ratio: f32,
+    },
+    ResizeSplit {
+        id: u32,
+        split_id: u32,
+        ratio: f32,
+    },
+    Focus {
+        pane_id: u32,
+    },
+    Layout {
+        session_id: u32,
+        tree: Node,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        zoom: Option<u32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        focus: Option<u32>,
     },
     Attach {
         id: u32,
@@ -239,6 +300,10 @@ impl Message {
             Self::NewSession { .. } => "new_session",
             Self::Created { .. } => "created",
             Self::ClosePane { .. } => "close_pane",
+            Self::SplitPane { .. } => "split_pane",
+            Self::ResizeSplit { .. } => "resize_split",
+            Self::Focus { .. } => "focus",
+            Self::Layout { .. } => "layout",
             Self::Attach { .. } => "attach",
             Self::Snapshot { .. } => "snapshot",
             Self::Delta { .. } => "delta",
@@ -324,6 +389,10 @@ fn is_known(tag: &str) -> bool {
             | "new_session"
             | "created"
             | "close_pane"
+            | "split_pane"
+            | "resize_split"
+            | "focus"
+            | "layout"
             | "attach"
             | "snapshot"
             | "delta"
@@ -398,6 +467,40 @@ mod tests {
                 pane_id: 1,
             },
             Message::ClosePane { id: 4, pane_id: 1 },
+            Message::SplitPane {
+                id: 5,
+                pane_id: 1,
+                axis: SplitAxis::Vertical,
+                ratio: 0.5,
+            },
+            Message::ResizeSplit {
+                id: 6,
+                split_id: 2,
+                ratio: 0.35,
+            },
+            Message::Focus { pane_id: 3 },
+            Message::Layout {
+                session_id: 1,
+                tree: Node::Split {
+                    split: SplitNode {
+                        id: 2,
+                        axis: SplitAxis::Horizontal,
+                        ratio: 0.5,
+                        a: Box::new(Node::Leaf { leaf: 1 }),
+                        b: Box::new(Node::Split {
+                            split: SplitNode {
+                                id: 3,
+                                axis: SplitAxis::Vertical,
+                                ratio: 0.25,
+                                a: Box::new(Node::Leaf { leaf: 2 }),
+                                b: Box::new(Node::Leaf { leaf: 3 }),
+                            },
+                        }),
+                    },
+                },
+                zoom: None,
+                focus: Some(3),
+            },
             Message::Attach {
                 id: 5,
                 pane_id: 1,
@@ -580,7 +683,7 @@ mod tests {
     #[test]
     fn unknown_message_type_is_unsupported_not_fatal() {
         let payload = ciborium::value::Value::Map(vec![
-            ("t".into(), "split_pane".into()),
+            ("t".into(), "definitely_not_a_message".into()),
             ("pane_id".into(), 1u32.into()),
         ]);
         let mut bytes = Vec::new();
@@ -606,5 +709,96 @@ mod tests {
         let mut bytes = Vec::new();
         ciborium::into_writer(&ciborium::value::Value::Map(vec![]), &mut bytes).expect("encode");
         assert_eq!(decode(&bytes), Err(PgError::InvalidArg));
+    }
+
+    #[test]
+    fn layout_tree_decodes_with_focus_and_reports_leaf_order() {
+        let message = Message::Layout {
+            session_id: 7,
+            tree: Node::Split {
+                split: SplitNode {
+                    id: 1,
+                    axis: SplitAxis::Vertical,
+                    ratio: 0.4,
+                    a: Box::new(Node::Leaf { leaf: 10 }),
+                    b: Box::new(Node::Split {
+                        split: SplitNode {
+                            id: 2,
+                            axis: SplitAxis::Horizontal,
+                            ratio: 0.5,
+                            a: Box::new(Node::Leaf { leaf: 11 }),
+                            b: Box::new(Node::Leaf { leaf: 12 }),
+                        },
+                    }),
+                },
+            },
+            zoom: None,
+            focus: Some(11),
+        };
+        let payload = encode(&message).expect("encode");
+        let decoded = decode(&payload).expect("decode");
+        assert_eq!(decoded, message);
+        let Message::Layout { tree, focus, .. } = decoded else {
+            panic!("layout");
+        };
+        let mut leaves = Vec::new();
+        tree.leaves(&mut leaves);
+        assert_eq!(leaves, vec![10, 11, 12], "tree order");
+        assert_eq!(focus, Some(11));
+    }
+
+    #[test]
+    fn malformed_split_axis_is_rejected() {
+        let payload = ciborium::value::Value::Map(vec![
+            ("t".into(), "split_pane".into()),
+            ("id".into(), 1u32.into()),
+            ("pane_id".into(), 1u32.into()),
+            ("axis".into(), "x".into()),
+            ("ratio".into(), 0.5f32.into()),
+        ]);
+        let mut bytes = Vec::new();
+        ciborium::into_writer(&payload, &mut bytes).expect("encode");
+        assert_eq!(decode(&bytes), Err(PgError::InvalidArg));
+    }
+
+    #[test]
+    fn malformed_layout_ratio_is_rejected() {
+        let tree = ciborium::value::Value::Map(vec![(
+            "split".into(),
+            ciborium::value::Value::Map(vec![
+                ("id".into(), 1u32.into()),
+                ("axis".into(), "v".into()),
+                ("ratio".into(), "half".into()),
+                (
+                    "a".into(),
+                    ciborium::value::Value::Map(vec![("leaf".into(), 1u32.into())]),
+                ),
+                (
+                    "b".into(),
+                    ciborium::value::Value::Map(vec![("leaf".into(), 2u32.into())]),
+                ),
+            ]),
+        )]);
+        let payload = ciborium::value::Value::Map(vec![
+            ("t".into(), "layout".into()),
+            ("session_id".into(), 1u32.into()),
+            ("tree".into(), tree),
+        ]);
+        let mut bytes = Vec::new();
+        ciborium::into_writer(&payload, &mut bytes).expect("encode");
+        assert_eq!(decode(&bytes), Err(PgError::InvalidArg));
+    }
+
+    #[test]
+    fn zoom_messages_are_unsupported_not_fatal() {
+        for tag in ["zoom_pane", "unzoom"] {
+            let payload = ciborium::value::Value::Map(vec![
+                ("t".into(), tag.into()),
+                ("pane_id".into(), 1u32.into()),
+            ]);
+            let mut bytes = Vec::new();
+            ciborium::into_writer(&payload, &mut bytes).expect("encode");
+            assert_eq!(decode(&bytes), Err(PgError::Unsupported), "{tag}");
+        }
     }
 }

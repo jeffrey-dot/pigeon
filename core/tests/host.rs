@@ -367,7 +367,7 @@ fn unknown_message_gets_unsupported_and_the_connection_survives() {
     // A well-formed frame with an unknown `t`, built by hand.
     let payload = ciborium::value::Value::Map(vec![(
         ciborium::value::Value::Text("t".into()),
-        ciborium::value::Value::Text("split_pane".into()),
+        ciborium::value::Value::Text("definitely_not_a_message".into()),
     )]);
     let mut body = Vec::new();
     ciborium::into_writer(&payload, &mut body).expect("encode");
@@ -379,7 +379,7 @@ fn unknown_message_gets_unsupported_and_the_connection_survives() {
     let Message::Unsupported { t_of } = reply else {
         unreachable!()
     };
-    assert_eq!(t_of, "split_pane");
+    assert_eq!(t_of, "definitely_not_a_message");
 
     // Still usable afterwards.
     client.send(&Message::Ping { ts: 9 });

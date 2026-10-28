@@ -766,7 +766,7 @@ mod tests {
     fn unknown_message_type_decodes_as_unsupported() {
         let payload = ciborium::value::Value::Map(vec![(
             Value::Text("t".to_owned()),
-            Value::Text("split_pane".to_owned()),
+            Value::Text("definitely_not_a_message".to_owned()),
         )]);
         let mut body = Vec::new();
         ciborium::into_writer(&payload, &mut body).expect("encode");
@@ -779,7 +779,7 @@ mod tests {
         assert_eq!(pg_msg_type(decoded), PgMsgType::PG_MSG_UNSUPPORTED);
         assert_eq!(
             pg_msg_get_str(decoded, field("t_of").as_ptr()).len,
-            "split_pane".len()
+            "definitely_not_a_message".len()
         );
         pg_msg_free(decoded);
     }

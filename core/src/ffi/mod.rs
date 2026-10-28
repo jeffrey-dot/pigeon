@@ -14,6 +14,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr;
 
 use crate::error::{PgError, PgResult};
+use crate::layout::{Axis, Layout};
 use crate::session::PaneState;
 use crate::status::{Kind as StatusKind, State as StatusState};
 
@@ -143,8 +144,9 @@ pub extern "C" fn pg_core_abi_version() -> u32 {
 pub struct PgCore {
     config: PgConfig,
     panes: std::collections::BTreeMap<u32, PaneState>,
+    /// Geometry and focus live in the layout tree; the map only holds panes.
+    layout: Option<Layout>,
     next_pane: u32,
-    focused: u32,
 }
 
 #[repr(C)]
@@ -186,8 +188,8 @@ pub extern "C" fn pg_core_new(cfg: *const PgConfig) -> *mut PgCore {
         Ok(Box::into_raw(Box::new(PgCore {
             config,
             panes: std::collections::BTreeMap::new(),
+            layout: None,
             next_pane: 1,
-            focused: 0,
         })))
     })
 }
@@ -225,12 +227,14 @@ pub extern "C" fn pg_pane_new(core: *mut PgCore, opts: *const PgPaneOptions) -> 
         let (cols, rows) = read_pane_options(opts)?.unwrap_or((80, 24));
         let pane_id = core.next_pane;
         core.next_pane = core.next_pane.saturating_add(1);
+        if core.layout.is_some() {
+            // Extra panes come from `pg_layout_split`, which knows the geometry.
+            return Err(PgError::InvalidArg);
+        }
         let history = scrollback_lines(&core.config);
         core.panes
             .insert(pane_id, PaneState::new(pane_id, cols, rows, history));
-        if core.focused == 0 {
-            core.focused = pane_id;
-        }
+        core.layout = Some(Layout::new(pane_id));
         Ok(pane_id)
     })
 }
@@ -240,8 +244,8 @@ pub extern "C" fn pg_pane_free(core: *mut PgCore, pane_id: u32) {
     ffi_call((), || {
         let core = unsafe_mut(core)?;
         core.panes.remove(&pane_id).ok_or(PgError::NoSuchPane)?;
-        if core.focused == pane_id {
-            core.focused = core.panes.keys().next().copied().unwrap_or(0);
+        if let Some(layout) = core.layout.as_mut() {
+            let _ = layout.close(pane_id);
         }
         Ok(())
     });
@@ -624,60 +628,112 @@ pub struct PgRect {
     pub h: f32,
 }
 
-/// Splits are M1; M0 has one pane per session and reports that honestly.
+/// Splits a pane and returns the **new pane id** (0 on failure).
 #[no_mangle]
 pub extern "C" fn pg_layout_split(
-    _core: *mut PgCore,
-    _pane_id: u32,
-    _axis: PgAxis,
-    _ratio: f32,
+    core: *mut PgCore,
+    pane_id: u32,
+    axis: PgAxis,
+    ratio: f32,
 ) -> u32 {
-    ffi_call(0, || Err(PgError::Unsupported))
+    ffi_call(0, || {
+        let core = unsafe_mut(core)?;
+        let (cols, rows) = core
+            .panes
+            .get(&pane_id)
+            .map(PaneState::size)
+            .ok_or(PgError::NoSuchPane)?;
+        let axis = match axis {
+            PgAxis::PG_AXIS_VERTICAL => Axis::Vertical,
+            PgAxis::PG_AXIS_HORIZONTAL => Axis::Horizontal,
+        };
+        // The target pane's own size is the extent being divided.
+        let new_id = core.next_pane;
+        core.next_pane = core.next_pane.saturating_add(1);
+        let layout = core.layout.as_mut().ok_or(PgError::NoSuchPane)?;
+        layout.split(pane_id, new_id, axis, ratio, cols, rows)?;
+        let (child_cols, child_rows) = match axis {
+            Axis::Vertical => ((cols / 2).max(2), rows),
+            Axis::Horizontal => (cols, (rows / 2).max(1)),
+        };
+        let history = scrollback_lines(&core.config);
+        let mut pane = PaneState::new(new_id, child_cols, child_rows, history);
+        pane.resize(child_cols, child_rows);
+        core.panes.insert(new_id, pane);
+        let _ = layout.focus(new_id);
+        Ok(new_id)
+    })
 }
 
-/// Closes a pane (and its process, when the host owns one).
+/// Closes a pane; its sibling takes over the parent rect.
 #[no_mangle]
 pub extern "C" fn pg_layout_close(core: *mut PgCore, pane_id: u32) -> bool {
     ffi_call(false, || {
         let core = unsafe_mut(core)?;
         core.panes.remove(&pane_id).ok_or(PgError::NoSuchPane)?;
-        if core.focused == pane_id {
-            core.focused = core.panes.keys().next().copied().unwrap_or(0);
+        if let Some(layout) = core.layout.as_mut() {
+            layout.close(pane_id)?;
         }
         Ok(true)
     })
 }
 
-/// Split ratios are M1; the single-pane tree has nothing to resize.
+/// Changes a split's ratio; clamped so both sides keep their minimum size.
 #[no_mangle]
-pub extern "C" fn pg_layout_resize(_core: *mut PgCore, _split_id: u32, _ratio: f32) -> bool {
-    ffi_call(false, || Err(PgError::Unsupported))
+pub extern "C" fn pg_layout_resize(core: *mut PgCore, split_id: u32, ratio: f32) -> bool {
+    ffi_call(false, || {
+        let core = unsafe_mut(core)?;
+        let (cols, rows) = focused(core)?.size();
+        let layout = core.layout.as_mut().ok_or(PgError::NoSuchSplit)?;
+        layout.set_ratio(split_id, ratio, cols, rows)?;
+        Ok(true)
+    })
 }
 
-/// One normalized rect per pane (M0: the focused pane fills the session box).
+/// One normalized rect per pane, in tree order.
 #[no_mangle]
 pub extern "C" fn pg_layout_rects(core: *mut PgCore, out: *mut PgRect, cap: usize) -> usize {
     ffi_call(0, || {
         let core = unsafe_ref(core)?;
-        if out.is_null() {
-            return Err(PgError::InvalidArg);
+        let layout = core.layout.as_ref().ok_or(PgError::NoSuchPane)?;
+        let rects = layout.rects();
+        if rects.is_empty() {
+            return Ok(0);
         }
-        if cap == 0 {
+        if out.is_null() || cap < rects.len() {
             return Err(PgError::Overflow);
         }
-        let focused = focused(core)?.pane_id;
-        // SAFETY: caller provided at least one writable entry.
-        unsafe {
-            *out = PgRect {
-                size: std::mem::size_of::<PgRect>() as u32,
-                pane_id: focused,
-                x: 0.0,
-                y: 0.0,
-                w: 1.0,
-                h: 1.0,
+        for (index, (pane_id, rect)) in rects.iter().enumerate() {
+            // SAFETY: `cap` entries were promised by the caller.
+            unsafe {
+                *out.add(index) = PgRect {
+                    size: std::mem::size_of::<PgRect>() as u32,
+                    pane_id: *pane_id,
+                    x: rect.x,
+                    y: rect.y,
+                    w: rect.w,
+                    h: rect.h,
+                };
             }
-        };
-        Ok(1)
+        }
+        Ok(rects.len())
+    })
+}
+
+/// The split to resize when the user drags the divider next to `pane_id`;
+/// 0 when the pane has no parent split.
+#[no_mangle]
+pub extern "C" fn pg_layout_split_of(core: *mut PgCore, pane_id: u32) -> u32 {
+    ffi_call(0, || {
+        let core = unsafe_ref(core)?;
+        if !core.panes.contains_key(&pane_id) {
+            return Err(PgError::NoSuchPane);
+        }
+        Ok(core
+            .layout
+            .as_ref()
+            .and_then(|layout| layout.split_of(pane_id))
+            .unwrap_or(0))
     })
 }
 
@@ -685,17 +741,24 @@ pub extern "C" fn pg_layout_rects(core: *mut PgCore, out: *mut PgRect, cap: usiz
 pub extern "C" fn pg_layout_focus(core: *mut PgCore, pane_id: u32) -> bool {
     ffi_call(false, || {
         let core = unsafe_mut(core)?;
-        if !core.panes.contains_key(&pane_id) {
-            return Err(PgError::NoSuchPane);
+        let layout = core.layout.as_mut().ok_or(PgError::NoSuchPane)?;
+        if layout.focus(pane_id) {
+            Ok(true)
+        } else {
+            Err(PgError::NoSuchPane)
         }
-        core.focused = pane_id;
-        Ok(true)
     })
 }
 
 #[no_mangle]
 pub extern "C" fn pg_layout_focused(core: *mut PgCore) -> u32 {
-    ffi_call(0, || Ok(unsafe_ref(core)?.focused))
+    ffi_call(0, || {
+        Ok(unsafe_ref(core)?
+            .layout
+            .as_ref()
+            .and_then(Layout::focused)
+            .unwrap_or(0))
+    })
 }
 
 // ---------------------------------------------------------------- helpers
@@ -717,7 +780,12 @@ fn unsafe_mut<'a>(core: *mut PgCore) -> PgResult<&'a mut PgCore> {
 }
 
 fn focused(core: &PgCore) -> PgResult<&PaneState> {
-    core.panes.get(&core.focused).ok_or(PgError::NoSuchPane)
+    let pane_id = core
+        .layout
+        .as_ref()
+        .and_then(Layout::focused)
+        .ok_or(PgError::NoSuchPane)?;
+    core.panes.get(&pane_id).ok_or(PgError::NoSuchPane)
 }
 
 fn scrollback_lines(config: &PgConfig) -> usize {

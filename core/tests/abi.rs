@@ -218,3 +218,63 @@ fn replies_are_delivered_through_respond() {
     assert_eq!(buffer[0], 0x1b, "replies start with ESC");
     pg_core_free(core);
 }
+
+#[test]
+fn layout_splits_closes_and_focuses() {
+    use pigeon_core::ffi::{
+        pg_layout_resize, pg_layout_split, pg_layout_split_of, pg_pane_free, PgAxis, PgRect,
+    };
+
+    let core = pg_core_new(ptr::null());
+    let first = pg_pane_new(core, &pane_options(80, 24));
+    assert!(first > 0);
+
+    // Extra panes come from a split, not from pg_pane_new.
+    assert_eq!(pg_pane_new(core, &pane_options(80, 24)), 0);
+    assert_eq!(pg_last_error_code(), PgErrorCode::PG_ERR_INVALID_ARG);
+
+    let second = pg_layout_split(core, first, PgAxis::PG_AXIS_VERTICAL, 0.5);
+    assert!(second > first, "split returns the new pane id");
+    assert_eq!(pg_layout_focused(core), second, "the new pane takes focus");
+    let split = pg_layout_split_of(core, second);
+    assert!(split > 0, "the new pane knows its divider");
+    assert_eq!(pg_layout_split_of(core, first), split);
+
+    let new_rect = |pane_id: u32| PgRect {
+        size: std::mem::size_of::<PgRect>() as u32,
+        pane_id,
+        x: 0.0,
+        y: 0.0,
+        w: 0.0,
+        h: 0.0,
+    };
+    let mut rects = [new_rect(0), new_rect(0), new_rect(0), new_rect(0)];
+    assert_eq!(pg_layout_rects(core, rects.as_mut_ptr(), rects.len()), 2);
+    assert_eq!(rects[0].pane_id, first);
+    assert_eq!(rects[1].pane_id, second);
+    assert!((rects[0].w - 0.5).abs() < 1e-5 && (rects[1].x - 0.5).abs() < 1e-5);
+    let area: f32 = rects[..2].iter().map(|r| r.w * r.h).sum();
+    assert!((area - 1.0).abs() < 1e-5, "panes tile the box");
+
+    // Dragging the divider is clamped by the minimum pane width.
+    assert!(pg_layout_resize(core, split, 0.99));
+    assert_eq!(pg_layout_rects(core, rects.as_mut_ptr(), rects.len()), 2);
+    assert!(rects[0].w <= 0.9 + 1e-5, "clamped, got {}", rects[0].w);
+    assert_eq!(pg_last_error_code(), PgErrorCode::PG_OK);
+
+    // Focus can move back, and only to live panes.
+    assert!(pg_layout_focus(core, first));
+    assert_eq!(pg_layout_focused(core), first);
+    assert!(!pg_layout_focus(core, 999));
+    assert_eq!(pg_last_error_code(), PgErrorCode::PG_ERR_NO_SUCH_PANE);
+
+    // Closing the second pane lets the first fill the box again.
+    assert!(pg_layout_close(core, second));
+    assert_eq!(pg_layout_rects(core, rects.as_mut_ptr(), rects.len()), 1);
+    assert_eq!((rects[0].w, rects[0].h), (1.0, 1.0));
+    assert_eq!(pg_layout_focused(core), first);
+    assert_eq!(pg_layout_split_of(core, first), 0, "no divider left");
+
+    pg_pane_free(core, first);
+    pg_core_free(core);
+}

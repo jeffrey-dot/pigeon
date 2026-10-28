@@ -57,7 +57,7 @@
 | c→s | `resize_split` | `id: u32`, `split_id: u32`, `ratio: f32` | — | 拖动分隔线；`split_id` 来自上一帧 `layout`；`ratio` 被夹到最小尺寸内 |
 | c→s | `zoom_pane` | `id: u32`, `pane_id: u32` | — | 放大单个 pane（对应 `layout.zoom`） |
 | c→s | `unzoom` | `id: u32`, `pane_id: u32` | — | 取消放大 |
-| s→c | `layout` | `session_id: u32`, `tree: node` | `zoom: u32` | `node = {leaf: pane_id} \| {split: {id: u32, axis: "v"\|"h", ratio: f32, a: node, b: node}}`；`zoom` 是当前放大的 `pane_id` |
+| s→c | `layout` | `session_id: u32`, `tree: node` | `zoom: u32`, `focus: u32` | `node = {leaf: pane_id} \| {split: {id: u32, axis: "v"\|"h", ratio: f32, a: node, b: node}}`；`zoom` 是当前放大的 `pane_id`；`focus` 是宿主持有的焦点 pane（M1 新增，可选，旧客户端忽略） |
 | s→c | `size_state` | `pane_id: u32`, `cols: u16`, `rows: u16`, `source: str`, `clients: u8` | — | `source` ∈ `latest`/`smallest`/`locked`；客户端据此在侧栏标注当前尺寸来源 |
 | s→c | `pane_exited` | `pane_id: u32`, `code: i32` | — | 进程退出；pane 记录保留到 `close_pane` |
 

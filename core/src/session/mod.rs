@@ -14,6 +14,8 @@ pub struct PaneState {
     pub pane_id: u32,
     /// Monotonic per pane; shared by snapshots and deltas.
     seq: u32,
+    cols: u16,
+    rows: u16,
     term: Box<dyn Term + Send>,
     status: StatusStore,
 }
@@ -23,6 +25,8 @@ impl PaneState {
         Self {
             pane_id,
             seq: 0,
+            cols,
+            rows,
             term: Box::new(AlacrittyTerm::new(cols, rows, scrollback)),
             status: StatusStore::new(),
         }
@@ -33,6 +37,8 @@ impl PaneState {
         Self {
             pane_id: 1,
             seq: 0,
+            cols: snapshot.cols,
+            rows: snapshot.rows,
             term: Box::new(FrozenTerm::new(snapshot)),
             status: StatusStore::new(),
         }
@@ -46,7 +52,14 @@ impl PaneState {
     }
 
     pub fn resize(&mut self, cols: u16, rows: u16) {
+        self.cols = cols;
+        self.rows = rows;
         self.term.resize(cols, rows);
+    }
+
+    /// Current cell size of this pane.
+    pub fn size(&self) -> (u16, u16) {
+        (self.cols, self.rows)
     }
 
     pub fn take_replies(&mut self) -> Vec<u8> {

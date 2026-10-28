@@ -66,6 +66,13 @@ typedef struct PgMsg PgMsg;
 #define PG_ATTR_DIM (1 << 5)
 
 /**
+ * Default minimum size of a pane, in cells.
+ */
+#define MIN_COLS 10
+
+#define MIN_ROWS 3
+
+/**
  * A frame may not exceed 8 MiB (protocol §1).
  */
 #define MAX_FRAME ((8 * 1024) * 1024)
@@ -405,24 +412,30 @@ bool pg_status_at(PgCore *core, size_t index, struct PgStatus *out);
 bool pg_status_ack(PgCore *core, uint32_t pane_id, uint32_t seq);
 
 /**
- * Splits are M1; M0 has one pane per session and reports that honestly.
+ * Splits a pane and returns the **new pane id** (0 on failure).
  */
-uint32_t pg_layout_split(PgCore *_core, uint32_t _pane_id, enum PgAxis _axis, float _ratio);
+uint32_t pg_layout_split(PgCore *core, uint32_t pane_id, enum PgAxis axis, float ratio);
 
 /**
- * Closes a pane (and its process, when the host owns one).
+ * Closes a pane; its sibling takes over the parent rect.
  */
 bool pg_layout_close(PgCore *core, uint32_t pane_id);
 
 /**
- * Split ratios are M1; the single-pane tree has nothing to resize.
+ * Changes a split's ratio; clamped so both sides keep their minimum size.
  */
-bool pg_layout_resize(PgCore *_core, uint32_t _split_id, float _ratio);
+bool pg_layout_resize(PgCore *core, uint32_t split_id, float ratio);
 
 /**
- * One normalized rect per pane (M0: the focused pane fills the session box).
+ * One normalized rect per pane, in tree order.
  */
 size_t pg_layout_rects(PgCore *core, struct PgRect *out, size_t cap);
+
+/**
+ * The split to resize when the user drags the divider next to `pane_id`;
+ * 0 when the pane has no parent split.
+ */
+uint32_t pg_layout_split_of(PgCore *core, uint32_t pane_id);
 
 bool pg_layout_focus(PgCore *core, uint32_t pane_id);
 
