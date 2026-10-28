@@ -107,6 +107,44 @@ final class SidebarOrderingTests: XCTestCase {
         XCTAssertEqual(SidebarModel.rowSubtitle(for: session, now: now), "Working · 1m")
     }
 
+    func testSubtitleWordingForTheHeaderBadge() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        XCTAssertEqual(
+            SidebarModel.subtitle(status: .blocked, since: now.addingTimeInterval(-120), now: now),
+            "Needs you · 2m"
+        )
+        XCTAssertEqual(SidebarModel.subtitle(status: .idle, since: now, now: now), "Idle · now")
+    }
+
+    func testRelativeTimeBucketsMatchTheSpec() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        func age(_ seconds: TimeInterval) -> String {
+            SidebarModel.relativeTime(now.addingTimeInterval(-seconds), now: now)
+        }
+        XCTAssertEqual(age(0), "now")
+        XCTAssertEqual(age(59), "now")
+        XCTAssertEqual(age(60), "1m")
+        XCTAssertEqual(age(3_599), "59m")
+        XCTAssertEqual(age(3_600), "1h")
+        XCTAssertEqual(age(90_000), "1d")
+    }
+
+    func testAgeIsHiddenUntilThePaneReports() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        var quiet = row(1, .idle)
+        quiet.lastSeen = now.addingTimeInterval(-600)
+        XCTAssertEqual(SidebarModel.ageText(for: quiet, now: now), "")
+        quiet.reported = true
+        XCTAssertEqual(SidebarModel.ageText(for: quiet, now: now), "10m")
+    }
+
+    func testStatusGlyphsCoverEveryStateWithNoGlyphForIdle() {
+        let glyphs = SidebarSession.Status.allCases.map { status -> String in
+            SidebarModel.statusGlyph(for: row(1, status))
+        }
+        XCTAssertEqual(glyphs, ["\u{25F7}", "!", "\u{2713}", "\u{25D0}", ""])
+    }
+
     func testStatusParsingCoversTheProtocolStrings() {
         XCTAssertEqual(SidebarModel.status(from: "blocked"), .blocked)
         XCTAssertEqual(SidebarModel.status(from: "error"), .error)

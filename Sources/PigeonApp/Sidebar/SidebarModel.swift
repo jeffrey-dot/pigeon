@@ -25,6 +25,8 @@ public struct SidebarSession: Equatable {
     /// Working directory reported by the pane (OSC 7) or the spawn cwd.
     public var cwd: String
     public var lastSeen: Date
+    /// Whether an OSC 7501 record ever arrived; without one there is no state to show.
+    public var reported: Bool
 
     public init(
         id: Int,
@@ -34,7 +36,8 @@ public struct SidebarSession: Equatable {
         unread: Int = 0,
         app: String = "shell",
         cwd: String = "",
-        lastSeen: Date = Date()
+        lastSeen: Date = Date(),
+        reported: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -44,6 +47,7 @@ public struct SidebarSession: Equatable {
         self.app = app
         self.cwd = cwd
         self.lastSeen = lastSeen
+        self.reported = reported
     }
 }
 
@@ -124,21 +128,47 @@ public enum SidebarModel {
 
     /// `"Working · 1m"` — the relative-time line from the reference UI.
     public static func subtitle(for session: SidebarSession, now: Date = Date(), since: Date) -> String {
-        let seconds = max(0, Int(now.timeIntervalSince(since)))
-        let relative: String
-        switch seconds {
-        case ..<60: relative = "\(seconds)s"
-        case ..<3600: relative = "\(seconds / 60)m"
-        default: relative = "\(seconds / 3600)h"
-        }
+        subtitle(status: session.status, since: since, now: now)
+    }
+
+    /// Same wording for the right-pane badge, which only has the raw status.
+    public static func subtitle(status: SidebarSession.Status, since: Date, now: Date = Date()) -> String {
         let state: String
-        switch session.status {
+        switch status {
         case .blocked: state = "Needs you"
         case .error: state = "Error"
         case .done: state = "Done"
         case .working: state = "Working"
         case .idle: state = "Idle"
         }
-        return "\(state) · \(relative)"
+        return "\(state) · \(relativeTime(since, now: now))"
+    }
+
+    /// `now` / `1m` / `3h` / `2d` — the row age from `docs/ui.md` §2.2.
+    public static func relativeTime(_ date: Date, now: Date = Date()) -> String {
+        let seconds = max(0, Int(now.timeIntervalSince(date)))
+        switch seconds {
+        case ..<60: return "now"
+        case ..<3600: return "\(seconds / 60)m"
+        case ..<86_400: return "\(seconds / 3600)h"
+        default: return "\(seconds / 86_400)d"
+        }
+    }
+
+    /// The row's trailing age; empty when the pane never reported, because the only
+    /// date we have is when the row appeared — not when the program last spoke.
+    public static func ageText(for session: SidebarSession, now: Date = Date()) -> String {
+        session.reported ? relativeTime(session.lastSeen, now: now) : ""
+    }
+
+    /// The row's trailing glyph (`docs/ui.md` §2.2); `idle` has none.
+    public static func statusGlyph(for session: SidebarSession) -> String {
+        switch session.status {
+        case .working: return "\u{25D0}"
+        case .blocked: return "\u{25F7}"
+        case .done: return "\u{2713}"
+        case .error: return "!"
+        case .idle: return ""
+        }
     }
 }

@@ -5,12 +5,15 @@ import AppKit
 /// draws them and reports user intent.
 final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
     private enum Row {
-        case group(String, Int)
+        case group(String, Int, Int)
         case session(SidebarSession)
     }
 
     private let table = NSTableView()
+    private let scroll = NSScrollView()
+    private let emptyState = NSStackView()
     private var rows: [Row] = []
+    private var ticker: Timer?
     private var selected: Int?
     /// Programmatic reloads must not look like the user clicking a row.
     private var suppressSelection = false
@@ -21,13 +24,15 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
     var onRename: ((Int, String) -> Void)?
     var onRenameGroup: ((String, String) -> Void)?
     var onReorder: (([Int]) -> Void)?
+    var onNewSession: (() -> Void)?
+    var onToggleSidebar: (() -> Void)?
 
     override func loadView() {
-        let scroll = NSScrollView()
+        let root = NSView()
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
         table.headerView = nil
-        table.rowHeight = 46
+        table.rowHeight = 26
         table.style = .sourceList
         table.backgroundColor = .clear
         table.dataSource = self
@@ -39,18 +44,79 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
         column.resizingMask = .autoresizingMask
         table.addTableColumn(column)
         scroll.documentView = table
-        view = scroll
+
+        // `docs/ui.md` §2.3: collapse and new-session buttons, right-aligned.
+        let buttons = NSStackView(views: [
+            symbolButton("sidebar.left", action: #selector(toggleSidebarClicked)),
+            symbolButton("plus", action: #selector(newSessionClicked)),
+        ])
+        buttons.orientation = .horizontal
+        buttons.spacing = 2
+
+        // §2.3 empty state: one line of copy plus a big primary button.
+        let hint = rowLabel("No sessions yet", size: 12, bold: false)
+        hint.textColor = .secondaryLabelColor
+        let create = NSButton(title: "New Session", target: self, action: #selector(newSessionClicked))
+        create.bezelStyle = .rounded
+        emptyState.orientation = .vertical
+        emptyState.spacing = 10
+        emptyState.alignment = .centerX
+        emptyState.addArrangedSubview(hint)
+        emptyState.addArrangedSubview(create)
+        emptyState.isHidden = true
+
+        for subview in [buttons, scroll, emptyState] {
+            root.addSubview(subview)
+            subview.translatesAutoresizingMaskIntoConstraints = false
+        }
+        NSLayoutConstraint.activate([
+            buttons.topAnchor.constraint(equalTo: root.topAnchor, constant: 6),
+            buttons.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -8),
+            buttons.heightAnchor.constraint(equalToConstant: 20),
+            scroll.topAnchor.constraint(equalTo: buttons.bottomAnchor, constant: 4),
+            scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            emptyState.centerXAnchor.constraint(equalTo: root.centerXAnchor),
+            emptyState.centerYAnchor.constraint(equalTo: root.centerYAnchor),
+        ])
+        view = root
+        // Ages go stale without any data change; the reference refreshes once a minute.
+        ticker = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            self?.table.reloadData()
+        }
     }
+
+    deinit {
+        ticker?.invalidate()
+    }
+
+    private func symbolButton(_ symbol: String, action: Selector) -> NSButton {
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        let button = NSButton(image: image ?? NSImage(), target: self, action: action)
+        button.isBordered = false
+        button.contentTintColor = .secondaryLabelColor
+        return button
+    }
+
+    @objc private func toggleSidebarClicked() { onToggleSidebar?() }
+
+    @objc private func newSessionClicked() { onNewSession?() }
 
     func update(sections: [(group: String, sessions: [SidebarSession])], selected: Int?) {
         suppressSelection = true
         defer { suppressSelection = false }
         self.selected = selected
         rows = sections.flatMap { section -> [Row] in
-            [.group(section.group, section.sessions.count)]
-                + section.sessions.map(Row.session)
+            [.group(
+                section.group,
+                section.sessions.count,
+                SidebarModel.needsYou(section.sessions)
+            )] + section.sessions.map(Row.session)
         }
         table.reloadData()
+        scroll.isHidden = rows.isEmpty
+        emptyState.isHidden = !rows.isEmpty
         if let selected, let index = rows.firstIndex(where: {
             if case let .session(session) = $0 { return session.id == selected }
             return false
@@ -65,7 +131,7 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
     }
 
     private func group(at row: Int) -> String? {
-        guard rows.indices.contains(row), case let .group(name, _) = rows[row] else { return nil }
+        guard rows.indices.contains(row), case let .group(name, _, _) = rows[row] else { return nil }
         return name
     }
 
@@ -85,17 +151,8 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         switch rows[row] {
-        case let .group(name, count):
-            let label = rowLabel("\(name)  \(count)", size: 11, bold: true)
-            label.textColor = .secondaryLabelColor
-            let view = NSTableCellView()
-            view.addSubview(label)
-            label.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                label.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 2),
-                label.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            ])
-            return view
+        case let .group(name, count, needs):
+            return groupCell(name: name, count: count, needs: needs)
         case let .session(session):
             return sessionCell(session)
         }
@@ -108,34 +165,77 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
         return label
     }
 
+    private func groupCell(name: String, count: Int, needs: Int) -> NSView {
+        let view = NSTableCellView()
+        let title = rowLabel("\(name)  \(count)", size: 11, bold: true)
+        title.textColor = .secondaryLabelColor
+        view.addSubview(title)
+        title.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            title.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 6),
+            title.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+        ])
+        // `1 needs you` only when a row in this group wants the user.
+        if needs > 0 {
+            let badge = rowLabel("\(needs) needs you", size: 11, bold: false)
+            badge.textColor = .systemOrange
+            view.addSubview(badge)
+            badge.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                badge.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -8),
+                badge.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+                badge.leadingAnchor.constraint(greaterThanOrEqualTo: title.trailingAnchor, constant: 6),
+            ])
+        }
+        return view
+    }
+
+    /// One line per the reference: title left; `<age> <glyph>` in a right-hand column.
     private func sessionCell(_ session: SidebarSession) -> NSView {
         let view = NSTableCellView()
-        let title = rowLabel(session.title, size: 13, bold: false)
-        let subtitle = rowLabel(SidebarModel.rowSubtitle(for: session), size: 11, bold: false)
-        subtitle.textColor = .secondaryLabelColor
-        let dot = NSView()
-        dot.wantsLayer = true
-        dot.layer?.cornerRadius = 3
-        dot.layer?.backgroundColor = statusColor(session).cgColor
-        for subview in [dot, title, subtitle] {
-            view.addSubview(subview)
-            subview.translatesAutoresizingMaskIntoConstraints = false
+        let unread = session.unread > 0
+
+        let glyph = rowLabel(SidebarModel.statusGlyph(for: session), size: 11, bold: false)
+        glyph.textColor = statusColor(session)
+        glyph.alignment = .center
+        let age = rowLabel(SidebarModel.ageText(for: session), size: 11, bold: false)
+        age.textColor = unread ? .labelColor : .secondaryLabelColor
+        age.alignment = .right
+        let title = rowLabel(session.title, size: 13, bold: unread)
+        view.addSubview(glyph)
+        view.addSubview(age)
+        view.addSubview(title)
+
+        var leading = view.leadingAnchor
+        var inset: CGFloat = 10
+        if unread {
+            let dot = NSView()
+            dot.wantsLayer = true
+            dot.layer?.cornerRadius = 2.5
+            dot.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
+            view.addSubview(dot)
+            dot.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                dot.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 4),
+                dot.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+                dot.widthAnchor.constraint(equalToConstant: 5),
+                dot.heightAnchor.constraint(equalToConstant: 5),
+            ])
+            leading = dot.trailingAnchor
+            inset = 5
         }
+
+        for label in [glyph, age, title] { label.translatesAutoresizingMaskIntoConstraints = false }
         NSLayoutConstraint.activate([
-            dot.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 6),
-            dot.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            dot.widthAnchor.constraint(equalToConstant: 6),
-            dot.heightAnchor.constraint(equalToConstant: 6),
-            title.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 8),
-            title.topAnchor.constraint(equalTo: view.topAnchor, constant: 7),
-            title.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -6),
-            subtitle.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            subtitle.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 2),
-            subtitle.trailingAnchor.constraint(equalTo: title.trailingAnchor),
+            title.leadingAnchor.constraint(equalTo: leading, constant: inset),
+            title.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            title.trailingAnchor.constraint(lessThanOrEqualTo: age.leadingAnchor, constant: -6),
+            glyph.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -8),
+            glyph.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            glyph.widthAnchor.constraint(equalToConstant: 12),
+            age.trailingAnchor.constraint(equalTo: glyph.leadingAnchor, constant: -6),
+            age.centerYAnchor.constraint(equalTo: view.centerYAnchor),
         ])
-        if session.unread > 0 || session.status == .blocked || session.status == .error {
-            view.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.08).cgColor
-        }
         return view
     }
 

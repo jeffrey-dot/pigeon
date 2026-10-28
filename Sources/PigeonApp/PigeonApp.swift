@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow!
     private var splitView: NSSplitView!
     private var sidebar: SidebarViewController!
+    private var header: SessionHeaderView!
     private var container: SplitContainerView!
     private var client: HostClient?
 
@@ -67,6 +68,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sidebar.onRename = { [weak self] id, name in self?.rename(id, name) }
         sidebar.onRenameGroup = { [weak self] group, name in self?.renameGroup(group, name) }
         sidebar.onReorder = { [weak self] order in self?.reorder(order) }
+        sidebar.onNewSession = { [weak self] in self?.newSession(nil) }
+        sidebar.onToggleSidebar = { [weak self] in self?.toggleSidebar(nil) }
 
         container = SplitContainerView(frame: frame)
         container.onSplit = { [weak self] axis in self?.split(axis) }
@@ -81,10 +84,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         splitView = NSSplitView()
         splitView.isVertical = true
         splitView.dividerStyle = .thin
+        // `docs/ui.md` §1: 240pt by default, user drag overrides (low priority).
+        let defaultWidth = sidebar.view.widthAnchor.constraint(equalToConstant: 240)
+        defaultWidth.priority = .defaultLow
+        defaultWidth.isActive = true
+        header = SessionHeaderView()
+        header.translatesAutoresizingMaskIntoConstraints = false
+        header.heightAnchor.constraint(equalToConstant: 40).isActive = true
+        let right = NSStackView(views: [header, container])
+        right.orientation = .vertical
+        right.spacing = 0
         splitView.addArrangedSubview(sidebar.view)
-        splitView.addArrangedSubview(container)
+        splitView.addArrangedSubview(right)
         sidebar.view.widthAnchor.constraint(greaterThanOrEqualToConstant: 200).isActive = true
-        sidebar.view.widthAnchor.constraint(lessThanOrEqualToConstant: 340).isActive = true
+        sidebar.view.widthAnchor.constraint(lessThanOrEqualToConstant: 360).isActive = true
 
         window.contentView = splitView
         window.makeKeyAndOrderFront(nil)
@@ -106,6 +119,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let viewMenu = NSMenu(title: "View")
         viewMenu.addItem(withTitle: "Split Left/Right", action: #selector(SplitContainerView.splitVertical(_:)), keyEquivalent: "d")
         viewMenu.addItem(withTitle: "Split Top/Bottom", action: #selector(SplitContainerView.splitHorizontal(_:)), keyEquivalent: "D")
+        let toggleSidebarItem = NSMenuItem(
+            title: "Toggle Sidebar", action: #selector(toggleSidebar(_:)), keyEquivalent: "b")
+        toggleSidebarItem.target = self
+        viewMenu.addItem(toggleSidebarItem)
         viewMenu.addItem(withTitle: "Close Pane", action: #selector(SplitContainerView.closeFocused(_:)), keyEquivalent: "w")
         viewMenu.addItem(withTitle: "Previous Pane", action: #selector(SplitContainerView.focusPrevious(_:)), keyEquivalent: "[")
         viewMenu.addItem(withTitle: "Next Pane", action: #selector(SplitContainerView.focusNext(_:)), keyEquivalent: "]")
@@ -324,7 +341,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func sidebarSessions() -> [SidebarSession] {
-        rows.values.map { row in
+        // Dictionary order is random; sort by id so groups keep first-seen order across launches.
+        rows.values.sorted { $0.id < $1.id }.map { row in
             SidebarSession(
                 id: row.id,
                 title: row.app,
@@ -333,7 +351,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 unread: row.unread,
                 app: row.app,
                 cwd: row.cwd,
-                lastSeen: row.lastSeen
+                lastSeen: row.lastSeen,
+                reported: row.seq > 0
             )
         }
     }
@@ -352,6 +371,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sidebar.update(sections: sections, selected: selectedSession)
         let needs = SidebarModel.needsYou(sidebarSessions())
         window.title = needs > 0 ? "pigeon — \(needs) needs you" : "pigeon"
+        updateHeader()
+    }
+
+    /// `docs/ui.md` §3: name, cwd, and the same status wording as the sidebar.
+    private func updateHeader() {
+        guard let row = selectedSession.flatMap({ rows[$0] }) else {
+            header.update(title: "", cwd: "", badge: "")
+            return
+        }
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let cwd = row.cwd.isEmpty ? "" : row.cwd.replacingOccurrences(of: home, with: "~")
+        header.update(
+            title: row.app,
+            cwd: cwd,
+            // No OSC 7501 record means no state to report: leave the badge blank.
+            badge: row.seq > 0
+                ? SidebarModel.subtitle(status: row.status, since: row.lastSeen)
+                : ""
+        )
+    }
+
+    @objc private func toggleSidebar(_ sender: Any?) {
+        sidebar.view.isHidden.toggle()
     }
 
     // MARK: - protocol
@@ -452,7 +494,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         row.seq = Wire.u32(message, "seq")
         row.lastSeen = Date()
-        if selectedSession != id && row.status != .idle {
+        // `docs/ui.md` §5: only done/error become unread; blocked is its own orange mark.
+        if selectedSession != id, row.status == .done || row.status == .error {
             row.unread += 1
             state.unread[String(id)] = row.unread
             store.save(state)
