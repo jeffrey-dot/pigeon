@@ -35,12 +35,12 @@ final class SessionHeaderView: NSView {
     /// The path gives way from its head, the way harp clips a long working directory.
     private func build() {
         title.font = .systemFont(ofSize: SidebarMetrics.cardTitleSize, weight: .semibold)
-        title.textColor = SidebarTheme.ink
+        title.textColor = SidebarTheme.cardInk
         path.font = .systemFont(ofSize: SidebarMetrics.cardPathSize)
-        path.textColor = SidebarTheme.gray
+        path.textColor = SidebarTheme.cardGray
         path.lineBreakMode = .byTruncatingHead
         state.font = .systemFont(ofSize: SidebarMetrics.cardStateSize)
-        state.textColor = SidebarTheme.gray
+        state.textColor = SidebarTheme.cardGray
         state.alignment = .right
         divider.boxType = .separator
 

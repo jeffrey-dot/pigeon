@@ -49,6 +49,15 @@ enum SidebarMetrics {
     static let cardHeaderSpacing: CGFloat = 10
     static let dividerWidth: CGFloat = 0.5
 
+    /// The right pane is a card, not a flush pane: 10pt radius, 8pt inset on the three
+    /// window edges, a 0.5pt edge and a soft shadow (`docs/ui.md` §7.1).
+    static let cardRadius: CGFloat = 10
+    static let cardInset: CGFloat = 8
+    static let cardEdgeWidth: CGFloat = 0.5
+    static let cardShadowOffsetY: CGFloat = 4
+    static let cardShadowBlur: CGFloat = 16
+    static let cardContentLeftPadding: CGFloat = 32
+
     /// Width of the macOS traffic-light zone inside the sidebar header.
     static let trafficLightWidth: CGFloat = 64
 

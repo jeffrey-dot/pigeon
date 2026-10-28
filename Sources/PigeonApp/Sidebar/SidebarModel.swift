@@ -144,6 +144,12 @@ public enum SidebarModel {
         return "\(state) · \(relativeTime(since, now: now))"
     }
 
+    /// harp capitalizes only the first character of a group name (`VT:10063`), not every word.
+    public static func displayGroupName(_ name: String) -> String {
+        guard let first = name.first else { return name }
+        return first.uppercased() + name.dropFirst()
+    }
+
     /// `now` / `1m` / `3h` / `2d` — the row age from `docs/ui.md` §2.2.
     public static func relativeTime(_ date: Date, now: Date = Date()) -> String {
         let seconds = max(0, Int(now.timeIntervalSince(date)))

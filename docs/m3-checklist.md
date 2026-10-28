@@ -8,11 +8,11 @@
 cargo fmt --check                                  # 通过
 cargo clippy --all-targets -- -D warnings          # 通过
 cargo test                                         # 66 单元 + 11 ABI + 21 宿主 = 98 passed
-cargo build --release --bin pigeon-host            # 1,234,272 B（1.18 MiB ≤ 8 MiB）
+cargo build --release --bin pigeon-host            # 1,234,288 B（1.18 MiB ≤ 8 MiB）
 cbindgen --config core/cbindgen.toml --crate pigeon-core \
          --output /tmp/pg.h core                   # 与 include/pigeon_core.h 无差异
 cargo build --lib --no-default-features            # 通过（库本体不引用 tokio/portable-pty）
-swift build && swift test                          # 通过 / 33 passed
+swift build && swift test                          # 通过 / 40 passed
 ```
 
 新增覆盖：
@@ -33,15 +33,18 @@ swift build && swift test                          # 通过 / 33 passed
 ```text
 sessions created: 4
 sidebar (light): sidebar sessions=4 needs=2
+sidebar width: sidebar width=272
 apps: sessions apps=1:sh 2:sh 3:done.sh 4:blocked.sh
 Cmd-J focus messages: 0 -> 1 (ack: 1)
-order: [2, 3, 1, 4]
-right-click Close Session: close_pane 0 -> 1
+selected before close: selected=2
+Cmd-Shift-W Close Session: close_pane 0 -> 1
 sessions after Cmd-T: 5
+drag: first attempt did not register, retrying
+order: [2, 1, 3, 4]
 reopened: sidebar sessions=4 needs=1
-state file: …/config/sidebar.json (83 bytes)
+state file: …/config/sidebar.json (89 bytes)
 sidebar (dark): sidebar sessions=4 needs=1
-titles: sessions apps=2:sh 3:done.sh 4:blocked.sh 5:sh
+titles: sessions apps=1:sh 3:done.sh 4:blocked.sh 5:sh
 ```
 
 `order: [2, 3, 1, 4]` 是脚本把 `A` 组的第 1 行拖到 `C` 组那一行（[reordered-light](images/m3/reordered-light.jpg) 里 `A` 组两行对调），
@@ -58,24 +61,25 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 
 | 项 | harp（出处 / 取值） | 我们的实现 | 截图 |
 |---|---|---|---|
-| 侧栏宽度 | `VT:9111` `SIDEBAR_WIDTH` 272 | 默认 272（低优先级约束，可拖 200–360） | [sidebar-light](images/m3/sidebar-light.jpg) |
+| 侧栏宽度 | `VT:9111` `SIDEBAR_WIDTH` 272 | 默认 272，`splitView.setPosition(272)` 真正落位（`PIGEON_DEBUG` 打出 `sidebar width=272`），可拖 200–360 | [sidebar-light](images/m3/sidebar-light.jpg) |
 | 侧栏底色 | `VT:9209` `SIDEBAR` `#e8e8eb` / `#232326`；`GLASS_TINT` 半透明罩 | `SidebarBackgroundView` 动态色填同样两值（不叠加玻璃模糊，见 §7.5） | [sidebar-light](images/m3/sidebar-light.jpg) / [sidebar-dark](images/m3/sidebar-dark.jpg) |
-| 窗口 chrome | `TL:64` 左侧 64pt 红绿灯区、标题栏透明 | `.fullSizeContentView` + `titlebarAppearsTransparent` + `titleVisibility = .hidden`，侧栏顶到窗口顶端、红绿灯落在侧栏底色上 | [sidebar-light](images/m3/sidebar-light.jpg) / [sidebar-dark](images/m3/sidebar-dark.jpg) |
+| 窗口 chrome | `TL:64` 左侧 64pt 红绿灯区、标题栏透明；`view.rs:581` 红绿灯中心 28pt、与侧栏按钮同排 | `.fullSizeContentView` + `titlebarAppearsTransparent` + `titleVisibility = .hidden`；侧栏顶到窗口顶端；折叠/新建按钮按**原生红绿灯中心**对齐（macOS 自己摆红绿灯，我们跟随它的行） | [sidebar-light](images/m3/sidebar-light.jpg) / [sidebar-dark](images/m3/sidebar-dark.jpg) |
 | 组头项目名 + 条数 | `VT:9123` 11.5 Semibold `SECTION_NAME`；`VT:10092` 11.5 `SECTION_COUNT`；首字母大写 | 同名 token；`A 2` / `B 1` / `C 1` | [sidebar-light](images/m3/sidebar-light.jpg) |
 | 组头 `needs you` | `VT:10101` 12pt `NEEDS_TEXT`；单数 `1 needs you`、复数 `N need you` | `SidebarTheme.needsLabel` 同文案同色 | [sidebar-light](images/m3/sidebar-light.jpg)（B、C 组） |
 | 行高 / 行距 | `VT:9118` 30、`VT:9117` 1 | `rowHeight 30` + `intercellSpacing 1` | [sidebar-light](images/m3/sidebar-light.jpg) |
 | 组间距 | `VT:9122` 组头 28 + `VT:9116` 间距 14 | 组行高度 42（标签靠底部，上方留 14 空档） | [sidebar-light](images/m3/sidebar-light.jpg)（B/C 组上方的空档） |
 | 行圆角 / 选中 | `VT:9121` 8、`VT:9205` `WHITE`、`SELECTED_EDGE` 0.5、`SELECTED_SHADOW` | `SidebarRowView` 自绘胶囊：8pt、动态色、0.5pt 描边、投影；`selectionHighlightStyle = .none` | [sidebar-light](images/m3/sidebar-light.jpg) / [sidebar-dark](images/m3/sidebar-dark.jpg) |
-| 悬停 | `VT:9210` `HOVER` 黑 5% / 白 6% | `SidebarRowView` 的 tracking area 用同一 token | 未截（脚本不模拟悬停，见 §5） |
+| 悬停 | `VT:9210` `HOVER` 黑 5% / 白 6% | `SidebarRowView` 的 tracking area 用同一 token；脚本把指针移到行上再截 | [hover-light](images/m3/hover-light.jpg) |
 | 行内缩进 / 右列 | `VT:10031` 左 12 / 右 8，`VT:9114` 列表左右 10 | 标题左 22pt、状态图标右缘 18pt、元素间距 8pt | [sidebar-light](images/m3/sidebar-light.jpg) |
 | 标题字号 / 字重 | `VT:9120` 13、未读 Semibold、`VT:9193` `INK` | 13pt / Semibold / `SidebarTheme.ink` | [sidebar-light](images/m3/sidebar-light.jpg)（`done.sh` 行） |
-| 时间 | `VT:8568` 10pt，等待时 `NEEDS_TEXT` 否则 `SUB`；`VT:9390` `now/5m/3h/2d` | 10pt、blocked 行橙色、`SidebarModel.relativeTime` 同四档 | [sidebar-light](images/m3/sidebar-light.jpg) |
-| 状态图标 | `VT:9544-9604` 15pt 字形 / 16pt 槽：working 轨道+弧、needs 环+点、done 实心盘、已读细勾、idle 月亮 | SF Symbols：`circle.dashed` / `exclamationmark.circle` / `checkmark.circle.fill` / `checkmark` / 无，颜色用同名 token | [sidebar-light](images/m3/sidebar-light.jpg) / [jump-light](images/m3/jump-light.jpg) |
+| 时间 | `VT:8568` 10pt；颜色 `VT:8564` → `needs_you_color()` `#E8A33D`；`VT:9390` `now/5m/3h/2d` | 10pt；blocked 行用 `needsAccent`（`#E8A33D`），其余 `GRAY`；`SidebarModel.relativeTime` 同四档 | [sidebar-light](images/m3/sidebar-light.jpg) |
+| 状态图标 | `VT:9544-9604` 15pt 字形 / 16pt 槽；needs 用 `ICON_NEEDS_RING`/`ICON_NEEDS_DOT`（`VT:9222-9223`） | SF Symbols：`circle.dashed` / `exclamationmark.circle` / `checkmark.circle.fill` / `checkmark` / 无；needs 用 `iconNeedsRing`（浅 `#c98314`、深 `#e8a33d`） | [sidebar-light](images/m3/sidebar-light.jpg) / [jump-light](images/m3/jump-light.jpg) |
 | 未读 | `VT:9849` 标题 Semibold + 实心 done 盘 | 同上，加 `docs/ui.md` §2.1 要求的行首 5pt 圆点（harp 没有这个点） | [sidebar-light](images/m3/sidebar-light.jpg)（`done.sh` 行） |
-| 顶部按钮 | `VT:10146-10162` 28×28、圆角 7、图标 17、`GRAY` | `NSButton` + SF Symbol 配置，28×28，右对齐 14pt | [sidebar-light](images/m3/sidebar-light.jpg) |
+| 顶部按钮 | `VT:10146-10162` 28×28、圆角 7、图标 17、`GRAY`、悬停 `HOVER` 填充 | `SidebarHeaderButton`：28×28、自绘 7pt 圆角悬停填充、图标 17、右对齐 14pt | [sidebar-light](images/m3/sidebar-light.jpg) |
 | 右栏头部 | `VT:9125` 40pt、12.5 Semibold `INK` + 12.5 `GRAY` 路径（行首截断）+ 12 `GRAY` 状态、左 32 / 右 20、0.5 `DIVIDER` | `SessionHeaderView` 同值；侧栏收起时左内边距 84（`VT:9127`） | [sidebar-light](images/m3/sidebar-light.jpg) / [jump-light](images/m3/jump-light.jpg) |
 | 空态 | harp 没有 | `docs/ui.md` §2.3：“No sessions yet” + New Session | [empty-light](images/m3/empty-light.jpg) / [empty-dark](images/m3/empty-dark.jpg) |
-| 外观切换 | — | 全部动态色；同一个 view 依次用 `.aqua`/`.darkAqua` 渲染的断言在 `SidebarRenderingTests` | [sidebar-light](images/m3/sidebar-light.jpg) vs [sidebar-dark](images/m3/sidebar-dark.jpg) |
+| 右栏卡片 | `view.rs:579` 圆角 10；`view.rs:22245` 0.5pt `CARD_EDGE`；`view.rs:22247` `CARD_SHADOW` 投影（下移 4、模糊 16）；`view.rs:22258-22262` 上/右/下各 8pt 外缩 | `CardView`：内层 `cornerRadius 10` + `masksToBounds`（防终端底色破角）、外层投影，上/右/下各 8pt，左边贴分隔线；卡片底色 = 终端背景，头部用卡片上的浅色 ink | [sidebar-light](images/m3/sidebar-light.jpg) / [jump-light](images/m3/jump-light.jpg) |
+| 外观切换 | — | 全部动态色；同一个 view 依次用 `.aqua`/`.darkAqua` 渲染的断言在 `SidebarRenderingTests`（侧栏底色 + 未读点），`CardView` 在 `viewDidChangeEffectiveAppearance` 里重解析 layer 色 | [sidebar-light](images/m3/sidebar-light.jpg) vs [sidebar-dark](images/m3/sidebar-dark.jpg) |
 
 ## 3. 产品调整（用户要求，2026-10-28）
 

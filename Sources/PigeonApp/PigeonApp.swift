@@ -104,11 +104,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         header = SessionHeaderView()
         header.translatesAutoresizingMaskIntoConstraints = false
         header.heightAnchor.constraint(equalToConstant: SidebarMetrics.cardHeaderHeight).isActive = true
-        let right = NSStackView(views: [header, container])
-        right.orientation = .vertical
-        right.spacing = 0
+        // The card: header on top, terminal below, one rounded surface inset from the window.
+        let card = CardView()
+        let cardBody = NSStackView(views: [header, container])
+        cardBody.orientation = .vertical
+        cardBody.spacing = 0
+        card.addSubview(cardBody)
+        cardBody.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            cardBody.topAnchor.constraint(equalTo: card.topAnchor),
+            cardBody.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            cardBody.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            cardBody.bottomAnchor.constraint(equalTo: card.bottomAnchor),
+        ])
+        // The gutter around the card is the sidebar's surface, so the card looks lifted.
+        let gutter = SidebarBackgroundView()
+        gutter.addSubview(card)
+        card.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            card.topAnchor.constraint(equalTo: gutter.topAnchor, constant: SidebarMetrics.cardInset),
+            card.trailingAnchor.constraint(equalTo: gutter.trailingAnchor, constant: -SidebarMetrics.cardInset),
+            card.bottomAnchor.constraint(equalTo: gutter.bottomAnchor, constant: -SidebarMetrics.cardInset),
+            card.leadingAnchor.constraint(equalTo: gutter.leadingAnchor),
+        ])
         splitView.addArrangedSubview(sidebar.view)
-        splitView.addArrangedSubview(right)
+        splitView.addArrangedSubview(gutter)
         sidebar.view.widthAnchor.constraint(
             greaterThanOrEqualToConstant: SidebarMetrics.widthRange.lowerBound).isActive = true
         sidebar.view.widthAnchor.constraint(
@@ -118,7 +138,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(container)
         NSApp.activate(ignoringOtherApps: true)
+        // `NSSplitView` sizes panes by frames, so the default width needs a real position;
+        // the low-priority width constraint alone only nudges autolayout.
+        splitView.setPosition(SidebarMetrics.width, ofDividerAt: 0)
+        alignSidebarHeaderWithTrafficLights()
+        if ProcessInfo.processInfo.environment["PIGEON_DEBUG"] != nil {
+            FileHandle.standardError.write(Data(
+                "pigeon: sidebar width=\(Int(sidebar.view.frame.width)) window=\(Int(window.frame.width))\n".utf8
+            ))
+        }
         refreshSidebar()
+    }
+
+    /// harp puts the sidebar's chips on the traffic lights' row; the native buttons live in
+    /// the titlebar overlay, so their center is the only reliable reference.
+    private func alignSidebarHeaderWithTrafficLights() {
+        guard let zoom = window.standardWindowButton(.zoomButton) else { return }
+        let center = zoom.convert(NSPoint(x: zoom.bounds.midX, y: zoom.bounds.midY), to: nil)
+        sidebar.alignHeaderControls(centerFromTop: window.frame.height - center.y)
     }
 
     private func buildMenu() {

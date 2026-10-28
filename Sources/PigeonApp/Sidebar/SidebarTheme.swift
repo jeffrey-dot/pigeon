@@ -17,8 +17,13 @@ enum SidebarTheme {
     static let sectionCount = dynamic(light: 0xa1a1a6, dark: 0x636366)
     /// `N needs you` — orange in both appearances.
     static let needsText = dynamic(light: 0x9a5700, dark: 0xf0b35c)
-    static let needsRing = dynamic(light: 0xc98314, dark: 0xc98314)
-    static let needsDot = dynamic(light: 0xe8a33d, dark: 0xe8a33d)
+    /// The row's "waiting" icon ring and dot (`VT:9222-9223`). Note these differ from
+    /// `NEEDS_RING`/`NEEDS_DOT`, which harp defines but does not use for rows.
+    static let iconNeedsRing = dynamic(light: 0xc98314, dark: 0xe8a33d)
+    static let iconNeedsDot = dynamic(light: 0xe8a33d, dark: 0xf0b35c)
+    /// harp's fixed `needs_you_color()` (`VT:4447`): the waiting row's age, same in both
+    /// appearances because a themed yellow reads as "done" in several themes.
+    static let needsAccent = dynamic(light: 0xe8a33d, dark: 0xe8a33d)
     /// The working arc and the filled unread-done disc.
     static let iconStrong = dynamic(light: 0x3a3a3c, dark: 0xe5e5ea)
     /// The tick cut out of the filled disc.
@@ -37,6 +42,16 @@ enum SidebarTheme {
     static let sidebar = dynamic(light: 0xe8e8eb, dark: 0x232326)
     static let hover = overlay(light: 0x000000, alpha: 13, dark: 0xffffff, alpha: 15)
     static let badgeText = dynamic(light: 0x3a2300, dark: 0x3a2300)
+    /// The card's 0.5pt edge and its shadow (`VT:9226-9227`).
+    static let cardEdge = overlay(light: 0x000000, alpha: 26, dark: 0xffffff, alpha: 26)
+    static let cardShadow = overlay(light: 0x000000, alpha: 13, dark: 0x000000, alpha: 64)
+    /// The card is the terminal's own surface, so it stays dark in both appearances; its
+    /// header therefore uses the dark-theme ink rather than the appearance-driven tokens.
+    static let cardSurface = dynamic(light: 0x1c1c21, dark: 0x1c1c21)
+    static let cardInk = dynamic(light: 0xf5f5f7, dark: 0xf5f5f7)
+    static let cardGray = dynamic(light: 0x8e8e93, dark: 0x8e8e93)
+    static let cardDivider = dynamic(light: 0x3a3a3c, dark: 0x3a3a3c)
+
     /// harp folds a failed agent into `Done`; pigeon keeps `error` distinct, so this
     /// one token has no harp counterpart and stays a system color.
     static let error = NSColor.systemRed

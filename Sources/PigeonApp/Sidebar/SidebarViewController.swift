@@ -10,6 +10,7 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
     }
 
     private let table = NSTableView()
+    private var headerControlsCenter: NSLayoutConstraint!
     private let scroll = NSScrollView()
     private let emptyState = NSStackView()
     private var rows: [Row] = []
@@ -72,9 +73,13 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
             subview.translatesAutoresizingMaskIntoConstraints = false
         }
         scroll.contentInsets = NSEdgeInsets(top: SidebarMetrics.listTopPadding, left: 0, bottom: 0, right: 0)
+        // The traffic lights sit in the titlebar overlay, so the header row is centered on
+        // them by the app once the window exists (`alignHeaderControls(centerFromTop:)`).
+        headerControlsCenter = buttons.centerYAnchor.constraint(
+            equalTo: root.topAnchor, constant: SidebarMetrics.headerHeight / 2)
         NSLayoutConstraint.activate([
-            buttons.heightAnchor.constraint(equalToConstant: SidebarMetrics.headerHeight),
-            buttons.topAnchor.constraint(equalTo: root.topAnchor),
+            buttons.heightAnchor.constraint(equalToConstant: SidebarMetrics.headerButtonSize),
+            headerControlsCenter,
             buttons.trailingAnchor.constraint(
                 equalTo: root.trailingAnchor, constant: -SidebarMetrics.headerPadRight),
             scroll.topAnchor.constraint(equalTo: buttons.bottomAnchor),
@@ -100,12 +105,17 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
             pointSize: SidebarMetrics.headerButtonIconSize, weight: .regular)
         let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
             .withSymbolConfiguration(config)
-        let button = NSButton(image: image ?? NSImage(), target: self, action: action)
+        let button = SidebarHeaderButton(image: image ?? NSImage(), target: self, action: action)
         button.isBordered = false
         button.contentTintColor = SidebarTheme.gray
         button.widthAnchor.constraint(equalToConstant: SidebarMetrics.headerButtonSize).isActive = true
         button.heightAnchor.constraint(equalToConstant: SidebarMetrics.headerButtonSize).isActive = true
         return button
+    }
+
+    /// Lines the header chips up with the traffic lights instead of the 56pt header's middle.
+    func alignHeaderControls(centerFromTop: CGFloat) {
+        headerControlsCenter?.constant = centerFromTop
     }
 
     @objc private func toggleSidebarClicked() { onToggleSidebar?() }
@@ -188,7 +198,8 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
 
     private func groupCell(name: String, count: Int, needs: Int) -> NSView {
         let view = NSTableCellView()
-        let title = rowLabel(name.capitalized, size: SidebarMetrics.sectionTitleSize, bold: true)
+        let title = rowLabel(
+            SidebarModel.displayGroupName(name), size: SidebarMetrics.sectionTitleSize, bold: true)
         title.textColor = SidebarTheme.sectionName
         let total = rowLabel("\(count)", size: SidebarMetrics.sectionCountSize, bold: false)
         total.textColor = SidebarTheme.sectionCount
@@ -242,7 +253,7 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
         glyph.imageScaling = .scaleProportionallyDown
 
         let age = rowLabel(SidebarModel.ageText(for: session), size: SidebarMetrics.rowTimeSize, bold: false)
-        age.textColor = session.status == .blocked ? SidebarTheme.needsText : SidebarTheme.gray
+        age.textColor = session.status == .blocked ? SidebarTheme.needsAccent : SidebarTheme.gray
         age.alignment = .right
         let title = rowLabel(session.title, size: SidebarMetrics.rowTitleSize, bold: unread)
         title.textColor = SidebarTheme.ink
@@ -265,10 +276,7 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
         ])
         if unread {
             // `docs/ui.md` §2.1 keeps its leading dot; it lives in the row's gutter so titles align.
-            let dot = NSView()
-            dot.wantsLayer = true
-            dot.layer?.cornerRadius = SidebarMetrics.unreadDotSize / 2
-            dot.layer?.backgroundColor = SidebarTheme.iconStrong.cgColor
+            let dot = SidebarDotView()
             view.addSubview(dot)
             dot.translatesAutoresizingMaskIntoConstraints = false
             NSLayoutConstraint.activate([
@@ -285,7 +293,7 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
     /// Status colors from harp's token table (`docs/ui.md` §7.4).
     private func statusColor(_ session: SidebarSession) -> NSColor {
         switch session.status {
-        case .blocked: return SidebarTheme.needsRing
+        case .blocked: return SidebarTheme.iconNeedsRing
         case .error: return SidebarTheme.error
         case .done: return session.unread > 0 ? SidebarTheme.iconStrong : SidebarTheme.ring
         case .working: return SidebarTheme.iconStrong

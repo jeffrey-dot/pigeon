@@ -116,6 +116,12 @@ final class SidebarOrderingTests: XCTestCase {
         XCTAssertEqual(SidebarModel.subtitle(status: .idle, since: now, now: now), "Idle · now")
     }
 
+    func testGroupNamesCapitalizeOnlyTheFirstCharacter() {
+        XCTAssertEqual(SidebarModel.displayGroupName("atlas"), "Atlas")
+        XCTAssertEqual(SidebarModel.displayGroupName("my app"), "My app")
+        XCTAssertEqual(SidebarModel.displayGroupName(""), "")
+    }
+
     func testRelativeTimeBucketsMatchTheSpec() {
         let now = Date(timeIntervalSince1970: 1_000_000)
         func age(_ seconds: TimeInterval) -> String {

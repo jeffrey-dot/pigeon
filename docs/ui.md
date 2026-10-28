@@ -39,7 +39,7 @@
 
 尺寸（macOS）：
 - 窗口：单窗口，圆角，标题栏与侧栏同色，红绿灯内嵌在侧栏顶部（`titlebarAppearsTransparent`）。
-- 侧栏：默认 240pt，可拖动分隔线 200–360pt；⌘B 折叠/展开。
+- 侧栏：默认 272pt（harp `SIDEBAR_WIDTH`，§7.1），可拖动分隔线 200–360pt；⌘B 折叠/展开。
 - 右栏头部：40pt 高；正文（终端）撑满剩余区域，无额外留白。
 
 ## 2. 侧栏
@@ -126,9 +126,9 @@ Pane(id, title, status, status_at, kind, msg)   # 直接来自 OSC 7501 记录
 |---|---|---|
 | 分组 | 按项目分组，组头 = 项目名 + 条数 | 相同（git 根优先，否则 cwd 末级目录），条数是组内 session 数 |
 | 需要你 | 组头右侧橙色 `1 needs you` | 相同位置、相同措辞；口径见下 |
-| 行 | 单行：标题左，右侧 `时间 + 图标` | 相同（标题 13pt、时间 11pt 二级色、字形 11pt），行高 26pt |
+| 行 | 单行：标题左，右侧 `时间 + 图标` | 相同（标题 13pt、时间 10pt、字形 15pt/16pt 槽），行高 30pt + 1pt 间距（§7.1） |
 | 状态图标 | spinner / 时钟 / 对勾 / 感叹号 | `◐` 蓝、`◷` 橙、`✓` 绿、`!` 红（§2.2），`idle` 不画 |
-| 选中态 | 整行圆角胶囊 | 系统 source list 的圆角高亮 |
+| 选中态 | 整行圆角胶囊 | 自绘胶囊：8pt 圆角、`WHITE` 底、0.5pt `SELECTED_EDGE`、投影（`SidebarRowView`） |
 | 相对时间 | `now` / `1m` / `12m` / `1h` | `now` / `Xm` / `Xh` / `Xd`，每分钟刷新 |
 
 **有意不同的**：
@@ -140,7 +140,7 @@ Pane(id, title, status, status_at, kind, msg)   # 直接来自 OSC 7501 记录
 | 没有 OSC 7501 记录的 session | Harp 没有这个概念 | 行尾时间与头部徽标**都留空** | 我们的信息源只有 OSC 7501（`AGENTS.md` §1）；不拿“这一行出现的时间”冒充“最后活动时间” |
 | 行尾图标 | spinner / 时钟 / 对勾 / chevron / pause | 只做 `◐ ◷ ✓ !` | 不做 chevron/pause（§2.1 的选择态已经表达了选中） |
 | 分组折叠 | 可折叠 | 不可折叠，右键 `Rename Group…` 改名 | 2026-10-28 用户决定：分组名比折叠有用 |
-| 标题栏 | 红绿灯内嵌在侧栏顶部，透明标题栏 | 红绿灯留在原生标题栏；折叠/新建按钮放侧栏顶部 | 不做 `titlebarAppearsTransparent` + `fullSizeContentView` 的窗口重构，留到改窗口 chrome 那一轮 |
+| 标题栏 | 红绿灯内嵌在侧栏顶部，透明标题栏 | **已对齐**：`.fullSizeContentView` + `titlebarAppearsTransparent` + 隐藏标题，红绿灯落在 56pt 侧栏头部里，折叠/新建按钮与红绿灯同一行（按原生按钮中心对齐） | 只剩 harp 的窗口玻璃材质模糊（`GLASS_BLUR_RADIUS` 30）没做：那是自绘窗口背景，AppKit 下换系统材质 |
 | 悬停 `×` 关闭 | 行尾出现 `×` | 无（右键菜单 / `⌘⇧W`） | 未实现，记在 `m3-checklist.md` §5 |
 | 空态 | 无 | “No sessions yet” + “New Session”（§2.3） | 参考图只是没有零会话的截图 |
 | 分屏 | 无 | 右栏内可继续分屏（嵌套） | §1 的终端区就是分屏容器 |
@@ -174,11 +174,16 @@ Pane(id, title, status, status_at, kind, msg)   # 直接来自 OSC 7501 记录
 | 组头高 | `VT:9122` `SECTION_HEADER_HEIGHT` | 28 | 28 |
 | 组头内边距 | `VT:9816` | 左 12 / 右 9 | 左 12 / 右 9 |
 | 状态图标槽 / 字形 | `VT:9521` `STATUS_GLYPH`、`VT:9565` 16×16 槽 | 15 / 16×16 | 15pt 字形、16pt 槽（SF Symbols） |
-| 顶部按钮 | `VT:10146-10162` | 28×28、圆角 7、图标 17、悬停用 `HOVER` | 28×28、圆角 7、图标 17 |
+| 顶部按钮 | `VT:10146-10162` | 28×28、圆角 7、图标 17、悬停 `HOVER` 填充 | 28×28、圆角 7、图标 17、`SidebarHeaderButton` 自绘悬停填充 |
 | 右栏头部高 | `VT:9125` `CARD_HEADER_HEIGHT` | 40 | 40 |
 | 右栏头部左右留白 | `VT:9127-9128` `CARD_HEADER_PAD_OPEN/CLOSED`、`VT:10945` | 左 32（侧栏开）/ 84（侧栏关），右 20 | 左 32 / 右 20 |
 | 右栏头部下边线 | `VT:10945` `Border::new(0.5)` + `DIVIDER` | 0.5pt | 0.5pt |
 | 窗口红绿灯区 | `TL:64` `TrafficLightData{width:64, side:Left}` | 左侧 64 宽 | 左侧 64 宽（原生红绿灯内嵌） |
+| 右栏卡片圆角 | `view.rs:579` `FRAMED_CARD_CORNER_RADIUS` | 10 | 10（`CardView` 内层 `cornerCurve = .continuous`） |
+| 右栏卡片外缩 | `view.rs:22258-22262` `inset_framed_card()` | 上/右/下各 8，左边贴分隔线 | 同上（8pt 缝露出侧栏底色） |
+| 右栏卡片描边 | `view.rs:22245` `Border::all(0.5)` + `CARD_EDGE` | 0.5 | 0.5（`cardEdge`） |
+| 右栏卡片投影 | `view.rs:22247-22252` `css_shadow(CARD_SHADOW, 4., 16.)` | 下移 4、模糊 16 | 下移 4、模糊 16（`cardShadow`，`shadowRadius = 8`） |
+| 卡片内容左内边距 | `view.rs:585` `FRAMED_CARD_CONTENT_LEFT_PADDING` | 32 | 32（头部与终端内容） |
 | 侧栏底部 footer | `VT:9113` `FOOTER_HEIGHT` | 44 | 不做（pigeon 没有 harp 的 footer，见 §6） |
 
 ### 7.2 颜色（浅 / 深）
@@ -193,7 +198,8 @@ Pane(id, title, status, status_at, kind, msg)   # 直接来自 OSC 7501 记录
 | `SECTION_NAME` | 组头项目名 | `#7c7c82` | `#8e8e93` |
 | `SECTION_COUNT` | 组头条数 | `#a1a1a6` | `#636366` |
 | `NEEDS_TEXT` | 组头 `N needs you` | `#9a5700` | `#f0b35c` |
-| `NEEDS_RING` / `NEEDS_DOT` | 行内“等待”状态图标 | `#c98314` / `#e8a33d` | `#c98314` / `#e8a33d` |
+| `ICON_NEEDS_RING` / `ICON_NEEDS_DOT` | 行内“等待”状态图标（`VT:9222-9223`，使用处 `VT:9583/9588`） | `#c98314` / `#e8a33d` | `#e8a33d` / `#f0b35c` |
+| `needs_you_color()` | 等待行的相对时间（`VT:4447`，固定值不经主题） | `#e8a33d` | `#e8a33d` |
 | `ICON_STRONG` | working 弧、未读 done 实心盘 | `#3a3a3c` | `#e5e5ea` |
 | `ICON_ON_FILL` | 实心盘里被抠掉的勾 | `#ffffff` | `#1c1c1e` |
 | `RING` | 已读 done 的勾、idle 月亮 | `#a1a1a6` | `#636366` |
@@ -214,7 +220,7 @@ Pane(id, title, status, status_at, kind, msg)   # 直接来自 OSC 7501 记录
 |---|---|---|---|
 | 字体 | `VT:9239-9260` `load_font()` | `.AppleSystemUIFont`（SF Pro Text） | `.systemFont`（同一个字体） |
 | 行标题 | `VT:9120` `ROW_TITLE_SIZE`、`VT:9849` | 13，未读 Semibold | 13，未读 Semibold |
-| 行时间 | `VT:8568` `Text::new_inline(..., 10.)` | 10，等待时用 `NEEDS_TEXT` 否则 `SUB` | 10，同上 |
+| 行时间 | `VT:8568` 10pt；颜色 `VT:8564` → `needs_you_color()` `#E8A33D`（等待）否则 `SUB` | 10pt；blocked 行用 `needsAccent` `#E8A33D`，其余 `GRAY`/`SUB` | 10pt，同上 |
 | 组头项目名 | `VT:9123` `SECTION_TITLE_SIZE`、`VT:10130` | 11.5 Semibold，首字母大写 | 11.5 Semibold，首字母大写 |
 | 组头条数 | `VT:10092` | 11.5 Normal | 11.5 Normal |
 | 组头 `needs you` | `VT:10101` | 12 Normal，`NEEDS_TEXT`；单数 `1 needs you`、复数 `N need you` | 12 Normal，同上（含单复数） |
@@ -227,7 +233,7 @@ Pane(id, title, status, status_at, kind, msg)   # 直接来自 OSC 7501 记录
 | harp | 出处 | 画法 | pigeon |
 |---|---|---|---|
 | `Working` | `VT:9565-9590` | `TRACK` 圆环 + `ICON_STRONG` 弧 | `◐` 或 `circle.dashed` 系 SF Symbol，同色 |
-| `Needs` | `VT:9591-9600` | `NEEDS_RING` 环 + `NEEDS_DOT` 点 | `exclamationmark.circle` 系，`NEEDS_RING` |
+| `Needs` | `VT:9591-9600` | `ICON_NEEDS_RING` 环 + `ICON_NEEDS_DOT` 点 | `exclamationmark.circle`，`iconNeedsRing` |
 | `Done`（未读） | `VT:9544-9555` | `ICON_STRONG` 实心盘 + `ICON_ON_FILL` 勾 | 实心对勾，`ICON_STRONG` |
 | `Done`（已读） | `VT:9557` | `RING` 细勾 | 细勾，`RING` |
 | `Idle` | `VT:9602` | `RING` 月亮 | 月亮，`RING` |
