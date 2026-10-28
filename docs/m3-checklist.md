@@ -145,20 +145,17 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 
 ## 6. CI（GitHub Actions，真跑）
 
-代码提交 `362c8c7`（审计修正：56pt 头部、卡片 32pt 缩进、真实悬停/热切换截图）的 CI 五作业 success：
+代码提交 `327bbe3`（浅/深同色系：终端默认色与卡片底色随主题）的 CI 五作业 success：
 
-<https://github.com/jeffrey-dot/pigeon/actions/runs/40660387885>
+<https://github.com/jeffrey-dot/pigeon/actions/runs/40664088619>
 
 | 作业 | 结果 |
 |---|---|
-| `docs` | success（相对链接检查 `links ok`） |
-| `rust (ubuntu-latest)` | success（`cargo test` **66 + 11 + 21 = 98 passed**） |
+| `docs` | success（相对链接检查） |
+| `rust (ubuntu-latest)` | success（`cargo test` 66 + 11 + 21 = 98 passed） |
 | `rust (macos-latest)` | success |
 | `header` | success（cbindgen `diff -u` 为空） |
-| `swift` | success（`swift test` **40 passed**） |
-
-之前 `0480738` 的 `swift` 作业红过一次（未读点像素断言在 CI 彩色配置下差 1，已改 ±2 容差）、
-`b4252f2` 五作业 success 但被审计挑出规格/截图不一致，随后由 `362c8c7` 修完。
+| `swift` | success（`swift test` 42 passed） |
 
 本机同一提交的全量输出：
 
@@ -166,9 +163,8 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 cargo fmt --check                                  # 通过
 cargo clippy --all-targets -- -D warnings          # 通过
 cargo test                                         # 66 + 11 + 21 = 98 passed
-swift build && swift test                          # Build complete / 40 passed
+swift build && swift test                          # Build complete / 42 passed
 cargo build --release --bin pigeon-host            # 1,234,288 B（1.18 MiB ≤ 8 MiB）
-cargo build --lib --no-default-features            # 通过
-cbindgen … --output /tmp/pg2.h && diff -q …        # header: no diff
-tools/m3-gui-check.sh                              # 见 §2 的转录（浅/深两趟，窗口级截图）
+cbindgen … --output /tmp/pg4.h && diff -q …        # header: no diff
+tools/m3-gui-check.sh                              # 见 §2 转录（浅/深 + 热切换，窗口级截图）
 ```
