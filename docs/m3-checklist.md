@@ -26,53 +26,56 @@ swift build && swift test                          # 通过 / 33 passed
 
 ## 2. GUI（真键盘 / 真鼠标，`tools/m3-gui-check.sh`）
 
-四个 session：`a` 组两个（同 cwd，用来演示组内拖拽）、`b` 组的 shell 自己隔 2s 打印 `done`（保持未读）、
-`c` 组的 shell 启动即打印 `blocked:kind=permission`。空态在创建任何 session 之前截。真实输出：
+四个 session：`A` 组两个（同 cwd，用来演示组内拖拽）、`B` 组的 shell 隔 2s 打印 `done`（保持未读）、
+`C` 组的 shell 启动即打印 `blocked:kind=permission`。空态在创建任何 session 之前截；
+浅/深两套都跑（`PIGEON_APPEARANCE=light|dark` 固定外观，不动系统设置）。真实输出：
 
 ```text
 sessions created: 4
-window: origin=(0,33) size=(1100,600)
-sidebar: sidebar sessions=4 needs=2
-apps: sessions apps=1:sh 2:sh 3:done.sh 4:status.sh
+sidebar (light): sidebar sessions=4 needs=2
+apps: sessions apps=1:sh 2:sh 3:done.sh 4:blocked.sh
 Cmd-J focus messages: 0 -> 1 (ack: 1)
-order: [2, 1, 3, 4]
+order: [2, 3, 1, 4]
 right-click Close Session: close_pane 0 -> 1
 sessions after Cmd-T: 5
 reopened: sidebar sessions=4 needs=1
-state file: …/config/sidebar.json (76 bytes)
-titles: sessions apps=1:sh 2:sh 3:done.sh 4:status.sh
+state file: …/config/sidebar.json (83 bytes)
+sidebar (dark): sidebar sessions=4 needs=1
+titles: sessions apps=2:sh 3:done.sh 4:blocked.sh 5:sh
 ```
 
-`order: [2, 1, 3, 4]` 是脚本把 `a` 组的第 2 行拖到第 4 行（`reordered.jpg` 里 `a` 组的两行顺序对调），
-不是人手操作——AppKit 的拖拽会话可以用带中间移动步的 `cliclick dd/dm/du` 驱动。
+`order: [2, 3, 1, 4]` 是脚本把 `A` 组的第 1 行拖到 `C` 组那一行（[reordered-light](images/m3/reordered-light.jpg) 里 `A` 组两行对调），
 
-### 2.1 参考图对照（criterion 2 逐条）
+交互证据：[右键菜单](images/m3/menu-light.jpg)（关闭 / 标记已读 / 重命名）、
+[分组右键](images/m3/group-menu-light.jpg)（`Rename Group…`）、
+[关窗重开](images/m3/reopen-light.jpg)（分组、未读、排序原样回来）、
+[拖拽后](images/m3/reordered-light.jpg)。
+不是人手操作。截图坐标按 §7.1 的几何算：56pt 头部 + 4pt 顶部留白 + 组行 42 + 会话行 31。
 
-| 项 | 参考图里的样子 | 我们的实现 | 截图 |
+### 2.1 与 harp 的逐项对照（criterion 2）
+
+harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.rs`，`TL` = `app/src/util/traffic_lights.rs`）。
+
+| 项 | harp（出处 / 取值） | 我们的实现 | 截图 |
 |---|---|---|---|
-| 侧栏宽度 | 参考图窗口 1440 宽、侧栏 ≈258pt | 默认 240pt（低优先级约束，拖分隔线可覆盖），夹在 200–360pt | `sidebar.jpg` |
-| 组头 | `Launch  4`（暗灰小字 + 条数），右侧橙色 `1 needs you` | 11pt semibold 二级色 `项目名  条数`；右侧同字号橙色 `N needs you`，N=0 时整块不渲染（`groupCell`） | `sidebar.jpg`（`b 1`/`c 1` 各一个 `1 needs you`） |
-| 行高与缩进 | 行 ≈26pt，标题左缩进 ≈10pt，右侧列贴右边缘 | 行高 26pt；标题左 10pt（未读时 4pt 圆点 + 5pt）；右列距右 8pt、字形固定 12pt 宽 | `sidebar.jpg` |
-| 标题字号与颜色 | 13pt 正文字号，主色；选中行整行圆角胶囊 | 13pt `.labelColor`，未读 `semibold`；选中交给 `NSTableView.style = .sourceList` 的圆角高亮 | `sidebar.jpg`（选中 `sh` 那行） |
-| 副标题 | 参考图行内没有第二行 | 单行版式（2026-10-28 用户拍板）。`Working · 1m` / `Needs you · 2m` 挪到**右栏头部徽标**：11pt 二级色，无 OSC 7501 记录时留空 | `sidebar.jpg`（头部 `sh /tmp/pigeon/a` + 空徽标）、`jump.jpg`（blocked 行为的 `Needs you · now`） |
-| 状态图标 | spinner / 时钟 / 对勾 / 感叹号，颜色区分 | `◐`蓝 `◷`橙 `✓`绿 `!`红（`docs/ui.md` §2.2 表），`idle` 与未上报不画 | `sidebar.jpg`（`done.sh` 的 `✓`、`status.sh` 的 `◷`） |
-| 相对时间 | `now` / `1m` / `12m` / `1h`，每分钟刷新 | `now`(<60s) / `Xm` / `Xh` / `Xd`，60s 定时 `reloadData`；**只有上报过的行才显示**——没有记录就没有“最后输出时间”，宁可留空（见 §4.9） | `sidebar.jpg` |
-| 未读点 | 参考图用加粗 + 图标，没有行首点 | `docs/ui.md` §2.1：5pt accent 圆点 + 标题加粗，选中该行即清除 | `sidebar.jpg` / `unread.jpg`（`done.sh` 那行） |
-| 顶部工具条 | 标题栏里红绿灯 + `⇤` `+` | 红绿灯留在原生标题栏（未做 `titlebarAppearsTransparent`）；侧栏顶部右对齐两个无边框 SF Symbol 按钮（`sidebar.left` 折叠 / `plus` 新建），⌘B 等价折叠 | `sidebar.jpg` |
-| 空态文案 | 参考图没有空态 | “No sessions yet” + 圆角 “New Session” 按钮，垂直居中 | `empty.jpg` |
-
-
-
-| 项 | 证据 |
-|---|---|
-| 三个项目分组的侧栏、**行标题 = 应用名**（`sh` / `status.sh`）、状态点与 `needs you` 计数 | ![sidebar](images/m3/sidebar.jpg) |
-| 第三个 session 的 blocked 状态与计数 | ![status](images/m3/status.jpg) |
-| ⌘J 跳到 blocked session（焦点/ack 已发） | ![jump](images/m3/jump.jpg) |
-| 右键菜单（关闭 / 标记已读 / 重命名） | ![menu](images/m3/menu.jpg) |
-| 分组头部右键 → `Rename Group…`（分组不可折叠） | ![group-menu](images/m3/group-menu.jpg)；改名写入 `sidebar.json` 的 `renamedGroups`（`SidebarStoreTests` 覆盖往返） |
-| 关窗重开：分组、未读、折叠原样回来 | ![reopen](images/m3/reopen.jpg) |
-| ⌘⇧W 关闭整个 session | 手验：按下后宿主的 shell 数 `3 → 2`（菜单项与右键“Close Session”走同一条 `closeSession`） |
-| **人手拖拽排序**（脚本无法驱动 AppKit 拖拽会话） | 用户手动拖动一行后，`/tmp/pigeon-m3-manual/config/sidebar.json` 变成 `{"order":[1,3,2],"collapsed":[],"renamed":{}}`：排序写入了磁盘，且下次启动按这个顺序渲染 |
+| 侧栏宽度 | `VT:9111` `SIDEBAR_WIDTH` 272 | 默认 272（低优先级约束，可拖 200–360） | [sidebar-light](images/m3/sidebar-light.jpg) |
+| 侧栏底色 | `VT:9209` `SIDEBAR` `#e8e8eb` / `#232326`；`GLASS_TINT` 半透明罩 | `SidebarBackgroundView` 动态色填同样两值（不叠加玻璃模糊，见 §7.5） | [sidebar-light](images/m3/sidebar-light.jpg) / [sidebar-dark](images/m3/sidebar-dark.jpg) |
+| 窗口 chrome | `TL:64` 左侧 64pt 红绿灯区、标题栏透明 | `.fullSizeContentView` + `titlebarAppearsTransparent` + `titleVisibility = .hidden`，侧栏顶到窗口顶端、红绿灯落在侧栏底色上 | [sidebar-light](images/m3/sidebar-light.jpg) / [sidebar-dark](images/m3/sidebar-dark.jpg) |
+| 组头项目名 + 条数 | `VT:9123` 11.5 Semibold `SECTION_NAME`；`VT:10092` 11.5 `SECTION_COUNT`；首字母大写 | 同名 token；`A 2` / `B 1` / `C 1` | [sidebar-light](images/m3/sidebar-light.jpg) |
+| 组头 `needs you` | `VT:10101` 12pt `NEEDS_TEXT`；单数 `1 needs you`、复数 `N need you` | `SidebarTheme.needsLabel` 同文案同色 | [sidebar-light](images/m3/sidebar-light.jpg)（B、C 组） |
+| 行高 / 行距 | `VT:9118` 30、`VT:9117` 1 | `rowHeight 30` + `intercellSpacing 1` | [sidebar-light](images/m3/sidebar-light.jpg) |
+| 组间距 | `VT:9122` 组头 28 + `VT:9116` 间距 14 | 组行高度 42（标签靠底部，上方留 14 空档） | [sidebar-light](images/m3/sidebar-light.jpg)（B/C 组上方的空档） |
+| 行圆角 / 选中 | `VT:9121` 8、`VT:9205` `WHITE`、`SELECTED_EDGE` 0.5、`SELECTED_SHADOW` | `SidebarRowView` 自绘胶囊：8pt、动态色、0.5pt 描边、投影；`selectionHighlightStyle = .none` | [sidebar-light](images/m3/sidebar-light.jpg) / [sidebar-dark](images/m3/sidebar-dark.jpg) |
+| 悬停 | `VT:9210` `HOVER` 黑 5% / 白 6% | `SidebarRowView` 的 tracking area 用同一 token | 未截（脚本不模拟悬停，见 §5） |
+| 行内缩进 / 右列 | `VT:10031` 左 12 / 右 8，`VT:9114` 列表左右 10 | 标题左 22pt、状态图标右缘 18pt、元素间距 8pt | [sidebar-light](images/m3/sidebar-light.jpg) |
+| 标题字号 / 字重 | `VT:9120` 13、未读 Semibold、`VT:9193` `INK` | 13pt / Semibold / `SidebarTheme.ink` | [sidebar-light](images/m3/sidebar-light.jpg)（`done.sh` 行） |
+| 时间 | `VT:8568` 10pt，等待时 `NEEDS_TEXT` 否则 `SUB`；`VT:9390` `now/5m/3h/2d` | 10pt、blocked 行橙色、`SidebarModel.relativeTime` 同四档 | [sidebar-light](images/m3/sidebar-light.jpg) |
+| 状态图标 | `VT:9544-9604` 15pt 字形 / 16pt 槽：working 轨道+弧、needs 环+点、done 实心盘、已读细勾、idle 月亮 | SF Symbols：`circle.dashed` / `exclamationmark.circle` / `checkmark.circle.fill` / `checkmark` / 无，颜色用同名 token | [sidebar-light](images/m3/sidebar-light.jpg) / [jump-light](images/m3/jump-light.jpg) |
+| 未读 | `VT:9849` 标题 Semibold + 实心 done 盘 | 同上，加 `docs/ui.md` §2.1 要求的行首 5pt 圆点（harp 没有这个点） | [sidebar-light](images/m3/sidebar-light.jpg)（`done.sh` 行） |
+| 顶部按钮 | `VT:10146-10162` 28×28、圆角 7、图标 17、`GRAY` | `NSButton` + SF Symbol 配置，28×28，右对齐 14pt | [sidebar-light](images/m3/sidebar-light.jpg) |
+| 右栏头部 | `VT:9125` 40pt、12.5 Semibold `INK` + 12.5 `GRAY` 路径（行首截断）+ 12 `GRAY` 状态、左 32 / 右 20、0.5 `DIVIDER` | `SessionHeaderView` 同值；侧栏收起时左内边距 84（`VT:9127`） | [sidebar-light](images/m3/sidebar-light.jpg) / [jump-light](images/m3/jump-light.jpg) |
+| 空态 | harp 没有 | `docs/ui.md` §2.3：“No sessions yet” + New Session | [empty-light](images/m3/empty-light.jpg) / [empty-dark](images/m3/empty-dark.jpg) |
+| 外观切换 | — | 全部动态色；同一个 view 依次用 `.aqua`/`.darkAqua` 渲染的断言在 `SidebarRenderingTests` | [sidebar-light](images/m3/sidebar-light.jpg) vs [sidebar-dark](images/m3/sidebar-dark.jpg) |
 
 ## 3. 产品调整（用户要求，2026-10-28）
 
@@ -111,10 +114,12 @@ titles: sessions apps=1:sh 2:sh 3:done.sh 4:status.sh
 
 | 项 | 说明 |
 |---|---|
-| ~~拖拽排序~~ | 已自动化：脚本把 `a` 组第 2 行拖到第 4 行，`order` 写成 `[2, 1, 3, 4]`（`reordered.jpg` 可见两行对调）。仍依赖固定行高/坐标，分组数一变就得同步 `ROW`/`TOP` |
+| ~~拖拽排序~~ | 已自动化：脚本把 `A` 组第 1 行拖到 `C` 组那一行，`order` 写成 `[2, 3, 1, 4]`（[reordered-light](images/m3/reordered-light.jpg) 可见两行对调）。仍依赖固定行高/坐标，分组或行数一变就得同步脚本里的 `KINDS`/`ROW_TOP` |
 | ~~右键 Close Session~~ | 已稳定：`close_pane 0 -> 1` |
 | 悬停 `×` 关闭 | ui.md §2.1 提到，未实现；关闭走右键菜单 / ⌘⇧W |
-| 相对时间的“最后输出时间” | 未上报的行留空（§4.9）；要显示真实最后输出时间需要宿主上报 pane 活动，M4 再做 |
+| 相对时间的“最后输出时间” | 未上报的行留空（§4.9）。harp 用终端最后一条命令的时间（`VT:9410` `age_from`），我们要宿主上报 pane 活动才做得到（M4） |
+| 悬停胶囊 | `SidebarRowView` 有 tracking area 和 `HOVER` token，但脚本不模拟鼠标悬停，没有截图证据 |
+| harp 的玻璃材质模糊 | 只取 `SIDEBAR` 不透明底色，不叠 `GLASS_BLUR_RADIUS` 30（自绘窗口背景，AppKit 下用系统材质，见 `docs/ui.md` §7.5） |
 | 输入法 / 手速 | M6 |
 | SSH / 多主机分组 | M4 |
 

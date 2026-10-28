@@ -138,11 +138,20 @@ final class SidebarOrderingTests: XCTestCase {
         XCTAssertEqual(SidebarModel.ageText(for: quiet, now: now), "10m")
     }
 
-    func testStatusGlyphsCoverEveryStateWithNoGlyphForIdle() {
-        let glyphs = SidebarSession.Status.allCases.map { status -> String in
-            SidebarModel.statusGlyph(for: row(1, status))
+    func testStatusSymbolsCoverEveryStateWithNoSymbolForIdle() {
+        let symbols = SidebarSession.Status.allCases.map { status in
+            SidebarModel.statusSymbol(for: row(1, status))
         }
-        XCTAssertEqual(glyphs, ["\u{25F7}", "!", "\u{2713}", "\u{25D0}", ""])
+        XCTAssertEqual(symbols, [
+            "exclamationmark.circle",
+            "exclamationmark.triangle.fill",
+            "checkmark",
+            "circle.dashed",
+            nil,
+        ])
+        var unreadDone = row(2, .done)
+        unreadDone.unread = 1
+        XCTAssertEqual(SidebarModel.statusSymbol(for: unreadDone), "checkmark.circle.fill")
     }
 
     func testStatusParsingCoversTheProtocolStrings() {

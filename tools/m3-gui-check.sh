@@ -1,6 +1,7 @@
 #!/bin/bash
-# Reproducible M3 sidebar check: three project sessions, a status event, Cmd-J,
-# Cmd-T, right-click menu, collapse, drag reorder, then reopen.
+# Reproducible M3 sidebar check against harp's geometry (`docs/ui.md` §7), in both
+# appearances: empty state, three projects (one with two sessions for the drag), a done
+# session that stays unread, a blocked one, Cmd-J, drag reorder, context menus, reopen.
 #
 # Needs Accessibility permission (System Events + cliclick). Build first:
 #   cargo build --release --bin pigeon-host && cargo build && swift build
@@ -28,100 +29,104 @@ PIGEON_DEBUG=1 "$HOST" --socket "$R/pigeon.sock" --shell /bin/sh >"$R/host.log" 
 HOST_PID=$!
 sleep 1
 
-# Empty state: launch once before any session exists.
-PIGEON_DEBUG=1 PIGEON_CONFIG_DIR="$CONFIG" XDG_RUNTIME_DIR="$R" "$APP" >"$R/app0.log" 2>&1 &
-APP_PID=$!
-sleep 4
-osa -e 'tell application "System Events" to tell process "pigeon" to set position of window 1 to {0, 0}'
+# Row geometry from `docs/ui.md` §7.1: 56pt sidebar header (traffic lights), 4pt list top
+# padding, a 42pt group row (28 header + 14 section gap), a 31pt session row (30 + 1 gap).
+# `KINDS` is the row list: group `g`, session `s`.
+KINDS="gssgsgs"
+ROW_TOP=$((28 + 56 + 4)) # window titlebar is inside the window (fullSizeContentView): 28+56+4
+row_y() {
+        python3 -c "
+kinds = '$KINDS'
+h = {'g': 42, 's': 31}
+y = $ROW_TOP
+for k in kinds[:$1]:
+    y += h[k]
+print(y + h[kinds[$1]] // 2)
+"
+}
+
+launch() { # launch <light|dark>
+        PIGEON_DEBUG=1 PIGEON_APPEARANCE="$1" PIGEON_CONFIG_DIR="$CONFIG" XDG_RUNTIME_DIR="$R" \
+                "$APP" >"$R/app-$1.log" 2>&1 &
+        APP_PID=$!
+        sleep 4
+        osa -e 'tell application "System Events" to tell process "pigeon" to set position of window 1 to {0, 0}'
+        osa -e 'tell application "System Events" to tell process "pigeon" to set size of window 1 to {1100, 600}'
+        osa -e 'tell application "System Events" to set frontmost of process "pigeon" to true'
+        sleep 1
+}
+
+# --- empty state, before any session exists (both appearances) -------------------------
+launch light
+shoot "$OUT/empty-light.jpg"
+kill "$APP_PID" 2>/dev/null
 sleep 1
-shoot "$OUT/empty.jpg"
+launch dark
+shoot "$OUT/empty-dark.jpg"
 kill "$APP_PID" 2>/dev/null
 sleep 1
 
+# --- sessions -------------------------------------------------------------------------
 cargo run --quiet --manifest-path core/Cargo.toml --example keys -- \
         --socket "$R/pigeon.sock" --new-session /tmp/pigeon/a >/dev/null 2>&1
-# Second session in the same project: two rows in one group, so the drag below
-# has something visible to reorder.
 cargo run --quiet --manifest-path core/Cargo.toml --example keys -- \
         --socket "$R/pigeon.sock" --new-session /tmp/pigeon/a >/dev/null 2>&1
-# Third session reports `done` on its own while unselected: unread dot + check mark.
+# A done session that nobody is looking at: unread dot + filled check.
 printf '#!/bin/sh\nsleep 2\nprintf "\\033]7501;state=done\\007"\nexec /bin/sh\n' >"$R/done.sh"
 chmod +x "$R/done.sh"
 cargo run --quiet --manifest-path core/Cargo.toml --example keys -- \
         --socket "$R/pigeon.sock" --new-session /tmp/pigeon/b --shell "$R/done.sh" >/dev/null 2>&1
-# Fourth session reports blocked on startup, so the sidebar has a `needs you`.
-printf '#!/bin/sh\nprintf "\\033]7501;state=blocked:kind=permission\\007"\nexec /bin/sh\n' >"$R/status.sh"
-chmod +x "$R/status.sh"
+# A blocked session: the group header carries `1 needs you`.
+printf '#!/bin/sh\nprintf "\\033]7501;state=blocked:kind=permission\\007"\nexec /bin/sh\n' >"$R/blocked.sh"
+chmod +x "$R/blocked.sh"
 cargo run --quiet --manifest-path core/Cargo.toml --example keys -- \
-        --socket "$R/pigeon.sock" --new-session "/tmp/pigeon/c" --shell "$R/status.sh" >/dev/null 2>&1
+        --socket "$R/pigeon.sock" --new-session /tmp/pigeon/c --shell "$R/blocked.sh" >/dev/null 2>&1
 echo "sessions created: $(grep -c 'pigeon-host: <- new_session' "$R/host.log")"
 
-PIGEON_DEBUG=1 PIGEON_CONFIG_DIR="$CONFIG" XDG_RUNTIME_DIR="$R" "$APP" >"$R/app.log" 2>&1 &
-APP_PID=$!
-sleep 4
-osa -e 'tell application "System Events" to tell process "pigeon" to set position of window 1 to {0, 0}'
-osa -e 'tell application "System Events" to tell process "pigeon" to set size of window 1 to {1100, 600}'
-osa -e 'tell application "System Events" to set frontmost of process "pigeon" to true'
-sleep 1
-# Click coordinates are derived from the real window frame, not assumed.
-FRAME=$(osascript -e 'tell application "System Events" to tell process "pigeon" to get {position, size} of window 1' 2>/dev/null)
-read -r OX OY W H <<<"$(python3 -c "
-import sys
-raw='$FRAME'.replace('{','').replace('}','').replace(',',' ')
-n=[int(float(x)) for x in raw.split()]
-print(n[0], n[1], n[2], n[3])
-")"
-echo "window: origin=($OX,$OY) size=($W,$H)"
-ROW=26
-# 28pt window titlebar + 30pt sidebar top bar (6 + 20 + 4).
-TOP=$((OY + 58))
-row_y() { echo $((TOP + ROW * $1 + ROW / 2)); }
-shoot "$OUT/sidebar.jpg"
-shoot "$OUT/unread.jpg"
-echo "sidebar: $(grep -o 'sidebar sessions=[0-9]* needs=[0-9]*' "$R/app.log" | tail -1)"
-echo "apps: $(grep -o 'sessions apps=[^"]*' "$R/app.log" | tail -1)"
+# --- light: full interaction pass ------------------------------------------------------
+launch light
+shoot "$OUT/sidebar-light.jpg"
+echo "sidebar (light): $(grep -o 'sidebar sessions=[0-9]* needs=[0-9]*' "$R/app-light.log" | tail -1)"
+echo "apps: $(grep -o 'sessions apps=[^"]*' "$R/app-light.log" | tail -1)"
 
 before=$(grep -c 'pigeon-host: <- focus' "$R/host.log")
 key j "command down"
 sleep 1
 after=$(grep -c 'pigeon-host: <- focus' "$R/host.log")
 echo "Cmd-J focus messages: $before -> $after (ack: $(grep -c 'pigeon-host: <- ack_status' "$R/host.log"))"
-shoot "$OUT/jump.jpg"
+shoot "$OUT/jump-light.jpg"
 
-# Drag session 2 onto session 1 inside group `a`: the only reorder a user can see
-# (the drop handler inserts the dragged session at the target's index). Several
-# moves are needed to cross AppKit's dragging threshold.
+# Drag session 1 below session 2 inside group A: the drop handler inserts the dragged
+# session at the target's index, and the target must be a session in a later group.
 cliclick dd:100,$(row_y 1)
 sleep 0.3
 cliclick dm:100,$(($(row_y 1) + 14))
 sleep 0.2
 cliclick dm:100,$(row_y 2)
 sleep 0.2
-cliclick dm:100,$(row_y 3)
-sleep 0.2
 cliclick dm:100,$(row_y 4)
+sleep 0.2
+cliclick dm:100,$(row_y 6)
 sleep 0.3
-cliclick du:100,$(row_y 4)
+cliclick du:100,$(row_y 6)
 sleep 1
-shoot "$OUT/reordered.jpg"
+shoot "$OUT/reordered-light.jpg"
 echo "order: $(sidebar_state order)"
 
-# Right-click a session: the first menu item is "Close Session".
 before=$(grep -c 'pigeon-host: <- close_pane' "$R/host.log")
 cliclick rc:100,$(row_y 2)
 sleep 1
-shoot "$OUT/menu.jpg"
-osascript -e 'tell application "System Events" to key code 125' >/dev/null 2>&1 # Down
-osascript -e 'tell application "System Events" to key code 36' >/dev/null 2>&1  # Return
+shoot "$OUT/menu-light.jpg"
+osa -e 'tell application "System Events" to key code 125' # Down
+osa -e 'tell application "System Events" to key code 36'  # Return
 sleep 2
 after=$(grep -c 'pigeon-host: <- close_pane' "$R/host.log")
 echo "right-click Close Session: close_pane $before -> $after"
 
-# Groups are headers, not collapsible: right-click shows "Rename Group…".
 cliclick rc:100,$(row_y 0)
 sleep 1
-shoot "$OUT/group-menu.jpg"
-osascript -e 'tell application "System Events" to key code 53' >/dev/null 2>&1
+shoot "$OUT/group-menu-light.jpg"
+osa -e 'tell application "System Events" to key code 53'
 sleep 1
 
 key t "command down"
@@ -130,15 +135,22 @@ echo "sessions after Cmd-T: $(grep -c 'pigeon-host: <- new_session' "$R/host.log
 
 kill "$APP_PID" 2>/dev/null
 sleep 1
-PIGEON_DEBUG=1 PIGEON_CONFIG_DIR="$CONFIG" XDG_RUNTIME_DIR="$R" "$APP" >"$R/app2.log" 2>&1 &
-APP_PID=$!
-sleep 4
-osa -e 'tell application "System Events" to tell process "pigeon" to set position of window 1 to {0, 0}'
-sleep 1
-shoot "$OUT/reopen.jpg"
-echo "reopened: $(grep -o 'sidebar sessions=[0-9]* needs=[0-9]*' "$R/app2.log" | tail -1)"
+launch light
+shoot "$OUT/reopen-light.jpg"
+echo "reopened: $(grep -o 'sidebar sessions=[0-9]* needs=[0-9]*' "$R/app-light.log" | tail -1)"
 echo "state file: $CONFIG/sidebar.json ($(wc -c <"$CONFIG/sidebar.json" 2>/dev/null || echo 0) bytes)"
 kill "$APP_PID" 2>/dev/null
+sleep 1
+
+# --- dark: the same list, for the palette half of the comparison table -----------------
+launch dark
+shoot "$OUT/sidebar-dark.jpg"
+key j "command down"
+sleep 1
+shoot "$OUT/jump-dark.jpg"
+echo "sidebar (dark): $(grep -o 'sidebar sessions=[0-9]* needs=[0-9]*' "$R/app-dark.log" | tail -1)"
+
+kill "$APP_PID" 2>/dev/null
 kill "$HOST_PID" 2>/dev/null
-echo "titles: $(grep -o 'sessions apps=[^"]*' "$R/app.log" | tail -1)"
+echo "titles: $(grep -o 'sessions apps=[^"]*' "$R/app-light.log" | tail -1)"
 echo "screenshots: $(ls "$OUT" | tr '\n' ' ')"

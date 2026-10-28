@@ -161,14 +161,14 @@ public enum SidebarModel {
         session.reported ? relativeTime(session.lastSeen, now: now) : ""
     }
 
-    /// The row's trailing glyph (`docs/ui.md` §2.2); `idle` has none.
-    public static func statusGlyph(for session: SidebarSession) -> String {
+    /// The row's trailing icon as an SF Symbol (`docs/ui.md` §2.2/§7.4); `idle` has none.
+    public static func statusSymbol(for session: SidebarSession) -> String? {
         switch session.status {
-        case .working: return "\u{25D0}"
-        case .blocked: return "\u{25F7}"
-        case .done: return "\u{2713}"
-        case .error: return "!"
-        case .idle: return ""
+        case .working: return "circle.dashed"
+        case .blocked: return "exclamationmark.circle"
+        case .done: return session.unread > 0 ? "checkmark.circle.fill" : "checkmark"
+        case .error: return "exclamationmark.triangle.fill"
+        case .idle: return nil
         }
     }
 }

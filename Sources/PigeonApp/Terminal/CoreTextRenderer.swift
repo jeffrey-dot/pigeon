@@ -39,6 +39,11 @@ enum CoreTextRenderer {
         cursor: PaneView.Cursor,
         in bounds: CGRect
     ) {
+        // The terminal's own background, painted even before the first snapshot: a pane
+        // with no cells must still look like a terminal, not like an empty window (which
+        // turns white under a light app appearance).
+        NSColor(calibratedRed: 0.11, green: 0.11, blue: 0.13, alpha: 1).setFill()
+        bounds.fill()
         // A resize can land between the request and the new snapshot; draw only
         // what we hold instead of trapping on a half-updated grid.
         guard cols > 0, rows > 0, !cells.isEmpty, cells.count >= cols * rows else { return }
@@ -47,8 +52,6 @@ enum CoreTextRenderer {
         }
         let size = cellSize()
         let font = font(bold: false)
-        NSColor(calibratedRed: 0.11, green: 0.11, blue: 0.13, alpha: 1).setFill()
-        bounds.fill()
 
         for row in 0..<rows {
             let originY = bounds.height - CGFloat(row + 1) * size.height

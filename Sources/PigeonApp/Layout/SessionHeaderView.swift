@@ -1,11 +1,13 @@
 import AppKit
 
-/// Right-pane header from `docs/ui.md` §3: session name, cwd, and the status
-/// badge (`Working · 1m`) that repeats the selected row's state in words.
+/// The card header from harp (`docs/ui.md` §7.3): session name, path, and the state
+/// wording on the right, 40pt tall over a 0.5pt divider.
 final class SessionHeaderView: NSView {
     private let title = NSTextField(labelWithString: "")
-    private let cwd = NSTextField(labelWithString: "")
-    private let badge = NSTextField(labelWithString: "")
+    private let path = NSTextField(labelWithString: "")
+    private let state = NSTextField(labelWithString: "")
+    private let divider = NSBox()
+    private var titleLeading: NSLayoutConstraint!
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -17,32 +19,55 @@ final class SessionHeaderView: NSView {
         build()
     }
 
-    func update(title name: String, cwd path: String, badge text: String) {
-        title.stringValue = name
-        cwd.stringValue = path
-        badge.stringValue = text
+    /// harp pads the header past the traffic lights when the sidebar is hidden.
+    func setSidebarCollapsed(_ collapsed: Bool) {
+        titleLeading.constant = collapsed
+            ? SidebarMetrics.cardHeaderPadClosed
+            : SidebarMetrics.cardHeaderPadOpen
     }
 
+    func update(title name: String, cwd: String, badge text: String) {
+        title.stringValue = name
+        path.stringValue = cwd
+        state.stringValue = text
+    }
+
+    /// The path gives way from its head, the way harp clips a long working directory.
     private func build() {
-        title.font = .systemFont(ofSize: 13, weight: .semibold)
-        cwd.font = .systemFont(ofSize: 11)
-        cwd.textColor = .secondaryLabelColor
-        badge.font = .systemFont(ofSize: 11)
-        badge.textColor = .secondaryLabelColor
-        badge.alignment = .right
-        for label in [title, cwd, badge] {
-            label.lineBreakMode = .byTruncatingTail
+        title.font = .systemFont(ofSize: SidebarMetrics.cardTitleSize, weight: .semibold)
+        title.textColor = SidebarTheme.ink
+        path.font = .systemFont(ofSize: SidebarMetrics.cardPathSize)
+        path.textColor = SidebarTheme.gray
+        path.lineBreakMode = .byTruncatingHead
+        state.font = .systemFont(ofSize: SidebarMetrics.cardStateSize)
+        state.textColor = SidebarTheme.gray
+        state.alignment = .right
+        divider.boxType = .separator
+
+        for label in [title, path, state] {
             addSubview(label)
             label.translatesAutoresizingMaskIntoConstraints = false
         }
+        addSubview(divider)
+        divider.translatesAutoresizingMaskIntoConstraints = false
+        titleLeading = title.leadingAnchor.constraint(
+            equalTo: leadingAnchor, constant: SidebarMetrics.cardHeaderPadOpen)
         NSLayoutConstraint.activate([
-            title.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            heightAnchor.constraint(equalToConstant: SidebarMetrics.cardHeaderHeight),
+            titleLeading,
             title.centerYAnchor.constraint(equalTo: centerYAnchor),
-            cwd.leadingAnchor.constraint(equalTo: title.trailingAnchor, constant: 8),
-            cwd.centerYAnchor.constraint(equalTo: centerYAnchor),
-            badge.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-            badge.centerYAnchor.constraint(equalTo: centerYAnchor),
-            cwd.trailingAnchor.constraint(lessThanOrEqualTo: badge.leadingAnchor, constant: -8),
+            path.leadingAnchor.constraint(
+                equalTo: title.trailingAnchor, constant: SidebarMetrics.cardHeaderSpacing),
+            path.centerYAnchor.constraint(equalTo: centerYAnchor),
+            path.trailingAnchor.constraint(
+                lessThanOrEqualTo: state.leadingAnchor, constant: -SidebarMetrics.cardHeaderSpacing),
+            state.trailingAnchor.constraint(
+                equalTo: trailingAnchor, constant: -SidebarMetrics.cardHeaderPadRight),
+            state.centerYAnchor.constraint(equalTo: centerYAnchor),
+            divider.leadingAnchor.constraint(equalTo: leadingAnchor),
+            divider.trailingAnchor.constraint(equalTo: trailingAnchor),
+            divider.bottomAnchor.constraint(equalTo: bottomAnchor),
+            divider.heightAnchor.constraint(equalToConstant: SidebarMetrics.dividerWidth),
         ])
     }
 }

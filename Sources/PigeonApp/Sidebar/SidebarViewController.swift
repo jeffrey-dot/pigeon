@@ -28,12 +28,14 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
     var onToggleSidebar: (() -> Void)?
 
     override func loadView() {
-        let root = NSView()
+        let root = SidebarBackgroundView()
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
         table.headerView = nil
-        table.rowHeight = 26
-        table.style = .sourceList
+        table.rowHeight = SidebarMetrics.rowHeight
+        table.intercellSpacing = NSSize(width: 0, height: SidebarMetrics.rowGap)
+        table.selectionHighlightStyle = .none
+        table.style = .plain
         table.backgroundColor = .clear
         table.dataSource = self
         table.delegate = self
@@ -51,11 +53,11 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
             symbolButton("plus", action: #selector(newSessionClicked)),
         ])
         buttons.orientation = .horizontal
-        buttons.spacing = 2
+        buttons.spacing = SidebarMetrics.headerButtonSpacing
 
         // §2.3 empty state: one line of copy plus a big primary button.
-        let hint = rowLabel("No sessions yet", size: 12, bold: false)
-        hint.textColor = .secondaryLabelColor
+        let hint = rowLabel("No sessions yet", size: SidebarMetrics.needsLabelSize, bold: false)
+        hint.textColor = SidebarTheme.gray
         let create = NSButton(title: "New Session", target: self, action: #selector(newSessionClicked))
         create.bezelStyle = .rounded
         emptyState.orientation = .vertical
@@ -69,11 +71,13 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
             root.addSubview(subview)
             subview.translatesAutoresizingMaskIntoConstraints = false
         }
+        scroll.contentInsets = NSEdgeInsets(top: SidebarMetrics.listTopPadding, left: 0, bottom: 0, right: 0)
         NSLayoutConstraint.activate([
-            buttons.topAnchor.constraint(equalTo: root.topAnchor, constant: 6),
-            buttons.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -8),
-            buttons.heightAnchor.constraint(equalToConstant: 20),
-            scroll.topAnchor.constraint(equalTo: buttons.bottomAnchor, constant: 4),
+            buttons.heightAnchor.constraint(equalToConstant: SidebarMetrics.headerHeight),
+            buttons.topAnchor.constraint(equalTo: root.topAnchor),
+            buttons.trailingAnchor.constraint(
+                equalTo: root.trailingAnchor, constant: -SidebarMetrics.headerPadRight),
+            scroll.topAnchor.constraint(equalTo: buttons.bottomAnchor),
             scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor),
@@ -92,10 +96,15 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
     }
 
     private func symbolButton(_ symbol: String, action: Selector) -> NSButton {
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        let config = NSImage.SymbolConfiguration(
+            pointSize: SidebarMetrics.headerButtonIconSize, weight: .regular)
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(config)
         let button = NSButton(image: image ?? NSImage(), target: self, action: action)
         button.isBordered = false
-        button.contentTintColor = .secondaryLabelColor
+        button.contentTintColor = SidebarTheme.gray
+        button.widthAnchor.constraint(equalToConstant: SidebarMetrics.headerButtonSize).isActive = true
+        button.heightAnchor.constraint(equalToConstant: SidebarMetrics.headerButtonSize).isActive = true
         return button
     }
 
@@ -149,6 +158,18 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
         return true
     }
 
+    /// A group header reserves the gap above it, the way harp spaces its sections.
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        if case .group = rows[row] {
+            return SidebarMetrics.sectionHeaderHeight + SidebarMetrics.sectionGap
+        }
+        return SidebarMetrics.rowHeight
+    }
+
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        SidebarRowView()
+    }
+
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         switch rows[row] {
         case let .group(name, count, needs):
@@ -167,24 +188,39 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
 
     private func groupCell(name: String, count: Int, needs: Int) -> NSView {
         let view = NSTableCellView()
-        let title = rowLabel("\(name)  \(count)", size: 11, bold: true)
-        title.textColor = .secondaryLabelColor
-        view.addSubview(title)
-        title.translatesAutoresizingMaskIntoConstraints = false
+        let title = rowLabel(name.capitalized, size: SidebarMetrics.sectionTitleSize, bold: true)
+        title.textColor = SidebarTheme.sectionName
+        let total = rowLabel("\(count)", size: SidebarMetrics.sectionCountSize, bold: false)
+        total.textColor = SidebarTheme.sectionCount
+        for label in [title, total] {
+            view.addSubview(label)
+            label.translatesAutoresizingMaskIntoConstraints = false
+        }
+        // The row is tall enough for the gap above the next section; the label sits at its foot.
         NSLayoutConstraint.activate([
-            title.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 6),
-            title.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            title.leadingAnchor.constraint(
+                equalTo: view.leadingAnchor,
+                constant: SidebarMetrics.listSidePadding + SidebarMetrics.sectionInsetLeft),
+            title.bottomAnchor.constraint(
+                equalTo: view.bottomAnchor, constant: -SidebarMetrics.sectionHeaderHeight / 2),
+            total.leadingAnchor.constraint(
+                equalTo: title.trailingAnchor, constant: SidebarMetrics.sectionSpacing),
+            total.firstBaselineAnchor.constraint(equalTo: title.firstBaselineAnchor),
         ])
-        // `1 needs you` only when a row in this group wants the user.
+        // `1 needs you` / `N need you` — harp's wording, only when a row wants the user.
         if needs > 0 {
-            let badge = rowLabel("\(needs) needs you", size: 11, bold: false)
-            badge.textColor = .systemOrange
+            let badge = rowLabel(SidebarTheme.needsLabel(needs), size: SidebarMetrics.needsLabelSize, bold: false)
+            badge.textColor = SidebarTheme.needsText
             view.addSubview(badge)
             badge.translatesAutoresizingMaskIntoConstraints = false
             NSLayoutConstraint.activate([
-                badge.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -8),
-                badge.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-                badge.leadingAnchor.constraint(greaterThanOrEqualTo: title.trailingAnchor, constant: 6),
+                badge.trailingAnchor.constraint(
+                    equalTo: view.trailingAnchor,
+                    constant: -(SidebarMetrics.listSidePadding + SidebarMetrics.sectionInsetRight)),
+                badge.firstBaselineAnchor.constraint(equalTo: title.firstBaselineAnchor),
+                badge.leadingAnchor.constraint(
+                    greaterThanOrEqualTo: total.trailingAnchor,
+                    constant: SidebarMetrics.sectionSpacing),
             ])
         }
         return view
@@ -194,58 +230,66 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
     private func sessionCell(_ session: SidebarSession) -> NSView {
         let view = NSTableCellView()
         let unread = session.unread > 0
+        let leading = SidebarMetrics.listSidePadding + SidebarMetrics.rowInsetLeft
+        let trailing = SidebarMetrics.listSidePadding + SidebarMetrics.rowInsetRight
 
-        let glyph = rowLabel(SidebarModel.statusGlyph(for: session), size: 11, bold: false)
-        glyph.textColor = statusColor(session)
-        glyph.alignment = .center
-        let age = rowLabel(SidebarModel.ageText(for: session), size: 11, bold: false)
-        age.textColor = unread ? .labelColor : .secondaryLabelColor
+        let glyph = NSImageView()
+        let config = NSImage.SymbolConfiguration(pointSize: SidebarMetrics.statusGlyphSize, weight: .regular)
+        glyph.image = SidebarModel.statusSymbol(for: session)
+            .flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: nil) }
+            .map { $0.withSymbolConfiguration(config) ?? $0 }
+        glyph.contentTintColor = statusColor(session)
+        glyph.imageScaling = .scaleProportionallyDown
+
+        let age = rowLabel(SidebarModel.ageText(for: session), size: SidebarMetrics.rowTimeSize, bold: false)
+        age.textColor = session.status == .blocked ? SidebarTheme.needsText : SidebarTheme.gray
         age.alignment = .right
-        let title = rowLabel(session.title, size: 13, bold: unread)
+        let title = rowLabel(session.title, size: SidebarMetrics.rowTitleSize, bold: unread)
+        title.textColor = SidebarTheme.ink
         view.addSubview(glyph)
         view.addSubview(age)
         view.addSubview(title)
-
-        var leading = view.leadingAnchor
-        var inset: CGFloat = 10
+        for label in [glyph, age, title] { label.translatesAutoresizingMaskIntoConstraints = false }
+        NSLayoutConstraint.activate([
+            title.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: leading),
+            title.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            title.trailingAnchor.constraint(
+                lessThanOrEqualTo: age.leadingAnchor, constant: -SidebarMetrics.rowSpacing),
+            glyph.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -trailing),
+            glyph.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            glyph.widthAnchor.constraint(equalToConstant: SidebarMetrics.statusGlyphSlot),
+            glyph.heightAnchor.constraint(equalToConstant: SidebarMetrics.statusGlyphSlot),
+            age.trailingAnchor.constraint(
+                equalTo: glyph.leadingAnchor, constant: -SidebarMetrics.rowSpacing),
+            age.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+        ])
         if unread {
+            // `docs/ui.md` §2.1 keeps its leading dot; it lives in the row's gutter so titles align.
             let dot = NSView()
             dot.wantsLayer = true
-            dot.layer?.cornerRadius = 2.5
-            dot.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
+            dot.layer?.cornerRadius = SidebarMetrics.unreadDotSize / 2
+            dot.layer?.backgroundColor = SidebarTheme.iconStrong.cgColor
             view.addSubview(dot)
             dot.translatesAutoresizingMaskIntoConstraints = false
             NSLayoutConstraint.activate([
-                dot.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 4),
+                dot.trailingAnchor.constraint(
+                    equalTo: title.leadingAnchor, constant: -SidebarMetrics.unreadDotGap),
                 dot.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-                dot.widthAnchor.constraint(equalToConstant: 5),
-                dot.heightAnchor.constraint(equalToConstant: 5),
+                dot.widthAnchor.constraint(equalToConstant: SidebarMetrics.unreadDotSize),
+                dot.heightAnchor.constraint(equalToConstant: SidebarMetrics.unreadDotSize),
             ])
-            leading = dot.trailingAnchor
-            inset = 5
         }
-
-        for label in [glyph, age, title] { label.translatesAutoresizingMaskIntoConstraints = false }
-        NSLayoutConstraint.activate([
-            title.leadingAnchor.constraint(equalTo: leading, constant: inset),
-            title.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            title.trailingAnchor.constraint(lessThanOrEqualTo: age.leadingAnchor, constant: -6),
-            glyph.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -8),
-            glyph.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            glyph.widthAnchor.constraint(equalToConstant: 12),
-            age.trailingAnchor.constraint(equalTo: glyph.leadingAnchor, constant: -6),
-            age.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-        ])
         return view
     }
 
+    /// Status colors from harp's token table (`docs/ui.md` §7.4).
     private func statusColor(_ session: SidebarSession) -> NSColor {
         switch session.status {
-        case .blocked: return .systemOrange
-        case .error: return .systemRed
-        case .done: return .systemGreen
-        case .working: return .systemBlue
-        case .idle: return session.unread > 0 ? .systemYellow : .tertiaryLabelColor
+        case .blocked: return SidebarTheme.needsRing
+        case .error: return SidebarTheme.error
+        case .done: return session.unread > 0 ? SidebarTheme.iconStrong : SidebarTheme.ring
+        case .working: return SidebarTheme.iconStrong
+        case .idle: return SidebarTheme.ring
         }
     }
 

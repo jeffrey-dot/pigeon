@@ -41,6 +41,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var state = SidebarState()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // `PIGEON_APPEARANCE=light|dark` pins the app's appearance for the screenshot runs
+        // (`tools/m3-gui-check.sh`), so both palettes can be captured without touching the
+        // system's own setting.
+        switch ProcessInfo.processInfo.environment["PIGEON_APPEARANCE"]?.lowercased() {
+        case "light": NSApp.appearance = NSAppearance(named: .aqua)
+        case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
+        default: break
+        }
         state = store.load()
         buildMenu()
         buildWindow()
@@ -55,11 +63,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let frame = NSRect(x: 0, y: 0, width: 1100, height: 600)
         window = NSWindow(
             contentRect: frame,
-            styleMask: [.titled, .closable, .resizable, .miniaturizable],
+            styleMask: [.titled, .closable, .resizable, .miniaturizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
         window.title = "pigeon"
+        // `docs/ui.md` §7.1: the sidebar runs under a transparent titlebar, with the traffic
+        // lights sitting inside its 56pt header (harp: TL:64, VT:9112).
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.isMovableByWindowBackground = true
 
         sidebar = SidebarViewController()
         sidebar.onSelect = { [weak self] id in self?.select(id) }
@@ -84,20 +97,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         splitView = NSSplitView()
         splitView.isVertical = true
         splitView.dividerStyle = .thin
-        // `docs/ui.md` §1: 240pt by default, user drag overrides (low priority).
-        let defaultWidth = sidebar.view.widthAnchor.constraint(equalToConstant: 240)
+        // `docs/ui.md` §7.1: harp's 272pt by default, user drag overrides (low priority).
+        let defaultWidth = sidebar.view.widthAnchor.constraint(equalToConstant: SidebarMetrics.width)
         defaultWidth.priority = .defaultLow
         defaultWidth.isActive = true
         header = SessionHeaderView()
         header.translatesAutoresizingMaskIntoConstraints = false
-        header.heightAnchor.constraint(equalToConstant: 40).isActive = true
+        header.heightAnchor.constraint(equalToConstant: SidebarMetrics.cardHeaderHeight).isActive = true
         let right = NSStackView(views: [header, container])
         right.orientation = .vertical
         right.spacing = 0
         splitView.addArrangedSubview(sidebar.view)
         splitView.addArrangedSubview(right)
-        sidebar.view.widthAnchor.constraint(greaterThanOrEqualToConstant: 200).isActive = true
-        sidebar.view.widthAnchor.constraint(lessThanOrEqualToConstant: 360).isActive = true
+        sidebar.view.widthAnchor.constraint(
+            greaterThanOrEqualToConstant: SidebarMetrics.widthRange.lowerBound).isActive = true
+        sidebar.view.widthAnchor.constraint(
+            lessThanOrEqualToConstant: SidebarMetrics.widthRange.upperBound).isActive = true
 
         window.contentView = splitView
         window.makeKeyAndOrderFront(nil)
@@ -394,6 +409,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func toggleSidebar(_ sender: Any?) {
         sidebar.view.isHidden.toggle()
+        // With no sidebar the traffic lights sit over the right pane, so its header
+        // pads past them (harp's `CARD_HEADER_PAD_CLOSED`).
+        header.setSidebarCollapsed(sidebar.view.isHidden)
     }
 
     // MARK: - protocol

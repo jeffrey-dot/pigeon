@@ -1,0 +1,63 @@
+import CoreGraphics
+
+/// Sidebar and window-chrome numbers from harp (`docs/ui.md` §7.1 / §7.3, source
+/// `app/src/workspace/view/vertical_tabs.rs` `mod sidebar` and
+/// `app/src/util/traffic_lights.rs`).
+///
+/// One place for every size the sidebar draws with, so the views carry no bare numbers.
+enum SidebarMetrics {
+    static let width: CGFloat = 272
+    static let widthRange: ClosedRange<CGFloat> = 200...360
+
+    /// The row that hosts the traffic lights and the collapse/new buttons.
+    static let headerHeight: CGFloat = 56
+    static let listSidePadding: CGFloat = 10
+    static let listTopPadding: CGFloat = 4
+    static let sectionGap: CGFloat = 14
+    static let rowGap: CGFloat = 1
+
+    static let rowHeight: CGFloat = 30
+    static let rowRadius: CGFloat = 8
+    static let rowInsetLeft: CGFloat = 12
+    static let rowInsetRight: CGFloat = 8
+    static let rowSpacing: CGFloat = 8
+
+    static let sectionHeaderHeight: CGFloat = 28
+    static let sectionInsetLeft: CGFloat = 12
+    static let sectionInsetRight: CGFloat = 9
+
+    /// The 16pt slot a 15pt status glyph sits in.
+    static let statusGlyphSlot: CGFloat = 16
+    static let statusGlyphSize: CGFloat = 15
+    static let unreadDotSize: CGFloat = 5
+
+    static let headerButtonSize: CGFloat = 28
+    static let headerButtonRadius: CGFloat = 7
+    static let headerButtonIconSize: CGFloat = 17
+    static let headerButtonSpacing: CGFloat = 2
+    /// harp pads the header buttons 14pt from the sidebar edge.
+    static let headerPadRight: CGFloat = 14
+    /// Gap between a section's name and its count, and between other inline labels.
+    static let sectionSpacing: CGFloat = 6
+    /// Gap between the unread dot and the title.
+    static let unreadDotGap: CGFloat = 5
+
+    static let cardHeaderHeight: CGFloat = 40
+    static let cardHeaderPadOpen: CGFloat = 32
+    static let cardHeaderPadClosed: CGFloat = 84
+    static let cardHeaderPadRight: CGFloat = 20
+    static let cardHeaderSpacing: CGFloat = 10
+    static let dividerWidth: CGFloat = 0.5
+
+    /// Width of the macOS traffic-light zone inside the sidebar header.
+    static let trafficLightWidth: CGFloat = 64
+
+    static let rowTitleSize: CGFloat = 13
+    static let rowTimeSize: CGFloat = 10
+    static let sectionTitleSize: CGFloat = 11.5
+    static let sectionCountSize: CGFloat = 11.5
+    static let needsLabelSize: CGFloat = 12
+    static let cardTitleSize: CGFloat = 12.5
+    static let cardPathSize: CGFloat = 12.5
+    static let cardStateSize: CGFloat = 12
+}

@@ -117,7 +117,8 @@ Pane(id, title, status, status_at, kind, msg)   # 直接来自 OSC 7501 记录
 
 ## 6. 与参考图的差异（有意为之）
 
-2026-10-28 按参考图 + 本文档做了逐项对照（明细表见 `docs/m3-checklist.md` §2.1）。现状：
+2026-10-28 按参考图 + 本文档做了逐项对照（明细表见 `docs/m3-checklist.md` §2.1）。
+**色值与尺寸的权威来源是 §7（从 harp 源码抄的规格表）**，本节只讲“哪些一致、哪些有意不同”。现状：
 
 **一致的**：
 
@@ -148,3 +149,95 @@ Pane(id, title, status, status_at, kind, msg)   # 直接来自 OSC 7501 记录
 组头数字与该组内这几类会话数一致；`blocked` 仍是排序最优先的一档。
 
 **可选后续**：同一会话加一个「转录视图」开关（读 Pi 的会话日志），与终端切换显示——先不做。
+
+## 7. harp 对齐规格（2026-10-28）
+
+> 出处：`/tmp/harp`（`dominikmartn/harp`，commit `0b14dc426bc0`，2026-10-26），只读参考。
+> 许可：AGPL-3.0 / MIT 双许可——**这里只抄数值与色值当规格，不复制代码或资源**。
+> 文件缩写：`VT` = `app/src/workspace/view/vertical_tabs.rs`（`mod sidebar`），`TL` = `app/src/util/traffic_lights.rs`。
+> harp 的侧栏是自绘的（warpui），所以“取值”列给的是它的数值与色值；pigeon 用 AppKit 原生控件复刻同样的数字。
+
+### 7.1 尺寸与间距
+
+| 项 | 出处 | harp 取值 | pigeon 取值（目标） |
+|---|---|---|---|
+| 侧栏宽度 | `VT:9111` `SIDEBAR_WIDTH` | 272（可拖） | 默认 272，夹 200–360 |
+| 侧栏顶部 header 高（红绿灯那一行） | `VT:9112` `HEADER_HEIGHT` | 56 | 56（红绿灯内嵌 + 右侧两个按钮） |
+| 列表左右留白 | `VT:9114` `LIST_SIDE_PADDING` | 10 | 10 |
+| 列表顶部留白 | `VT:9115` `LIST_TOP_PADDING` | 4 | 4 |
+| 分组之间 | `VT:9116` `SECTION_GAP` | 14 | 14 |
+| 行之间 | `VT:9117` `ROW_GAP` | 1 | 1 |
+| 行高 | `VT:9118` `ROW_HEIGHT` | 30 | 30 |
+| 行圆角 | `VT:9121` `ROW_RADIUS` | 8 | 8（选中/悬停/拖动都是这一个半径） |
+| 行内边距 | `VT:10031`（行）`VT:2983`（正文行） | 左 12 / 右 8 | 左 12 / 右 8 |
+| 行内元素间距 | `VT:9827` `row_line` spacing | 8 | 8 |
+| 组头高 | `VT:9122` `SECTION_HEADER_HEIGHT` | 28 | 28 |
+| 组头内边距 | `VT:9816` | 左 12 / 右 9 | 左 12 / 右 9 |
+| 状态图标槽 / 字形 | `VT:9521` `STATUS_GLYPH`、`VT:9565` 16×16 槽 | 15 / 16×16 | 15pt 字形、16pt 槽（SF Symbols） |
+| 顶部按钮 | `VT:10146-10162` | 28×28、圆角 7、图标 17、悬停用 `HOVER` | 28×28、圆角 7、图标 17 |
+| 右栏头部高 | `VT:9125` `CARD_HEADER_HEIGHT` | 40 | 40 |
+| 右栏头部左右留白 | `VT:9127-9128` `CARD_HEADER_PAD_OPEN/CLOSED`、`VT:10945` | 左 32（侧栏开）/ 84（侧栏关），右 20 | 左 32 / 右 20 |
+| 右栏头部下边线 | `VT:10945` `Border::new(0.5)` + `DIVIDER` | 0.5pt | 0.5pt |
+| 窗口红绿灯区 | `TL:64` `TrafficLightData{width:64, side:Left}` | 左侧 64 宽 | 左侧 64 宽（原生红绿灯内嵌） |
+| 侧栏底部 footer | `VT:9113` `FOOTER_HEIGHT` | 44 | 不做（pigeon 没有 harp 的 footer，见 §6） |
+
+### 7.2 颜色（浅 / 深）
+
+`VT:9185-9235` 的 `colors` 模块：`tokens!` 宏，每个 token 一对浅/深值；深色由主题的 `ColorScheme::LightOnDark` 选出。
+
+| token | 用处 | 浅色 | 深色 |
+|---|---|---|---|
+| `INK` | 行标题、右栏会话名 | `#1d1d1f` | `#f5f5f7` |
+| `SUB` | 次要文字（shell 图标等） | `#626269` | `#98989f` |
+| `GRAY` | 时间、路径、顶部按钮图标 | `#6e6e73` | `#8e8e93` |
+| `SECTION_NAME` | 组头项目名 | `#7c7c82` | `#8e8e93` |
+| `SECTION_COUNT` | 组头条数 | `#a1a1a6` | `#636366` |
+| `NEEDS_TEXT` | 组头 `N needs you` | `#9a5700` | `#f0b35c` |
+| `NEEDS_RING` / `NEEDS_DOT` | 行内“等待”状态图标 | `#c98314` / `#e8a33d` | `#c98314` / `#e8a33d` |
+| `ICON_STRONG` | working 弧、未读 done 实心盘 | `#3a3a3c` | `#e5e5ea` |
+| `ICON_ON_FILL` | 实心盘里被抠掉的勾 | `#ffffff` | `#1c1c1e` |
+| `RING` | 已读 done 的勾、idle 月亮 | `#a1a1a6` | `#636366` |
+| `TRACK` | working 的转圈轨道 | `#e0e0e4` | `#3a3a3e` |
+| `WHITE` | 选中行底色 | `#ffffff` | `#3a3a3d` |
+| `QUIET_SELECTED` | 窗口失焦时的选中底色 | `#f4f4f5` | `#2f2f32` |
+| `HOVER` | 悬停底色 | 黑 5%（alpha 13） | 白 6%（alpha 15） |
+| `SELECTED_EDGE` | 选中行 0.5pt 描边 | 黑 8% | 白 10% |
+| `SELECTED_SHADOW` | 选中行投影 | 黑 6% | 黑 25% |
+| `DIVIDER` | 右栏头部下边线 | `#ececef` | `#3a3a3c` |
+| `SIDEBAR` | 侧栏不透明底色 | `#e8e8eb` | `#232326` |
+| `GLASS_TINT` | 侧栏材质上的半透明罩（`sidebar_fill()`） | `rgba(250,250,252,140)` | `rgba(30,30,32,140)` |
+| `BADGE_TEXT` | needs-you 角标文字 | `#3a2300` | `#3a2300` |
+
+### 7.3 字号与字重
+
+| 项 | 出处 | harp 取值 | pigeon 取值（目标） |
+|---|---|---|---|
+| 字体 | `VT:9239-9260` `load_font()` | `.AppleSystemUIFont`（SF Pro Text） | `.systemFont`（同一个字体） |
+| 行标题 | `VT:9120` `ROW_TITLE_SIZE`、`VT:9849` | 13，未读 Semibold | 13，未读 Semibold |
+| 行时间 | `VT:8568` `Text::new_inline(..., 10.)` | 10，等待时用 `NEEDS_TEXT` 否则 `SUB` | 10，同上 |
+| 组头项目名 | `VT:9123` `SECTION_TITLE_SIZE`、`VT:10130` | 11.5 Semibold，首字母大写 | 11.5 Semibold，首字母大写 |
+| 组头条数 | `VT:10092` | 11.5 Normal | 11.5 Normal |
+| 组头 `needs you` | `VT:10101` | 12 Normal，`NEEDS_TEXT`；单数 `1 needs you`、复数 `N need you` | 12 Normal，同上（含单复数） |
+| 右栏会话名 | `VT:10923` | 12.5 Semibold，`INK` | 12.5 Semibold |
+| 右栏路径 | `VT:10926` | 12.5，`GRAY`，**从行首截断** | 12.5，`GRAY`，行首截断 |
+| 右栏状态 | `VT:10939` | 12，`GRAY` | 12，`GRAY` |
+
+### 7.4 行尾状态（语义照搬，画法用 SF Symbols）
+
+| harp | 出处 | 画法 | pigeon |
+|---|---|---|---|
+| `Working` | `VT:9565-9590` | `TRACK` 圆环 + `ICON_STRONG` 弧 | `◐` 或 `circle.dashed` 系 SF Symbol，同色 |
+| `Needs` | `VT:9591-9600` | `NEEDS_RING` 环 + `NEEDS_DOT` 点 | `exclamationmark.circle` 系，`NEEDS_RING` |
+| `Done`（未读） | `VT:9544-9555` | `ICON_STRONG` 实心盘 + `ICON_ON_FILL` 勾 | 实心对勾，`ICON_STRONG` |
+| `Done`（已读） | `VT:9557` | `RING` 细勾 | 细勾，`RING` |
+| `Idle` | `VT:9602` | `RING` 月亮 | 月亮，`RING` |
+| `Shell`（无 agent） | `VT:9604` | `SUB` 终端图标 | 不画（pigeon 的 idle 行不显示字形，见 §2.2） |
+| 时间文案 | `VT:9390` `age_label` | `now` / `5m` / `3h` / `2d` | 一致（`SidebarModel.relativeTime`） |
+| 时间起点 | `VT:9410` `age_from` | working 从本轮开始；shell 从最后一条命令；其余从状态变化，退回最后命令 | 只有“状态变化时间”；shell 行留空（`docs/plan.md` §11 已记缺口） |
+| 未读 | `VT:9849` | 标题 Semibold + 实心 done 盘 | 标题 Semibold + 行首圆点（§2.1） |
+
+### 7.5 取用范围
+
+- **照搬**：7.1 全部尺寸、7.2 全部 token、7.3 字号字重、7.4 语义与颜色。
+- **不照搬**：harp 的 `MENU_*`、`LIFTED_*`（拖动悬浮副本）、`CARD_*`（分组卡片）、footer、玻璃材质模糊（`GLASS_BLUR_RADIUS`）——这些是它自绘 UI 的专属部件，pigeon 用系统菜单/系统材质替代或不做。
+- **色值落地方式**：7.2 的每个 token 在 pigeon 里写成 `NSColor(name:dynamicProvider:)`（浅/深各一支），保证切换系统外观即时生效。
