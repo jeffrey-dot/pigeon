@@ -181,6 +181,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func focus(_ pane: UInt32) {
         focusedPane = pane
+        container.focusPane(pane)
         send({ message in
             Wire.set(message, u32: "pane_id", pane)
         }, type: PG_MSG_FOCUS)

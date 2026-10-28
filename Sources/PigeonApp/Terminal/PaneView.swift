@@ -17,6 +17,8 @@ final class PaneView: NSView {
         var visible: Bool
     }
 
+    /// Set by the container once the pane view is created.
+    var paneID: UInt32?
     private(set) var cols = 80
     private(set) var rows = 24
     private(set) var cells: [Cell] = []
@@ -108,10 +110,16 @@ final class PaneView: NSView {
                 Unicode.Scalar(cell.codepoint).map(Character.init) ?? " "
             }
             FileHandle.standardError.write(
-                Data("pigeon: grid \(cols)x\(rows) cursor=\(cursor.x),\(cursor.y) row0=\(String(first))\n".utf8)
+                Data("pigeon: grid pane=\(paneID ?? 0) \(cols)x\(rows) cursor=\(cursor.x),\(cursor.y) row0=\(String(first))\n".utf8)
             )
         }
         needsDisplay = true
+    }
+
+    /// Clicks belong to the container (divider drags, focus); NSView does not
+    /// bubble unhandled mouse events, so forward them explicitly.
+    override func mouseDown(with event: NSEvent) {
+        nextResponder?.mouseDown(with: event)
     }
 
     override func keyDown(with event: NSEvent) {

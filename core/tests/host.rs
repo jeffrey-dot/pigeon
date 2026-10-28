@@ -256,6 +256,16 @@ fn comparable(
     (cols, rows, alt, cursor, scroll, screen)
 }
 
+/// Waits until *this pane's* snapshot contains `needle`.
+fn wait_for_pane_text(client: &mut Client, pane: u32, needle: &str) {
+    client.wait_for(|message| match message {
+        Message::Snapshot { pane_id, .. } if *pane_id == pane => {
+            screen_text(message).contains(needle)
+        }
+        _ => false,
+    });
+}
+
 /// Waits until some snapshot's grid contains `needle`.
 fn wait_for_text(client: &mut Client, needle: &str) {
     client.wait_for(|message| match message {
@@ -959,4 +969,79 @@ fn zoom_messages_are_unsupported_at_the_host() {
         unreachable!()
     };
     assert_eq!(ts, 11);
+}
+
+#[test]
+fn two_panes_on_one_connection_both_get_live_output() {
+    let _serial = one_at_a_time();
+    let host = start_host();
+    let mut client = Client::connect(&host.socket);
+    hello(&mut client);
+    let first = attach_first(&mut client);
+    let (second, _) = split(&mut client, first, proto::SplitAxis::Vertical, 0.5, 2);
+
+    // The client watches both panes on the same connection.
+    client.send(&Message::Attach {
+        id: 120,
+        pane_id: second,
+        size_policy: None,
+    });
+    let _ = snapshot(&mut client);
+
+    client.send(&Message::Keys {
+        pane_id: second,
+        bytes: b"echo RIGHT-LIVE\r".to_vec(),
+    });
+    wait_for_pane_text(&mut client, second, "RIGHT-LIVE");
+
+    // Focus moves to the other pane; its output must flow too, without a re-attach.
+    client.send(&Message::Focus { pane_id: first });
+    let _ = wait_for_layout(
+        &mut client,
+        |m| matches!(m, Message::Layout { focus: Some(f), .. } if *f == first),
+    );
+    client.send(&Message::Keys {
+        pane_id: first,
+        bytes: b"echo LEFT-LIVE\r".to_vec(),
+    });
+    wait_for_pane_text(&mut client, first, "LEFT-LIVE");
+
+    // Both panes are still live afterwards.
+    client.send(&Message::Keys {
+        pane_id: second,
+        bytes: b"echo RIGHT-AGAIN\r".to_vec(),
+    });
+    wait_for_pane_text(&mut client, second, "RIGHT-AGAIN");
+}
+
+#[test]
+fn closing_the_watched_pane_still_delivers_the_new_layout() {
+    let _serial = one_at_a_time();
+    let host = start_host();
+    let mut client = Client::connect(&host.socket);
+    hello(&mut client);
+    let first = attach_first(&mut client);
+    let (second, _) = split(&mut client, first, proto::SplitAxis::Vertical, 0.5, 2);
+    // Watch the pane we are about to close: the layout must still arrive.
+    client.send(&Message::Attach {
+        id: 130,
+        pane_id: second,
+        size_policy: None,
+    });
+    let _ = snapshot(&mut client);
+    client.send(&Message::Keys {
+        pane_id: second,
+        bytes: b"echo BYE\r".to_vec(),
+    });
+    wait_for_pane_text(&mut client, second, "BYE");
+
+    client.send(&Message::ClosePane {
+        id: 131,
+        pane_id: second,
+    });
+    let layout = wait_for_layout(&mut client, |m| leaves_of(tree_of(m)) == vec![first]);
+    let Message::Layout { focus, .. } = &layout else {
+        unreachable!()
+    };
+    assert_eq!(*focus, Some(first), "focus falls back to the survivor");
 }

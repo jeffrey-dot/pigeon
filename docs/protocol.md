@@ -53,7 +53,7 @@
 | c→s | `close_pane` | `id: u32`, `pane_id: u32` | — | 关闭 pane 及其进程组（SIGHUP → SIGKILL） |
 | c→s | `split_pane` | `id: u32`, `pane_id: u32`, `axis: "v"\|"h"`, `ratio: f32` | — | `v` = 左右并排，`h` = 上下堆叠；`ratio` ∈ (0,1)，被夹到最小尺寸内 |
 | c→s | `resize_pane` | `pane_id: u32`, `cols: u16`, `rows: u16` | — | 是**请求**：是否生效由尺寸策略决定（§6），结果以 `size_state` 广播 |
-| c→s | `focus` | `pane_id: u32` | — | 客户端自己的焦点；宿主只用于 `latest` 尺寸策略 |
+| c→s | `focus` | `pane_id: u32` | — | 客户端把焦点告诉宿主；宿主记在布局树里，并随 `layout.focus` 广播，供重连复原 |
 | c→s | `resize_split` | `id: u32`, `split_id: u32`, `ratio: f32` | — | 拖动分隔线；`split_id` 来自上一帧 `layout`；`ratio` 被夹到最小尺寸内 |
 | c→s | `zoom_pane` | `id: u32`, `pane_id: u32` | — | 放大单个 pane（对应 `layout.zoom`） |
 | c→s | `unzoom` | `id: u32`, `pane_id: u32` | — | 取消放大 |
@@ -78,6 +78,7 @@
   - 颜色：`0x01000000 | idx` 表示调色板索引；否则按 `0xRRGGBB`。
   - `link` 缺省 = 无超链接；非 0 时指向同一帧 `links` 表里的 `id`（`links` 随该帧的 `snapshot`/`delta` 下发）。
 - 同一 `pane_id` 的 `snapshot` 会把该客户端的 `seq` 基准重置。
+- `layout.tree` 用 `{leaf: 0}` 表示「这个 session 已经没有 pane 了」（pane id 从 1 开始）。
 
 ### 3.4 输入与状态
 

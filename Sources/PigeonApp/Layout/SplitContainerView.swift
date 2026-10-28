@@ -46,6 +46,7 @@ final class SplitContainerView: NSView {
 
     private func makePane(_ id: UInt32) -> PaneView {
         let view = PaneView(frame: .zero)
+        view.paneID = id
         view.onInput = { [weak self] bytes in self?.onPaneInput?(id, bytes) }
         view.onResize = { [weak self] cols, rows in self?.onPaneResize?(id, cols, rows) }
         addSubview(view)
@@ -53,6 +54,12 @@ final class SplitContainerView: NSView {
     }
 
     func paneView(_ id: UInt32) -> PaneView? { panes[id] }
+
+    /// Makes `id` the keyboard target; the host is told separately via `onFocus`.
+    func focusPane(_ id: UInt32) {
+        guard let view = panes[id] else { return }
+        window?.makeFirstResponder(view)
+    }
 
     /// Applies a snapshot message to the right pane.
     func applySnapshot(_ snapshot: UnsafePointer<PgSnapshot>) -> Bool {
@@ -109,6 +116,7 @@ final class SplitContainerView: NSView {
             return
         }
         if let pane = model.pane(at: point) {
+            focusPane(pane.id)
             onFocus?(pane.id)
         }
     }
@@ -131,10 +139,16 @@ final class SplitContainerView: NSView {
     @objc func splitHorizontal(_ sender: Any?) { onSplit?(PG_AXIS_HORIZONTAL) }
     @objc func closeFocused(_ sender: Any?) { onClose?() }
     @objc func focusPrevious(_ sender: Any?) {
-        if let next = model.nextFocus(forward: false) { onFocus?(next) }
+        if let next = model.nextFocus(forward: false) {
+            focusPane(next)
+            onFocus?(next)
+        }
     }
     @objc func focusNext(_ sender: Any?) {
-        if let next = model.nextFocus(forward: true) { onFocus?(next) }
+        if let next = model.nextFocus(forward: true) {
+            focusPane(next)
+            onFocus?(next)
+        }
     }
 
     // MARK: - shortcuts
@@ -150,10 +164,16 @@ final class SplitContainerView: NSView {
             onClose?()
             return true
         case "[":
-            if let next = model.nextFocus(forward: false) { onFocus?(next) }
+            if let next = model.nextFocus(forward: false) {
+                focusPane(next)
+                onFocus?(next)
+            }
             return true
         case "]":
-            if let next = model.nextFocus(forward: true) { onFocus?(next) }
+            if let next = model.nextFocus(forward: true) {
+                focusPane(next)
+                onFocus?(next)
+            }
             return true
         default:
             return false

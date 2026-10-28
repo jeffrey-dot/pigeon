@@ -133,8 +133,12 @@ async fn run() -> Result<(), String> {
 #[derive(Default)]
 struct ClientState {
     greeted: bool,
-    /// `(pane, negotiated delta)` for the pane this client is watching.
-    attached: Option<(u32, bool)>,
+    /// Panes this connection gets live output for → negotiated `delta`.
+    watched: HashMap<u32, bool>,
+    /// The session whose layout this connection follows (one per window in M1).
+    session: Option<u32>,
+    /// Whether the handshake negotiated `delta` for this connection.
+    delta_ok: bool,
 }
 
 async fn handle_client(
@@ -199,28 +203,21 @@ async fn handle_client(
                 let Ok(event) = event else { continue };
                 match event {
                     Event::Layout { session_id, message } => {
-                        let watching = match state.attached {
-                            Some((pane, _)) => {
-                                let map = sessions.lock().await;
-                                map.get(&session_id)
-                                    .is_some_and(|session| session.panes.contains_key(&pane))
-                            }
-                            None => false,
-                        };
-                        if watching {
+                        // Follow the session even after its last watched pane is
+                        // gone, so closing the active pane still redraws the tree.
+                        if state.session == Some(session_id) {
                             send(&mut writer, &message).await?;
                         }
                     }
                     Event::Exited { pane_id, code } => {
-                        if state.attached.map(|(pane, _)| pane) == Some(pane_id) {
+                        if state.watched.contains_key(&pane_id) {
                             send(&mut writer, &Message::PaneExited { pane_id, code }).await?;
                         }
                     }
                     Event::Delta { pane_id, message } => {
-                        if state.attached.map(|(pane, _)| pane) != Some(pane_id) {
+                        let Some(delta_ok) = state.watched.get(&pane_id).copied() else {
                             continue;
-                        }
-                        let delta_ok = state.attached.map(|(_, delta)| delta).unwrap_or(false);
+                        };
                         if delta_ok {
                             send(&mut writer, &message).await?;
                         } else if let Some(snapshot) = snapshot_of(&sessions, pane_id, false).await {
@@ -340,7 +337,7 @@ async fn dispatch(
                 .filter(|feature| features.iter().any(|asked| asked == *feature))
                 .map(|feature| (*feature).to_owned())
                 .collect();
-            state.attached = Some((0, offered.iter().any(|f| f == "delta")));
+            state.delta_ok = offered.iter().any(|f| f == "delta");
             Some(Message::HelloAck {
                 proto: PROTO_VERSION,
                 server: format!("pigeon-host {}", env!("CARGO_PKG_VERSION")),
@@ -413,8 +410,8 @@ async fn dispatch(
                     id: Some(id),
                 });
             };
-            let delta_ok = state.attached.map(|(_, delta)| delta).unwrap_or(false);
-            state.attached = Some((pane_id, delta_ok));
+            state.watched.insert(pane_id, state.delta_ok);
+            state.session = Some(session_id);
             // The tree follows the snapshot, so a reconnecting window redraws
             // the same split geometry.
             {
@@ -563,6 +560,16 @@ async fn dispatch(
             }
             let _ = session.layout.close(pane_id);
             if session.layout.is_empty() {
+                // Convention: `{leaf: 0}` means "no panes left" (ids start at 1).
+                let _ = events.send(Event::Layout {
+                    session_id,
+                    message: Message::Layout {
+                        session_id,
+                        tree: Node::Leaf { leaf: 0 },
+                        zoom: None,
+                        focus: None,
+                    },
+                });
                 map.remove(&session_id);
             } else {
                 apply_layout(session_id, session, events);

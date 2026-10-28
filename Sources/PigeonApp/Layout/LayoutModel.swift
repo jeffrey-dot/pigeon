@@ -34,7 +34,12 @@ struct LayoutModel: Equatable {
                 Data("pigeon: layout message rects=\(rectCount)\n".utf8)
             )
         }
-        guard rectCount > 0 else { return nil }
+        if rectCount == 0 {
+            // `{leaf: 0}` means "no panes left"; keep the model empty so the
+            // container removes the stale views instead of showing ghosts.
+            self = .empty
+            return
+        }
         var splits = [PgSplit](repeating: Self.blankSplit, count: 64)
         let splitCount = splits.withUnsafeMutableBufferPointer { buffer in
             pg_msg_layout_splits(message, buffer.baseAddress, buffer.count)

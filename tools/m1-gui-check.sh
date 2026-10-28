@@ -51,10 +51,29 @@ cliclick c:200,328
 sleep 1
 echo "focus messages: $(grep -c focus "$R/host.log")"
 
-# Cmd-W closes the focused pane (the last split), then Cmd-[ / Cmd-] move focus.
+# Both panes must be live on the same connection: type in the focused (right)
+# pane, then click the left pane and type there too.
+# Clicking a pane also makes it the keyboard target; type in both.
+cliclick c:700,328
+sleep 1
+osa -e 'tell application "System Events" to keystroke "echo RIGHT-LIVE"'
+osa -e 'tell application "System Events" to key code 36'
+sleep 2
+shoot "$OUT/typed-right.jpg"
+cliclick c:200,328
+sleep 1
+osa -e 'tell application "System Events" to keystroke "echo LEFT-LIVE"'
+osa -e 'tell application "System Events" to key code 36'
+sleep 2
+shoot "$OUT/typed-left.jpg"
+right=$(grep -o 'grid pane=[0-9]* .*RIGHT-LIVE' "$R/app.log" | head -1 | cut -d' ' -f2)
+left=$(grep -o 'grid pane=[0-9]* .*LEFT-LIVE' "$R/app.log" | head -1 | cut -d' ' -f2)
+echo "typed into $right, then clicked and typed into $left (must differ)"
+
+# Cmd-W closes the *focused* pane (the left one we just typed in, also watched).
 key w "command down"; sleep 1
 shoot "$OUT/closed-pane.jpg"
-echo "after Cmd-W: $(panes) shells, close_pane sent $(grep -c close_pane "$R/host.log")"
+echo "after Cmd-W: $(panes) shells, close_pane sent $(grep -c close_pane "$R/host.log"), app tree: $(grep -o 'layout [0-9]* panes' "$R/app.log" | tail -1)"
 key "]" "command down"; sleep 1
 key "[" "command down"; sleep 1
 echo "focus messages after Cmd-] and Cmd-[: $(grep -c focus "$R/host.log")"
@@ -77,7 +96,7 @@ osa -e 'tell application "System Events" to tell process "pigeon" to set positio
 sleep 1
 shoot "$OUT/reopen.jpg"
 restored=$(grep -o "pigeon: layout [0-9]* panes" "$R/app2.log" | awk '{print $3}' | sort -n | tail -1)
-drawn=$(grep -c 'pigeon: grid [0-9]*x[0-9]* cursor=[0-9]*,[0-9]* row0=[^ ]' "$R/app2.log")
+drawn=$(grep -c 'pigeon: grid pane=[0-9]* .* row0=[^ ]' "$R/app2.log")
 echo "reopened window: ${restored:-0} panes restored, ${drawn} grid redraws with content"
 kill "$APP_PID" 2>/dev/null
 kill "$HOST_PID" 2>/dev/null
