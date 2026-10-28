@@ -81,14 +81,14 @@ reopened window: 3 panes restored, 11 grid redraws with content
 
 ## 5. CI（GitHub Actions，真跑）
 
-推送 `6637f5c` 后 CI 一次通过：
+代码提交 `4b925f1` 的 CI 一次通过（docs-only 的跟进提交同样全绿）：
 
-<https://github.com/jeffrey-dot/pigeon/actions/runs/40635575813>
+<https://github.com/jeffrey-dot/pigeon/actions/runs/40636754201>
 
 | 作业 | 结果 | 关键输出 |
 |---|---|---|
 | `docs` | success | 文档相对链接检查 `links ok` |
-| `rust (ubuntu-latest)` | success | `cargo test` **64 + 11 + 14 = 89 passed**（含多 pane 宿主端到端） |
+| `rust (ubuntu-latest)` | success | `cargo test` **64 + 11 + 14 = 89 passed**（含多 pane 与 vim 备用屏重连的宿主端到端） |
 | `rust (macos-latest)` | success | 同上 |
 | `header` | success | `cbindgen` 生成后 `diff -u` 为空 |
 | `swift` | success | `cargo build` → `swift build` → `swift test` **22 passed** |
