@@ -34,7 +34,7 @@ tools/m2-gui-check.sh                              # 全部 PASS（1 条 OS 按�
 | 版本拒绝 | `bad_version_is_rejected_with_hello_error`（宿主侧）；客户端把 `hello_error` 的 `reason`/`detail` 显示到提示里并停止重试 |
 | zoom | `layout::tests::zoom_gives_one_pane_the_whole_window_and_unzoom_restores_the_tree`（zoom 后该 pane rect = 整窗、焦点跟过去、unzoom 后嵌套比例逐字段还原、未知 pane 报 false）、`closing_the_zoomed_pane_drops_the_zoom`、`zooming_a_pane_gives_it_the_whole_window_and_unzoom_restores_the_split`（真宿主：`layout.zoom` 下发、`size_state` 变成整窗 80×24、unzoom 后叶子顺序不变、未知 pane 回 `no_such_pane`）、`zoom_messages_round_trip`（协议往返） |
 | zoom（客户端） | `ZoomTests`：`zoomRequest`（无焦点不发、未 zoom 发 `zoom_pane`、已 zoom 发 `unzoom`、换 pane 再 zoom）、`hides(pane:zoom:)`、菜单项真的是 `⌘⇧↩`（keyEquivalent `\r` + modifier + selector 存在）、无 zoom 时所有 pane 可见 |
-| 多主机分组 | `SidebarOrderingTests`：分组标题带机器名（`arch / ~`）、本地组保持原名、同一项目在两台机器上分成两组；离线主机不产生会话行；`Grouping.pinnedGroup` 保证**组在会话首次出现时钉住，`cd` 不换组** |
+| 多主机分组 | `SidebarOrderingTests`：机器标题在分组之上（本机电脑名 / 远端 ssh 名或地址）、分组只显示项目名、同一项目在两台机器上分成两组；离线主机不产生会话行；`Grouping.pinnedGroup` 保证**组在会话首次出现时钉住，`cd` 不换组** |
 | VT 对账 | `tools/vt-parity/`：8 条语料（basic/cursor/erase/wide/scroll-region/alt-screen/insert-delete/wrap）与 tmux `capture-pane` 逐行一致 |
 
 ## 2. GUI（真窗口，`tools/m2-gui-check.sh`）

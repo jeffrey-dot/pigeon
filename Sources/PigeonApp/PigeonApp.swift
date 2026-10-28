@@ -954,12 +954,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return Wire.string(info.active_title)
     }
 
+    /// "Jeffrey's MacBook Air"; looked up once because the lookup can touch the resolver.
+    private lazy var localMachineName: String = Host.current().localizedName ?? ""
+
     private func refreshSidebar() {
         let raw = SidebarModel.sections(sidebarSessions(), order: state.order)
         let sections = raw.map { section in
-            // The heading is the user's group name (plus the machine on remote ones); it must
-            // not gain markers or directory names as the session moves around.
-            (group: state.renamedGroups[section.group] ?? section.group, sessions: section.sessions)
+            // The heading is the user's group name; it must not gain markers or directory names
+            // as the session moves around. The machine is its own heading above it.
+            var named = section
+            named.group = state.renamedGroups[section.key] ?? section.group
+            return named
         }
         if ProcessInfo.processInfo.environment["PIGEON_DEBUG"] != nil {
             let needs = SidebarModel.needsYou(sidebarSessions())
@@ -969,10 +974,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             debugLog(
                 "sidebar active=\(activeHost) perHost=\(perHost) sessions=\(rows.count) needs=\(needs) "
                     + "selected=\(selectedSession.map(String.init) ?? "-") "
-                    + "groups=\(sections.map(\.group).joined(separator: "|"))")
+                    + "groups=\(sections.map(\.key).joined(separator: "|"))")
         }
         let selectedRow = selectedSession.map { rowId(host: activeHost, session: $0) }
-        sidebar.update(sections: sections, selected: selectedRow)
+        let localName = localMachineName
+        sidebar.update(sections: sections, selected: selectedRow) { host in
+            SidebarModel.machineLabel(host: host, localName: localName)
+        }
         // Idempotent: the self-test starts on the first refresh that has a session on screen
         // (more than one path can end a session-list update early).
         beginSelfTestIfNeeded()

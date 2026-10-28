@@ -64,39 +64,75 @@ public struct SidebarSession: Equatable {
     }
 }
 
+/// One project heading in the sidebar, under the machine it lives on.
+public struct SidebarSection: Equatable {
+    /// The machine (`local` for this one); consecutive sections share a machine heading.
+    public var host: String
+    /// Identity for renames: `host / project`, so the same project on two machines stays two
+    /// groups that rename independently.
+    public var key: String
+    /// The project name the heading shows.
+    public var group: String
+    public var sessions: [SidebarSession]
+
+    public init(host: String, key: String, group: String, sessions: [SidebarSession]) {
+        self.host = host
+        self.key = key
+        self.group = group
+        self.sessions = sessions
+    }
+}
+
 /// Grouping, ordering and the `needs you` count. Kept free of AppKit so it can be
 /// unit tested and reused by a future Linux client.
 public enum SidebarModel {
-    /// Groups in first-seen order; rows inside a group by urgency, then title.
+    /// Machines in first-seen order, their groups in first-seen order; rows inside a group
+    /// by urgency, then title.
     public static func sections(
         _ sessions: [SidebarSession],
         order: [Int] = []
-    ) -> [(group: String, sessions: [SidebarSession])] {
-        var groups: [String] = []
+    ) -> [SidebarSection] {
+        var hosts: [String] = []
+        var keys: [String: [String]] = [:]
         var grouped: [String: [SidebarSession]] = [:]
         for session in sessions {
-            // The same project on two machines is two groups, and the heading carries the
-            // machine: `arch / ~`. Renaming one must not rename the other.
-            let key = groupLabel(host: session.host, project: session.group)
+            let host = session.host.isEmpty ? "local" : session.host
+            let key = groupLabel(host: host, project: session.group)
+            if keys[host] == nil {
+                hosts.append(host)
+            }
             if grouped[key] == nil {
-                groups.append(key)
+                keys[host, default: []].append(key)
             }
             grouped[key, default: []].append(session)
         }
         func rank(_ id: Int) -> Int { order.firstIndex(of: id) ?? Int.max }
-        return groups.map { group in
-            let rows = (grouped[group] ?? []).sorted { left, right in
-                if left.status != right.status { return left.status < right.status }
-                let (leftRank, rightRank) = (rank(left.id), rank(right.id))
-                if leftRank != rightRank { return leftRank < rightRank }
-                return left.title.localizedStandardCompare(right.title) == .orderedAscending
+        return hosts.flatMap { host in
+            (keys[host] ?? []).map { key in
+                let members = grouped[key] ?? []
+                let rows = members.sorted { left, right in
+                    if left.status != right.status { return left.status < right.status }
+                    let (leftRank, rightRank) = (rank(left.id), rank(right.id))
+                    if leftRank != rightRank { return leftRank < rightRank }
+                    return left.title.localizedStandardCompare(right.title) == .orderedAscending
+                }
+                return SidebarSection(
+                    host: host, key: key, group: members.first?.group ?? key, sessions: rows)
             }
-            return (group: group, sessions: rows)
         }
     }
 
-    /// The heading one row belongs under: the project alone on this machine, `host / project`
-    /// once the row comes from somewhere else (`docs/remote.md` §4).
+    /// The machine heading above a host's groups: this computer's name for `local`, otherwise
+    /// what the user typed to reach it (ssh alias or address).
+    public static func machineLabel(host: String, localName: String) -> String {
+        if host.isEmpty || host == "local" {
+            return localName.isEmpty ? "This Mac" : localName
+        }
+        return host
+    }
+
+    /// A group's rename key: the project alone on this machine, `host / project` once the row
+    /// comes from somewhere else (`docs/remote.md` §4).
     public static func groupLabel(host: String, project: String) -> String {
         if host.isEmpty || host == "local" {
             return project

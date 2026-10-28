@@ -5,7 +5,10 @@ import AppKit
 /// draws them and reports user intent.
 final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
     private enum Row {
-        case group(String, Int, Int)
+        /// A machine heading above that machine's groups.
+        case machine(String)
+        /// Rename key, shown name, member count, `needs you` count.
+        case group(key: String, name: String, count: Int, needs: Int)
         case session(SidebarSession)
     }
 
@@ -129,17 +132,27 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
         onNewSession?("")
     }
 
-    func update(sections: [(group: String, sessions: [SidebarSession])], selected: Int?) {
+    /// `machineName` turns a section's host into its heading text; it is asked once per machine.
+    func update(sections: [SidebarSection], selected: Int?, machineName: (String) -> String) {
         suppressSelection = true
         defer { suppressSelection = false }
         self.selected = selected
-        rows = sections.flatMap { section -> [Row] in
-            [.group(
-                section.group,
-                section.sessions.count,
-                SidebarModel.needsYou(section.sessions)
-            )] + section.sessions.map(Row.session)
+        var built: [Row] = []
+        var lastHost: String?
+        for section in sections {
+            if section.host != lastHost {
+                built.append(.machine(machineName(section.host)))
+                lastHost = section.host
+            }
+            built.append(.group(
+                key: section.key,
+                name: section.group,
+                count: section.sessions.count,
+                needs: SidebarModel.needsYou(section.sessions)
+            ))
+            built += section.sessions.map(Row.session)
         }
+        rows = built
         table.reloadData()
         if let selected, let index = rows.firstIndex(where: {
             if case let .session(session) = $0 { return session.id == selected }
@@ -154,9 +167,9 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
         return session
     }
 
-    private func group(at row: Int) -> String? {
-        guard rows.indices.contains(row), case let .group(name, _, _) = rows[row] else { return nil }
-        return name
+    private func group(at row: Int) -> (key: String, name: String)? {
+        guard rows.indices.contains(row), case let .group(key, name, _, _) = rows[row] else { return nil }
+        return (key, name)
     }
 
     // MARK: - table
@@ -164,21 +177,25 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
 
     func tableView(_ tableView: NSTableView, isGroupRow row: Int) -> Bool {
-        if case .group = rows[row] { return true }
-        return false
+        if case .session = rows[row] { return false }
+        return true
     }
 
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
-        if case .group = rows[row] { return false }
-        return true
+        if case .session = rows[row] { return true }
+        return false
     }
 
     /// A group header reserves the gap above it, the way harp spaces its sections.
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-        if case .group = rows[row] {
+        switch rows[row] {
+        case .machine:
+            return SidebarMetrics.machineHeaderHeight + (row == 0 ? 0 : SidebarMetrics.machineGap)
+        case .group:
             return SidebarMetrics.sectionHeaderHeight + SidebarMetrics.sectionGap
+        case .session:
+            return SidebarMetrics.rowHeight
         }
-        return SidebarMetrics.rowHeight
     }
 
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
@@ -187,15 +204,16 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         switch rows[row] {
-        case let .group(name, count, needs):
-            let cwd = rows.first { row in
-                if case let .session(session) = row, session.group == name { return true }
-                return false
-            }
-            .flatMap { row -> String? in
-                if case let .session(session) = row { return session.cwd }
-                return nil
-            } ?? ""
+        case let .machine(name):
+            let view = SidebarMachineCellView()
+            view.configure(name: name)
+            return view
+        case let .group(_, name, count, needs):
+            // The group's sessions follow its header directly, so the first of them gives `+`
+            // its directory (looking it up by name would mix machines sharing a project name).
+            let next = rows.indices.contains(row + 1) ? rows[row + 1] : nil
+            var cwd = ""
+            if case let .session(session) = next { cwd = session.cwd }
             return groupCell(name: name, count: count, needs: needs, cwd: cwd)
         case let .session(session):
             return sessionCell(session)
@@ -274,9 +292,9 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
     }
 
     @objc private func renameGroupClicked() {
-        guard let name = group(at: table.clickedRow) else { return }
-        prompt(title: "Rename group", current: name) { [weak self] newName in
-            self?.onRenameGroup?(name, newName)
+        guard let group = group(at: table.clickedRow) else { return }
+        prompt(title: "Rename group", current: group.name) { [weak self] newName in
+            self?.onRenameGroup?(group.key, newName)
         }
     }
 

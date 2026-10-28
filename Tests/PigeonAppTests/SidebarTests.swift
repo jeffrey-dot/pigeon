@@ -194,19 +194,17 @@ final class SidebarOrderingTests: XCTestCase {
             "core", "a git root still wins over the cwd's own name")
     }
 
-    func testTheGroupHeadingCarriesTheMachineName() {
-        // Local groups keep the plain project name; remote ones are `host / project`, so the
-        // machine is visible on the heading instead of in a separate machine list.
-        XCTAssertEqual(SidebarModel.groupLabel(host: "local", project: "~"), "~")
-        XCTAssertEqual(SidebarModel.groupLabel(host: "", project: "~"), "~")
-        XCTAssertEqual(SidebarModel.groupLabel(host: "arch", project: "~"), "arch / ~")
+    func testGroupsSitUnderTheirMachineAndShowOnlyTheProject() {
         var remote = row(1, .idle)
         remote.group = "~"
         remote.host = "arch"
-        XCTAssertEqual(SidebarModel.sections([remote]).first?.group, "arch / ~")
+        let section = SidebarModel.sections([remote]).first
+        XCTAssertEqual(section?.host, "arch")
+        XCTAssertEqual(section?.group, "~", "the machine has its own heading now")
+        XCTAssertEqual(section?.key, "arch / ~", "renames stay per machine")
     }
 
-    func testRemoteSessionsCarryTheirHostInTheGroupHeading() {
+    func testRenameKeysAreProjectAloneLocallyAndHostPrefixedRemotely() {
         XCTAssertEqual(SidebarModel.groupLabel(host: "local", project: "api"), "api")
         XCTAssertEqual(SidebarModel.groupLabel(host: "", project: "api"), "api")
         XCTAssertEqual(SidebarModel.groupLabel(host: "arch", project: "api"), "arch / api")
@@ -220,9 +218,32 @@ final class SidebarOrderingTests: XCTestCase {
         remote.host = "arch"
 
         let sections = SidebarModel.sections([local, remote])
-        XCTAssertEqual(sections.map(\.group), ["api", "arch / api"])
+        XCTAssertEqual(sections.map(\.host), ["local", "arch"])
+        XCTAssertEqual(sections.map(\.group), ["api", "api"])
+        XCTAssertEqual(sections.map(\.key), ["api", "arch / api"])
         XCTAssertEqual(sections[0].sessions.map(\.id), [1])
         XCTAssertEqual(sections[1].sessions.map(\.id), [2])
+    }
+
+    func testAMachinesGroupsStayTogetherEvenWhenSessionsInterleave() {
+        // Sessions arrive host by host in practice, but a machine heading must appear once:
+        // all of a machine's groups follow it, in first-seen order.
+        var a = row(1, .idle); a.group = "api"
+        var b = row(2, .idle); b.group = "web"; b.host = "arch"
+        var c = row(3, .idle); c.group = "docs"
+        let sections = SidebarModel.sections([a, b, c])
+        XCTAssertEqual(sections.map(\.host), ["local", "local", "arch"])
+        XCTAssertEqual(sections.map(\.group), ["api", "docs", "web"])
+    }
+
+    func testTheMachineHeadingNamesThisMacOrTheSshTarget() {
+        XCTAssertEqual(SidebarModel.machineLabel(host: "local", localName: "Jeffrey's MacBook Air"),
+                       "Jeffrey's MacBook Air")
+        XCTAssertEqual(SidebarModel.machineLabel(host: "", localName: "mini"), "mini")
+        XCTAssertEqual(SidebarModel.machineLabel(host: "local", localName: ""), "This Mac",
+                       "a failed name lookup still gets a heading")
+        XCTAssertEqual(SidebarModel.machineLabel(host: "arch", localName: "mini"), "arch")
+        XCTAssertEqual(SidebarModel.machineLabel(host: "10.0.0.5", localName: "mini"), "10.0.0.5")
     }
 
     func testStatusSymbolsCoverEveryStateWithNoSymbolForIdle() {

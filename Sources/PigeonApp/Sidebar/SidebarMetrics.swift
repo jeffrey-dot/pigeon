@@ -27,6 +27,10 @@ enum SidebarMetrics {
     static let selectedShadowOffsetY: CGFloat = -1
 
     static let sectionHeaderHeight: CGFloat = 28
+    /// The machine heading above a host's project groups, and the extra gap before the next
+    /// machine so two hosts read as two blocks.
+    static let machineHeaderHeight: CGFloat = 22
+    static let machineGap: CGFloat = 18
     static let sectionInsetLeft: CGFloat = 12
     static let sectionInsetRight: CGFloat = 9
 
@@ -78,6 +82,7 @@ enum SidebarMetrics {
     static let rowTimeSize: CGFloat = 10
     static let sectionTitleSize: CGFloat = 11.5
     static let sectionCountSize: CGFloat = 11.5
+    static let machineTitleSize: CGFloat = 11
     static let needsLabelSize: CGFloat = 12
     static let cardTitleSize: CGFloat = 12.5
     static let cardPathSize: CGFloat = 12.5
