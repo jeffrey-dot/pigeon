@@ -205,7 +205,7 @@ tmux attach（前台，一个普通程序）
 |---|---|---|
 | **M0 单 pane + 后台会话进程** | Rust 内核（C ABI）+ AppKit 客户端 + `pigeon-host` + 快照复原 | vim/htop/less/Pi TUI 正常；中文/宽字符/真彩色；resize；无重复应答；**关窗口后进程继续跑、重开屏幕原样** |
 | **M1 分屏** | 自己的 LayoutTree + 多 pane | 左右/上下/三格/四格嵌套；拖动分隔线；缩放；焦点切换；关窗口后所有 pane 继续跑 |
-| **M2 多客户端与健壮性** | 协议版本协商、多窗口同看一个会话、后台进程崩溃处理 | 两个窗口看同一会话尺寸正确；`kill -9` 后台进程有明确提示并可重开；协议版本不匹配拒绝连接并说明 |
+| **M2 多客户端与健壮性** | 协议版本协商、多窗口同看一个会话、后台进程崩溃处理、**滚动回看**（滚轮 / PageUp·PageDown / 滚动条） | 两个窗口看同一会话尺寸正确；`kill -9` 后台进程有明确提示并可重开；协议版本不匹配拒绝连接并说明；**能回看全部历史（默认 1 万行）、备用屏（alt）下禁用回看、offset>0 时不画光标、重连后仍可回看** |
 | **M3 侧栏** | 树 + 状态 + 未读 + 通知 + 跳转 | 分组与计数正确；`blocked` 优先；后台 pane 状态可见；kill -9 后 ≤5s 回落；点击/键盘都能跳 |
 | **M4 SSH** | 宿主自动推送到远端 + 连接管理 | 断网 30s 恢复；远端任务不受影响；认证失败/远端没跑起来有明确提示 |
 | **M5 Linux 客户端** | 复用同一宿主与协议，Linux 原生客户端（GTK）/ 或换语言的客户端 | Ubuntu 上功能对齐 macOS：会话、分屏、侧栏、OSC 7501 状态；`cargo test` 在 Ubuntu 全绿（Swift 侧只跑 macOS） |
@@ -279,7 +279,8 @@ M3 落地后仍在的洞。
 | 未上报 session 的相对时间 | 没有 OSC 7501 记录的 session 行尾留空，不拿创建时间冒充“最后活动时间” | 宿主能上报 pane 活动时间时（M4） |
 | `tools/vt-parity/run.sh` 与 golden 语料未建 | 靠 `core/tests/` 的确定性用例兜底 | M2 接真实程序对账时 |
 | OSC 8 超链接被丢弃 | `PgCell.hyperlink_id` 恒为 0，`cell[4]` 不上线 | 需要按链接跳转时 |
-| DECSTBM 滚动区恒等于整屏 | `alacritty_terminal` 不暴露 `scroll_region` | 需要客户端画滚动条时 |
+| 滚动回看（翻页） | 内核有 `history`（默认 1 万行），协商 `scrollback` 后 `snapshot.history` 也已下发，但客户端 `PaneView.apply` 只拷 `screen` 把 `history` 丢掉；没有 `scrollWheel`、没有 display offset，PageUp/PageDown 走 `KeyEncoder` 发给 PTY（那是让 less/vim 自己翻页，不是终端回看）；offset 归属（客户端 view 状态 vs 内核新增 `pg_pane_scroll`）也还没定 | M2，见 §7 验收 |
+| DECSTBM 滚动区恒等于整屏 | `alacritty_terminal` 不暴露 `scroll_region` | M2 画滚动条时；只影响滚动条位置提示，不影响回看本身 |
 | Swift 客户端不协商 `delta` | 只收 `snapshot`（协议 §5 允许） | 做性能时开启增量 |
 | IME 候选窗未实现 | 走 AppKit 默认 `keyDown` | M6 |
 | `zstd` 能力只定义了帧内 tag | 阈值、何时启用未定 | M4 远端实测后 |
