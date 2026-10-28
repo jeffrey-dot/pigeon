@@ -12,7 +12,7 @@ cargo build --release --bin pigeon-host            # 1,234,288 B（1.18 MiB ≤ 
 cbindgen --config core/cbindgen.toml --crate pigeon-core \
          --output /tmp/pg.h core                   # 与 include/pigeon_core.h 无差异
 cargo build --lib --no-default-features            # 通过（库本体不引用 tokio/portable-pty）
-swift build && swift test                          # 通过 / 40 passed
+swift build && swift test                          # 通过 / 44 passed
 ```
 
 新增覆盖：
@@ -138,7 +138,8 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
     内容就此丢掉。重排回来的尺寸只是“格子变大”，**不会把旧内容变回来**；纯 shell 会因 SIGWINCH 重画提示符，
     而空闲的 TUI（这里的 `pi`）不会重绘，于是 `π - core` 那个 pane 一直空白、光标停在第 30 行。
     证据：`grid pane=2 97x36 cursor=0,30 filled=0 lastRow=-1`（整屏 0 个字形），同一时刻 `pane=1 filled=26`；
-    手动把窗口缩小再放大触发 SIGWINCH 后恢复成 `filled=1421 lastRow=35`。修法：判定抽成纯函数
+    手动把窗口缩小再放大触发 SIGWINCH 后恢复成 `filled=1421 lastRow=35`，恢复后的画面见
+    [pane-recovered](images/m3/pane-recovered.jpg)（同一个 `π - core` pane，pi 的完整界面回来了）。修法：判定抽成纯函数
     `PaneView.gridSize(for:cellSize:)`，`<2` 列 / `<1` 行 / 零 cellSize 一律返回 `nil`，不上报；
     `PaneGridTests` 有四个反例 + 一个正例。
 12. **点侧栏行不切换右栏内容**：协议里 `attach` 同时是“这个窗口跟随哪个 session”的声明（宿主收到后把
@@ -163,9 +164,11 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 
 ## 6. CI（GitHub Actions，真跑）
 
-代码提交 `7fd5460`（终端零尺寸 / 退化 resize / 切换会话三个回归的修复）的 CI 五作业 success：
+HEAD `80169ae`（三个回归的修复 + 验收记录）的 CI 五作业 success：
 
-<https://github.com/jeffrey-dot/pigeon/actions/runs/40668695404>
+<https://github.com/jeffrey-dot/pigeon/actions/runs/40688090799>
+
+代码提交 `7fd5460` 的 run [40668695404](https://github.com/jeffrey-dot/pigeon/actions/runs/40668695404) 同样五作业 success。
 
 | 作业 | 结果 |
 |---|---|
@@ -175,7 +178,7 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 | `header` | success（cbindgen `diff -u` 为空） |
 | `swift` | success（`swift test` **44 passed**，含新增 `PaneGridTests`） |
 
-HEAD（文档收尾 `293643c`）的 run 40683408546 同样五作业 success，但首跑时 `rust (macos-latest)` 红过一次：
+中间 `293643c` 的 run 40683408546 首跑时 `rust (macos-latest)` 红过一次：
 `acked_status_is_not_replayed_after_reconnect`（`core/tests/host.rs:1173`，靠 `sleep(300ms)` 等重连补发）在负载高的 runner 上会抢跑，
 `gh run rerun --failed` 后全绿。这是既有时间敏感用例，和本次三个回归无关；要根治得改那个用例的同步方式。
 
