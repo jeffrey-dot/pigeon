@@ -82,7 +82,7 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 | 空态 | harp 没有 | `docs/ui.md` §2.3：“No sessions yet” + New Session | [empty-light](images/m3/empty-light.jpg) / [empty-dark](images/m3/empty-dark.jpg) |
 | 右栏卡片 | `view.rs:579` 圆角 10；`view.rs:22245` 0.5pt `CARD_EDGE`；`view.rs:22247` `CARD_SHADOW` 投影（下移 4、模糊 16）；`view.rs:22258-22262` 上/右/下各 8pt 外缩 | `CardView`：内层 `cornerRadius 10` + `masksToBounds`（防终端底色破角）、外层投影，上/右/下各 8pt，左边贴分隔线；终端内容再左缩 32pt；**卡片底色 = 主题背景**（`terminalBackground`，浅 `#ffffff` / 深 `#050505`），头部用 `ink`/`gray`（跟外观） | [sidebar-light](images/m3/sidebar-light.jpg) / [jump-light](images/m3/jump-light.jpg) |
 | 终端默认底/字 | `default_themes.rs:262` `dark_theme()`（bg `#050505`、fg `#ffffff`）/ `:275` `light_theme()`（bg `#ffffff`、fg `#111111`）；卡片背景 `view.rs:22241` = 主题背景 | `SidebarTheme.terminalBackground` 浅 `#ffffff` / 深 `#050505`，`terminalForeground` 浅 `#111111` / 深 `#ffffff`；只作用于“没有显式颜色”的格子，ANSI 16/256 色不动（`CoreTextRenderer.defaultColors(for:)`） | [sidebar-light](images/m3/sidebar-light.jpg) / [sidebar-dark](images/m3/sidebar-dark.jpg) |
-| 外观切换 | — | 脚本在**同一个进程**里按 ⌥⌘A 触发 `NSApp.appearance` 翻转（`PIGEON_DEBUG` 下的调试菜单项），前后各截一张；`CardView` 在 `viewDidChangeEffectiveAppearance` 里重解析 layer 色，侧栏/未读点由 `SidebarRenderingTests` 断言 | [hot-switch-dark](images/m3/hot-switch-dark.jpg) → [hot-switch-light](images/m3/hot-switch-light.jpg) |
+| 外观切换 | — | 循环是 **light → 跟随系统 → dark → light**（`AppearanceMode`，⌥⌘A 在 `PIGEON_DEBUG` 下可用）；每次切换都重发 `appearance`，脚本连按三次并打印计数：`hot switch: appearance sent 1 -> 4 over 3 toggles`、`appearance -> system / dark / light`。`CardView` 在 `viewDidChangeEffectiveAppearance` 里重解析 layer 色，侧栏/未读点由 `SidebarRenderingTests` 断言 | [hot-switch-system](images/m3/hot-switch-system.jpg) → [hot-switch-dark](images/m3/hot-switch-dark.jpg) → [hot-switch-back-light](images/m3/hot-switch-back-light.jpg) |
 
 ### 2.2 像素抽查（同一份截图取样，`/tmp/pxbin` 读 JPEG）
 
@@ -107,7 +107,9 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 | 协议 | `appearance { fg, bg, ansi[16] }`（c→s，全字段可选）；`docs/protocol.md` §3；往返/缺字段/错长度三条用例在 `core/src/proto/mod.rs` 的测试里 |
 | VT 层 | `colour_queries_are_answered_from_the_client_palette`（`]11;?` → `rgb:ffff/ffff/ffff`、`]10;?` → `rgb:1111/1111/1111`、`]4;1;?` → `rgb:c3c3/0707/7171`）、`colour_queries_stay_silent_without_a_palette`、`cursor_colour_and_unknown_queries_are_not_answered` |
 | 宿主 | `a_new_pane_answers_colour_queries_with_the_client_palette`（先发色板再建 pane，脚本的启动查询就拿到亮色）、`appearance_reaches_an_existing_pane_without_recreating_it`（先无答复 `R[]`，发色板后同一 pane 再问得到答案，pane id 不变） |
-| 客户端 | `appearance sent fg=111111 bg=ffffff`（`PIGEON_DEBUG` 日志）；外观切换（⌥⌘A / 系统外观变化）都会重发 |
+| 客户端 | `appearance sent fg=111111 bg=ffffff`（`PIGEON_DEBUG` 日志）；启动后一次，此后每次外观切换（⌥⌘A 三态循环 / 系统外观变化，走同一条 `effectiveAppearance` KVO）再发一次 —— 脚本实测三次切换把计数从 1 推到 4 |
+| 缺省 | 客户端还没说话时，宿主用 harp 内置深色板回答（`Palette::default_dark()`，`#050505` / `#ffffff` + `DARK_MODE_*`）；`appearance` 缺字段或色值不是 16 个则保留原答复、不 panic，用例 `colour_queries_fall_back_to_harps_dark_theme`、`a_malformed_appearance_keeps_the_previous_palette` |
+| 对比度兜底 | 协议生效后客户端不再改 TUI 自己选的色：`TerminalPalette.readable` 的阈值降到 **1.2:1**，只拦真正看不见的色（`testTheFloorOnlyRescuesInvisibleText` 断言 harp 亮色黄 `#F3E430` 原样通过） |
 | 手测 | `/tmp/pigeon-manual…` 的宿主日志里有 2 条 `rgb:ffff/ffff/ffff` 回复；亮色外观下 `pi` 用亮色主题渲染，见 [osc11-light](images/m3/osc11-light.jpg) |
 
 ## 3. 产品调整（用户要求，2026-10-28）

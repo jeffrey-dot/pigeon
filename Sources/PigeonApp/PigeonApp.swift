@@ -505,7 +505,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let mode = AppearanceMode.current().next
         NSApp.appearance = mode.appearance
         debugLog("appearance -> \(mode.rawValue)")
-        sendAppearance()
+        // No explicit send here: the `effectiveAppearance` observer fires on this change too,
+        // and sending twice would just duplicate the message.
     }
 
     @objc private func toggleSidebar(_ sender: Any?) {

@@ -1231,7 +1231,11 @@ fn write_probe_shell(name: &str, probes: u8) -> String {
     std::fs::create_dir_all(&dir).expect("probe dir");
     let path = dir.join("probe.sh");
     let mut body = String::from("#!/bin/bash\n");
-    body.push_str("q() { printf '\\033]11;?\\033\\\\'; IFS= read -r -n 25 -t 2 reply; printf 'R[%s]' \"$reply\" | cat -v; printf '\\n'; }\n");
+    // Retry: under load the reply can land after the first timeout, and a flaky probe would
+    // look like a broken host.
+    body.push_str(
+        "q() { for _ in 1 2 3 4 5; do printf '\\033]11;?\\033\\\\'; IFS= read -r -n 25 -t 2 reply; [ -n \"$reply\" ] && break; done; printf 'R[%s]' \"$reply\" | cat -v; printf '\\n'; }\n",
+    );
     body.push_str("q\n");
     if probes > 1 {
         body.push_str("IFS= read -r -t 20 _\nq\n");
@@ -1306,8 +1310,8 @@ fn appearance_reaches_an_existing_pane_without_recreating_it() {
         pane_id,
         size_policy: None,
     });
-    // No palette yet: the first probe is unanswered (`R[]`), which is the old behaviour.
-    wait_for_pane_text(&mut client, pane_id, "R[]");
+    // No `appearance` yet: the host answers with harp's built-in dark theme.
+    wait_for_pane_text(&mut client, pane_id, "rgb:0505/0505/0505");
     client.send(&light_appearance());
     // Press Enter so the probe script asks again — same pane, same PTY.
     client.send(&Message::Keys {
@@ -1325,4 +1329,68 @@ fn appearance_reaches_an_existing_pane_without_recreating_it() {
         }
         other => panic!("expected sessions, got {}", other.name()),
     }
+}
+
+#[test]
+fn colour_queries_fall_back_to_harps_dark_theme() {
+    let _serial = one_at_a_time();
+    // No `appearance` message at all: the host still answers, with harp's built-in dark theme.
+    let probe = write_probe_shell("default", 1);
+    let host = start_host_with(&probe);
+    let mut client = Client::connect(&host.socket);
+    hello(&mut client);
+    client.send(&Message::NewSession {
+        id: 1,
+        cwd: None,
+        shell: None,
+        env: None,
+    });
+    let Message::Created { pane_id, .. } =
+        client.wait_for(|m| matches!(m, Message::Created { .. }))
+    else {
+        unreachable!()
+    };
+    client.send(&Message::Attach {
+        id: 2,
+        pane_id,
+        size_policy: None,
+    });
+    wait_for_pane_text(&mut client, pane_id, "rgb:0505/0505/0505");
+}
+
+#[test]
+fn a_malformed_appearance_keeps_the_previous_palette() {
+    let _serial = one_at_a_time();
+    let probe = write_probe_shell("malformed", 2);
+    let host = start_host_with(&probe);
+    let mut client = Client::connect(&host.socket);
+    hello(&mut client);
+    client.send(&Message::NewSession {
+        id: 1,
+        cwd: None,
+        shell: None,
+        env: None,
+    });
+    let Message::Created { pane_id, .. } =
+        client.wait_for(|m| matches!(m, Message::Created { .. }))
+    else {
+        unreachable!()
+    };
+    client.send(&Message::Attach {
+        id: 2,
+        pane_id,
+        size_policy: None,
+    });
+    wait_for_pane_text(&mut client, pane_id, "rgb:0505/0505/0505");
+    // Incomplete message: no colours to install, so the default stays in place.
+    client.send(&Message::Appearance {
+        fg: None,
+        bg: None,
+        ansi: Vec::new(),
+    });
+    client.send(&Message::Keys {
+        pane_id,
+        bytes: b"\n".to_vec(),
+    });
+    wait_for_pane_text(&mut client, pane_id, "rgb:0505/0505/0505");
 }

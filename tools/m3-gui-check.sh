@@ -125,15 +125,22 @@ shoot "$OUT/hover-light.jpg"
 cliclick m:150,$((OY + 560))
 sleep 0.5
 
-# Hot appearance switch inside the same process: the debug menu item flips NSApp.appearance,
-# which is the path AppKit takes when the user changes the system appearance.
-key a "command down, option down"
+# Appearance switching inside one process. The cycle is light → system → dark → light, so a
+# press is not "toggle dark"; each press must also re-send the palette to the host.
+sent_before=$(grep -c "appearance sent" "$R/app-light.log")
+key a "command down, option down"   # light -> follow the system
+sleep 1
+shoot "$OUT/hot-switch-system.jpg"
+key a "command down, option down"   # system -> dark
 sleep 1
 shoot "$OUT/hot-switch-dark.jpg"
-key a "command down, option down"
+key a "command down, option down"   # dark -> light
 sleep 1
-shoot "$OUT/hot-switch-light.jpg"
-echo "hot switch: dark + light captured from one process"
+shoot "$OUT/hot-switch-back-light.jpg"
+sent_after=$(grep -c "appearance sent" "$R/app-light.log")
+echo "hot switch: appearance sent $sent_before -> $sent_after over 3 toggles"
+grep -o "appearance -> [a-z]*" "$R/app-light.log" | tail -3 | tr '\n' ' '
+echo
 
 before=$(grep -c 'pigeon-host: <- focus' "$R/host.log")
 key j "command down"
@@ -144,19 +151,17 @@ shoot "$OUT/jump-light.jpg"
 
 # The menu itself is the visual evidence; closing then goes through ⌘⇧W, which calls the
 # same `closeSession` and does not depend on where a synthetic click lands inside a menu.
-cliclick rc:100,$(row_y 2) w:600
+cliclick rc:100,$(row_y 6) w:600
 sleep 1
 shoot "$OUT/menu-light.jpg"
-cliclick c:600,420
-sleep 1
-before=$(grep -c 'pigeon-host: <- close_pane' "$R/host.log")
-cliclick c:150,$(row_y 6)
-sleep 1
-echo "selected before close: $(grep -o 'selected=[0-9-]*' "$R/app-light.log" | tail -1)"
-osa -e 'tell application "System Events" to keystroke "W" using {command down, shift down}'
+# Pick "Close Session" (first item) from the real menu: the keyboard path into a menu is
+# deterministic, while ⌘⇧W depends on which window ended up key after the screenshots.
+osa -e 'tell application "System Events" to key code 125' # Down
+sleep 0.3
+osa -e 'tell application "System Events" to key code 36' # Return
 sleep 2
 after=$(grep -c 'pigeon-host: <- close_pane' "$R/host.log")
-echo "Cmd-Shift-W Close Session: close_pane $before -> $after"
+echo "menu Close Session: close_pane $before -> $after"
 
 cliclick rc:100,$(row_y 0)
 sleep 1

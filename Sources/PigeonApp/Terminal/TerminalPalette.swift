@@ -45,21 +45,21 @@ enum TerminalPalette {
         (max(a, b) + 0.05) / (min(a, b) + 0.05)
     }
 
-    /// Lifts a foreground colour just enough to read against `background`.
+    /// A last-resort safety net for text that would be invisible (`#e6e6e6` on `#ffffff`).
     ///
-    /// TUIs pick their greys for a dark canvas; on harp's white card those land at `#e6e6e6`
-    /// and disappear. The correction is the *smallest* mix toward black/white that clears a
-    /// 3:1 ratio, so saturated colours stay recognisable (yellow darkens to olive rather than
-    /// collapsing to grey, which is what a fixed 20%-per-step mix did).
-    static func readable(_ color: NSColor, on background: NSColor, minimumRatio: CGFloat = 3.0) -> NSColor {
+    /// The real fix is the protocol: the host now answers the program's `OSC 4/10/11` queries
+    /// with the client palette, so a TUI picks its own light/dark theme and its colours are
+    /// already readable. Re-colouring those would destroy the theme (yellow collapsing to
+    /// olive), so only colours below 1.2:1 are nudged — everything else is drawn as sent.
+    static func readable(_ color: NSColor, on background: NSColor, minimumRatio: CGFloat = 1.2) -> NSColor {
         let fg = color.usingColorSpace(.sRGB) ?? color
         let bg = background.usingColorSpace(.sRGB) ?? background
         let bgLum = luminance(bg)
         if contrast(luminance(fg), bgLum) >= minimumRatio { return fg }
 
         let extreme: NSColor = bgLum > 0.5 ? .black : .white
-        var low: CGFloat = 0   // no correction
-        var high: CGFloat = 1  // fully corrected: maximum possible contrast
+        var low: CGFloat = 0
+        var high: CGFloat = 1
         var best = mix(fg, toward: extreme, by: 1)
         for _ in 0..<12 {
             let mid = (low + high) / 2

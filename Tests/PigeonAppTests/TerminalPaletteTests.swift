@@ -30,30 +30,29 @@ final class TerminalPaletteTests: XCTestCase {
         XCTAssertNil(TerminalPalette.hex(231, appearance: light))
     }
 
-    /// TUIs pick greys for a dark canvas; on the light card those land at `#e6e6e6`. The floor
-    /// must push them to a readable contrast without touching colours that already read.
-    func testContrastFloorLiftsDarkCanvasGreys() {
+    /// The protocol is the fix now, so the floor only stops *invisible* text: a TUI's own
+    /// light-theme colours (which it picked after asking us for the background) pass through
+    /// untouched, otherwise every theme collapses to one muddy colour.
+    func testTheFloorOnlyRescuesInvisibleText() {
         let white = NSColor.white
         let washed = NSColor(srgbRed: 0xe6 / 255, green: 0xe6 / 255, blue: 0xe6 / 255, alpha: 1)
         let lifted = TerminalPalette.readable(washed, on: white)
-        XCTAssertGreaterThanOrEqual(contrast(lifted, white), 3.0, "washed-out grey must clear 3:1 on white")
+        XCTAssertGreaterThanOrEqual(contrast(lifted, white), 1.19, "invisible grey must clear 1.2:1")
+        XCTAssertLessThan(contrast(lifted, white), 3.0, "but it must not be repainted as body text")
 
         let nearBlack = NSColor(srgbRed: 0x05 / 255, green: 0x05 / 255, blue: 0x05 / 255, alpha: 1)
-        let dim = NSColor(srgbRed: 0x22 / 255, green: 0x22 / 255, blue: 0x22 / 255, alpha: 1)
-        let brightened = TerminalPalette.readable(dim, on: nearBlack)
-        XCTAssertGreaterThanOrEqual(contrast(brightened, nearBlack), 3.0, "dim grey must clear 3:1 on near-black")
+        let dim = NSColor(srgbRed: 0x0a / 255, green: 0x0a / 255, blue: 0x0a / 255, alpha: 1)
+        XCTAssertGreaterThanOrEqual(contrast(TerminalPalette.readable(dim, on: nearBlack), nearBlack), 1.19)
 
-        let ink = NSColor(srgbRed: 0x11 / 255, green: 0x11 / 255, blue: 0x11 / 255, alpha: 1)
-        XCTAssertEqual(TerminalPalette.readable(ink, on: white), ink.usingColorSpace(.sRGB))
-
-        // Saturated colours keep their identity: only the *minimum* correction is applied, so
-        // darkening yellow and blue must not land on the same grey.
+        // A theme's own colours are left alone: harp's bright yellow is ~1.25:1 on white and
+        // still recognisably yellow, so it must not be swapped for a grey.
         let yellow = NSColor(srgbRed: 0xF3 / 255, green: 0xE4 / 255, blue: 0x30 / 255, alpha: 1)
-        let blue = NSColor(srgbRed: 0x20 / 255, green: 0xBB / 255, blue: 0xFC / 255, alpha: 1)
-        let fixedYellow = TerminalPalette.readable(yellow, on: white).usingColorSpace(.sRGB)!
-        let fixedBlue = TerminalPalette.readable(blue, on: white).usingColorSpace(.sRGB)!
-        XCTAssertGreaterThan(fixedYellow.redComponent - fixedYellow.blueComponent, 0.15, "yellow must stay warm")
-        XCTAssertGreaterThan(fixedBlue.blueComponent - fixedBlue.redComponent, 0.1, "blue must stay cool")
+        let keptYellow = TerminalPalette.readable(yellow, on: white).usingColorSpace(.sRGB)!
+        XCTAssertGreaterThan(keptYellow.redComponent, 0.9)
+        XCTAssertGreaterThan(keptYellow.greenComponent, 0.85)
+
+        let midGrey = NSColor(srgbRed: 0x8a / 255, green: 0x8a / 255, blue: 0x8a / 255, alpha: 1)
+        XCTAssertEqual(TerminalPalette.readable(midGrey, on: white), midGrey.usingColorSpace(.sRGB))
     }
 
     private func contrast(_ a: NSColor, _ b: NSColor) -> CGFloat {

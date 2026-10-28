@@ -109,6 +109,22 @@ pub struct Palette {
 }
 
 impl Palette {
+    /// harp's built-in dark theme (`dark_theme()` + `DARK_MODE_*` colours): what the host
+    /// answers with before any client has told it otherwise. Once a client sends
+    /// `appearance`, that palette is the only source — this is a pre-client fallback, not a
+    /// second palette the panes switch between.
+    pub fn default_dark() -> Self {
+        Self::from_rgb(
+            0x00ff_ffff,
+            0x0005_0505,
+            &[
+                0x616161, 0xFF8272, 0xB4FA72, 0xFEFDC2, 0xA5D5FE, 0xFF8FFD, 0xD0D1FE, 0xF1F1F1,
+                0x8E8E8E, 0xFFC4BD, 0xD6FCB9, 0xFEFDD5, 0xC1E3FE, 0xFFB1FE, 0xE5E6FE, 0xFEFFFF,
+            ],
+        )
+        .expect("default palette is well-formed")
+    }
+
     /// Builds a palette from the wire values; a wrong-length ANSI list is rejected rather
     /// than padded, so a broken client cannot invent colours.
     pub fn from_rgb(fg: u32, bg: u32, ansi: &[u32]) -> Option<Self> {
@@ -192,6 +208,19 @@ mod tests {
             ],
         )
         .expect("palette")
+    }
+
+    #[test]
+    fn the_default_palette_is_harps_dark_theme() {
+        let mut term = term();
+        term.set_palette(Some(Palette::default_dark()));
+        term.feed(b"\x1b]11;?\x1b\\");
+        term.feed(b"\x1b]10;?\x1b\\");
+        term.feed(b"\x1b]4;1;?\x1b\\");
+        let replies = String::from_utf8(term.take_replies()).expect("utf8");
+        assert!(replies.contains("]11;rgb:0505/0505/0505"), "{replies:?}");
+        assert!(replies.contains("]10;rgb:ffff/ffff/ffff"), "{replies:?}");
+        assert!(replies.contains("]4;1;rgb:ffff/8282/7272"), "{replies:?}");
     }
 
     #[test]

@@ -140,7 +140,8 @@ async fn run() -> Result<(), String> {
     let (events, _) = broadcast::channel::<Event>(256);
     let sessions: Sessions = Arc::new(Mutex::new(HashMap::new()));
     let meta: Meta = Arc::new(Mutex::new(HashMap::new()));
-    let palette: PaletteSlot = Arc::new(std::sync::Mutex::new(None::<Palette>));
+    // Before a client speaks, answer colour queries with harp's built-in dark theme.
+    let palette: PaletteSlot = Arc::new(std::sync::Mutex::new(Some(Palette::default_dark())));
 
     if std::fs::metadata(&socket).is_ok_and(|meta| meta.file_type().is_socket()) {
         let _ = std::fs::remove_file(&socket);
