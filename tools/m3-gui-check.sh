@@ -79,16 +79,6 @@ launch() { # launch <light|dark>
         echo "window: origin=($OX,$OY) size=($W,$H)"
 }
 
-# --- empty state, before any session exists (both appearances) -------------------------
-launch light
-shoot "$OUT/empty-light.jpg"
-kill "$APP_PID" 2>/dev/null
-sleep 1
-launch dark
-shoot "$OUT/empty-dark.jpg"
-kill "$APP_PID" 2>/dev/null
-sleep 1
-
 # --- sessions -------------------------------------------------------------------------
 cargo run --quiet --manifest-path core/Cargo.toml --example keys -- \
         --socket "$R/pigeon.sock" --new-session /tmp/pigeon/a >/dev/null 2>&1

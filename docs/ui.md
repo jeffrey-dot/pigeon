@@ -78,7 +78,7 @@
 
 - 左侧：原生红绿灯。
 - 右侧两个按钮：`⇤` 折叠侧栏、`+` 新建会话（下拉：本机 / 远端主机；工作目录默认当前项目）。
-- 空状态：没有任何会话时显示一行提示 + 一个大按钮「新建会话」。
+- 空状态：**不做**。首次连接到一个没有会话的宿主时，客户端自动新建一个 session（2026-10-28 用户要求），所以不会出现“空列表”。
 
 ## 3. 右栏（终端）
 
@@ -142,7 +142,7 @@ Pane(id, title, status, status_at, kind, msg)   # 直接来自 OSC 7501 记录
 | 分组折叠 | 可折叠 | 不可折叠，右键 `Rename Group…` 改名 | 2026-10-28 用户决定：分组名比折叠有用 |
 | 标题栏 | 红绿灯内嵌在侧栏顶部，透明标题栏 | **已对齐**：`.fullSizeContentView` + `titlebarAppearsTransparent` + 隐藏标题，红绿灯落在 56pt 侧栏头部里，折叠/新建按钮与红绿灯同一行（按原生按钮中心对齐） | 只剩 harp 的窗口玻璃材质模糊（`GLASS_BLUR_RADIUS` 30）没做：那是自绘窗口背景，AppKit 下换系统材质 |
 | 悬停 `×` 关闭 | 行尾出现 `×` | 无（右键菜单 / `⌘⇧W`） | 未实现，记在 `m3-checklist.md` §5 |
-| 空态 | 无 | “No sessions yet” + “New Session”（§2.3） | 参考图只是没有零会话的截图 |
+| 空态 | 无 | 不显示空态：没有会话时自动新建一个（§2.3） | 参考图只是没有零会话的截图 |
 | 分屏 | 无 | 右栏内可继续分屏（嵌套） | §1 的终端区就是分屏容器 |
 
 `needs you` 的口径比参考图宽：`blocked`、`error`、以及**未读的 `done`** 都算“要你”（`SidebarModel.needsYou`），
@@ -189,7 +189,7 @@ Pane(id, title, status, status_at, kind, msg)   # 直接来自 OSC 7501 记录
 | 终端默认前景 | 同上，`foreground` | 深 `#ffffff` / 浅 `#111111` | `SidebarTheme.terminalForeground`：浅 `#111111`、深 `#ffffff`（只作用于“没有显式颜色”的格子，ANSI 16/256 色不动） |
 | 卡片底色 | `view.rs:22241` `with_background(appearance.theme().background())` | = 主题背景 | = `terminalBackground`（浅白、深 `#050505`），所以侧栏与卡片同色系 |
 | 未读点 | harp 没有这个元素：它用「标题 Semibold + 实心 done 盘」表达未读（`VT:9544-9555`） | — | 5pt 圆点、`ICON_STRONG`（浅 `#3a3a3c` / 深 `#e5e5ea`），画在标题左侧 5pt；同时标题 Semibold。出处是本档 §2.1 |
-| 空态 | harp 没有：列表为空时只剩组头 | — | “No sessions yet” 12pt `GRAY` + 圆角 “New Session” 按钮，垂直居中。出处是本档 §2.3 |
+| 空态 | harp 没有：列表为空时只剩组头 | — | 不做空态：客户端在“宿主没有会话”时自动新建一个（`applySessions`），所以列表不会空着 |
 
 ### 7.2 颜色（浅 / 深）
 

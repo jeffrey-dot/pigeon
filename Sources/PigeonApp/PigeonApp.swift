@@ -38,6 +38,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var nextRequest: UInt32 = 1
     /// Session created by `+` / ⌘T: select it once the refreshed list contains it.
     private var pendingSelectSession: Int?
+    /// First launch on an empty host: give the user one session instead of an empty window.
+    private var createdInitialSession = false
 
     private var appearanceObservation: NSKeyValueObservation?
     private let store = SidebarStore()
@@ -608,6 +610,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if ProcessInfo.processInfo.environment["PIGEON_DEBUG"] != nil {
             let apps = rows.values.map { "\($0.id):\($0.app)" }.sorted().joined(separator: " ")
             FileHandle.standardError.write(Data("pigeon: sessions apps=\(apps)\n".utf8))
+        }
+        if rows.isEmpty, !createdInitialSession {
+            // First launch on an empty host: one session instead of an empty window.
+            createdInitialSession = true
+            debugLog("no sessions on the host: creating one")
+            sendNewSession(cwd: nil)
+            return
         }
         if let pending = pendingSelectSession, rows[pending] != nil {
             pendingSelectSession = nil

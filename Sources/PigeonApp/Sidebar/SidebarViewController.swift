@@ -12,7 +12,6 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
     private let table = NSTableView()
     private var headerControlsCenter: NSLayoutConstraint!
     private let scroll = NSScrollView()
-    private let emptyState = NSStackView()
     private var rows: [Row] = []
     private var ticker: Timer?
     private var selected: Int?
@@ -56,19 +55,7 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
         buttons.orientation = .horizontal
         buttons.spacing = SidebarMetrics.headerButtonSpacing
 
-        // §2.3 empty state: one line of copy plus a big primary button.
-        let hint = rowLabel("No sessions yet", size: SidebarMetrics.needsLabelSize, bold: false)
-        hint.textColor = SidebarTheme.gray
-        let create = NSButton(title: "New Session", target: self, action: #selector(newSessionClicked))
-        create.bezelStyle = .rounded
-        emptyState.orientation = .vertical
-        emptyState.spacing = 10
-        emptyState.alignment = .centerX
-        emptyState.addArrangedSubview(hint)
-        emptyState.addArrangedSubview(create)
-        emptyState.isHidden = true
-
-        for subview in [buttons, scroll, emptyState] {
+        for subview in [buttons, scroll] {
             root.addSubview(subview)
             subview.translatesAutoresizingMaskIntoConstraints = false
         }
@@ -89,8 +76,6 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
             scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            emptyState.centerXAnchor.constraint(equalTo: root.centerXAnchor),
-            emptyState.centerYAnchor.constraint(equalTo: root.centerYAnchor),
         ])
         view = root
         // Ages go stale without any data change; the reference refreshes once a minute.
@@ -142,8 +127,6 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
             )] + section.sessions.map(Row.session)
         }
         table.reloadData()
-        scroll.isHidden = rows.isEmpty
-        emptyState.isHidden = !rows.isEmpty
         if let selected, let index = rows.firstIndex(where: {
             if case let .session(session) = $0 { return session.id == selected }
             return false
