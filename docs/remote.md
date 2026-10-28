@@ -109,10 +109,11 @@ macOS 的 `cc` 会被当成链接器并拒继 musl 的 `-static`，所以必须�
 
 ## 4. 多主机与侧栏
 
-客户端实现：侧栏顶部 `Machines` 分组（`This Mac` + 每台已知主机，行尾是 `connected`/`connecting`/`offline`，
-点一行就切过去），`Hosts` 菜单（每个已知主机带勾选、`Use This Mac`、`Connect to Host…` ⌘⇧O），
-列表与“上次连的是谁”存在 `~/.config/pigeon/hosts.json`（`HostsStore`），启动时自动回到上次的主机。
-一个窗口就是一条连接，切换主机先挂断再探测（A→B→C），侧栏按 `host / project` 分组。
+客户端实现：**每台已知主机启动即各自连一条 ssh**，会话按 `host / project` 分组，机器名就在分组标题上
+（本机组保持项目原名，远端是 `arch / ~`）；离线主机整组收起，正在连接的主机标题带 `· connecting`。
+加机器与切主机走 `Hosts` 菜单（每个已知主机带勾选、`Use This Mac`、`Connect to Host…` ⌘⇧O），
+列表与“上次看的是谁”存在 `~/.config/pigeon/hosts.json`（`HostsStore`）。终端区同一时刻只显示一台主机，
+点另一台的会话即切换（连接早已建立，不需要重新探测）。
 
 - 侧栏第一层是**主机**：`本机` / `host-a` / `host-b`，组头显示连接状态（`connecting` / `offline` / 版本不匹配）。
 - 每个主机的会话归到其下的项目分组（与本地同样的分组规则，cwd 来自远端）。

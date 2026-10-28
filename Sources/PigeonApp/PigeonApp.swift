@@ -33,13 +33,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var header: SessionHeaderView!
     private var container: SplitContainerView!
     private var hostStatus: HostStatusView!
-    private var client: HostClient?
-    /// Set when `PIGEON_REMOTE=<host>` picked a remote machine instead of the local socket.
-    private var remote: RemoteSession?
+    /// One live connection per machine (`docs/remote.md` §4). `"local"` is this Mac.
+    private var clients: [String: HostClient] = [:]
+    private var remotes: [String: RemoteSession] = [:]
+    private var rowsByHost: [String: [Int: Row]] = [:]
+    private var focusedByHost: [String: UInt32] = [:]
+    private var seenByHost: [String: Set<UInt32>] = [:]
+    private var requestedByHost: [String: Set<UInt32>] = [:]
+    private var pendingByHost: [String: [UInt32: Data]] = [:]
+    private var recovering: [String: Int] = [:]
+    /// The host whose layout is on screen; every host stays connected in the background.
+    private var activeHost = "local"
+    /// Stable order for namespaced sidebar ids (`host index * 100_000 + session`).
+    private var hostOrder: [String] = ["local"]
+
+    private var client: HostClient? {
+        get { clients[activeHost] }
+        set { clients[activeHost] = newValue }
+    }
+    private var remote: RemoteSession? {
+        get { remotes[activeHost] }
+        set { remotes[activeHost] = newValue }
+    }
+    private var rows: [Int: Row] {
+        get { rowsByHost[activeHost] ?? [:] }
+        set { rowsByHost[activeHost] = newValue }
+    }
+    private var focusedPane: UInt32? {
+        get { focusedByHost[activeHost] }
+        set { focusedByHost[activeHost] = newValue }
+    }
+    private var haveSnapshot: Set<UInt32> {
+        get { seenByHost[activeHost] ?? [] }
+        set { seenByHost[activeHost] = newValue }
+    }
+    private var requested: Set<UInt32> {
+        get { requestedByHost[activeHost] ?? [] }
+        set { requestedByHost[activeHost] = newValue }
+    }
+    private var pendingSnapshots: [UInt32: Data] {
+        get { pendingByHost[activeHost] ?? [:] }
+        set { pendingByHost[activeHost] = newValue }
+    }
     /// Mode C keeps the VT state here (no host on the far side).
     private var localSession: LocalSession?
-    /// Attempts made since the socket last worked; drives `HostRecovery`.
-    private var recoveryAttempt = 0
     /// Why the host rejected this client (bad version, busy); retrying cannot help.
     private var refusedReason: String?
     /// Messages this window has sent, by type: what the self-test asserts on.
@@ -50,17 +87,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The last row the sidebar asked to select (a `Machines` row uses a negative id).
     private var lastSelectedId: Int?
 
-    private var rows: [Int: Row] = [:]
-    private var selectedSession: Int?
-    private var focusedPane: UInt32?
-    private var requested: Set<UInt32> = []
-    private var haveSnapshot: Set<UInt32> = []
-    private var pendingSnapshots: [UInt32: Data] = [:]
+    private var selectedByHost: [String: Int] = [:]
+    private var selectedSession: Int? {
+        get { selectedByHost[activeHost] }
+        set { selectedByHost[activeHost] = newValue }
+    }
     private var nextRequest: UInt32 = 1
+    /// Sessions per host, and which host is the one on screen. Every host keeps its own
+    /// connection (`docs/remote.md` §4: one ssh per machine, N sessions on it).
     /// Session created by `+` / ⌘T: select it once the refreshed list contains it.
     private var pendingSelectSession: Int?
-    /// First launch on an empty host: give the user one session instead of an empty window.
-    private var createdInitialSession = false
+    /// Hosts that already got their "empty host, one session" treatment.
+    private var createdInitialSessionFor: Set<String> = []
 
     private var appearanceObservation: NSKeyValueObservation?
     private let store = SidebarStore()
@@ -87,12 +125,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         buildMenu()
         buildWindow()
         if let host = ProcessInfo.processInfo.environment["PIGEON_REMOTE"], !host.isEmpty {
+            startRemote(host, select: true)
+            return
+        }
+        // Every known machine connects at launch (`docs/remote.md` §4): the sidebar lists
+        // their sessions side by side, not one at a time.
+        activeHost = hosts.current ?? "local"
+        if !connectHost() {
+            hostLost(host: "local", "No session host is running.")
+        }
+        for host in hosts.hosts {
             startRemote(host)
-        } else if let remembered = hosts.current {
-            // The window reopens where it was left (`docs/remote.md` §4).
-            startRemote(remembered)
-        } else if !connectHost() {
-            hostLost("No session host is running.")
         }
     }
 
@@ -302,46 +345,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - host
 
-    /// `PIGEON_REMOTE=<ssh host>`: open a remote session instead of the local socket
-    /// (`docs/remote.md` §1). Probing runs off the main thread — ssh takes a second and the
-    /// window must appear first.
-    private func startRemote(_ host: String) {
-        // Remember the machine even when it was reached through `PIGEON_REMOTE` or the
-        // remembered-host path: otherwise the Machines list would not show it at all.
+    /// Connects to one machine (`docs/remote.md` §4: every known host gets its own ssh
+    /// connection; the window only shows the one whose session is selected).
+    private func startRemote(_ host: String, select: Bool = false) {
         if !hosts.hosts.contains(host) {
             hosts.hosts.append(host)
-        }
-        if hosts.current != host {
-            hosts.current = host
             hostsStore.save(hosts)
         }
-        let session = RemoteSession(host: host)
-        remote = session
         connectingHost = host
+        if select {
+            activeHost = host
+        }
         refreshSidebar()
+        let session = remotes[host] ?? RemoteSession(host: host)
+        remotes[host] = session
         DispatchQueue.global(qos: .userInitiated).async {
             do {
                 let outcome = try session.connect()
-                DispatchQueue.main.async { [weak self] in self?.apply(outcome) }
+                DispatchQueue.main.async { [weak self] in self?.apply(outcome, host: host) }
             } catch {
                 DispatchQueue.main.async { [weak self] in
                     self?.connectingHost = nil
                     self?.refreshSidebar()
-                    self?.showStopped("cannot reach \(host): \(error)")
+                    self?.debugLog("cannot reach \(host): \(error)")
                 }
             }
         }
     }
 
-    private func apply(_ outcome: RemoteSession.Outcome) {
-        debugLog("remote transport=\(outcome.transport.rawValue) host=\(remote?.host ?? "-")")
+    private func apply(_ outcome: RemoteSession.Outcome, host: String) {
+        debugLog("remote transport=\(outcome.transport.rawValue) host=\(host)")
         connectingHost = nil
         refreshSidebar()
         if let client = outcome.client {
-            wire(client)
+            wire(client, host: host)
             return
         }
-        guard let process = outcome.process, let host = remote?.host else { return }
+        guard let process = outcome.process else { return }
+        // Degraded (mode C) owns the terminal area, so it only makes sense for the host the
+        // window is showing; a background host just stays offline until it is selected.
+        guard host == activeHost else {
+            debugLog("degraded host \(host) not visible; leaving it offline")
+            refreshSidebar()
+            return
+        }
         startDegraded(process: process, host: host, note: outcome.note)
     }
 
@@ -381,7 +428,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let path = Self.defaultSocketPath()
         do {
             let client = try HostClient.connect(path: path)
-            wire(client)
+            wire(client, host: "local")
             return true
         } catch {
             debugLog("host unreachable at \(path): \(error)")
@@ -391,51 +438,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Points the window at a live client: the local socket and a remote bridge look the same
     /// from here on (that is the point of mode A/B).
-    private func wire(_ client: HostClient) {
+    private func wire(_ client: HostClient, host: String) {
         client.onMessage = { [weak self] message in
             DispatchQueue.main.async {
                 defer { Wire.free(message) }
-                self?.handle(message)
+                self?.handle(message, host: host)
             }
         }
         client.onClose = { [weak self] in
-            DispatchQueue.main.async { self?.hostLost("The session host closed the connection.") }
+            DispatchQueue.main.async {
+                self?.hostLost(host: host, "The session host closed the connection.")
+            }
         }
-        self.client = client
-        recoveryAttempt = 0
-        hostStatus.hide()
+        clients[host] = client
+        recovering[host] = 0
+        if host == activeHost {
+            hostStatus.hide()
+        }
+        // The handshake goes to this host, so point the send helpers at it for a moment.
+        let previous = activeHost
+        activeHost = host
         sendHello()
+        sendAppearance()
+        activeHost = previous
+        refreshSidebar()
     }
 
-    /// The socket is gone: say so, then try to bring it back (including starting the host) a
-    /// few times before asking the user to.
-    private func hostLost(_ reason: String) {
-        client = nil
-        if let refused = refusedReason {
+    /// One host dropped: retry *that* host on its own budget, without touching the others.
+    private func hostLost(host: String, _ reason: String) {
+        clients[host] = nil
+        if host == activeHost, let refused = refusedReason {
             refusedReason = nil
             showStopped(refused)
             return
         }
-        recoveryAttempt = 0
-        recover(reason)
+        recovering[host] = 0
+        recover(host: host, reason: reason)
     }
 
-    private func recover(_ reason: String) {
-        let remote = self.remote != nil
+    private func recover(host: String, reason: String) {
+        let remote = host != "local"
+        let attempt = recovering[host] ?? 0
         let allowed = remote
-            ? HostRecovery.canRetryRemote(after: recoveryAttempt)
-            : HostRecovery.canRetry(after: recoveryAttempt)
+            ? HostRecovery.canRetryRemote(after: attempt)
+            : HostRecovery.canRetry(after: attempt)
         guard allowed else {
-            showStopped(reason)
+            if host == activeHost { showStopped(reason) }
+            refreshSidebar()
             return
         }
-        recoveryAttempt += 1
-        show(hostStatus: .reconnecting(attempt: recoveryAttempt))
+        recovering[host] = attempt + 1
+        if host == activeHost {
+            show(hostStatus: .reconnecting(attempt: attempt + 1))
+        }
         let delay = remote ? HostRecovery.remoteRetryDelay : HostRecovery.retryDelay
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self else { return }
             if remote {
-                self.reconnectRemote(reason)
+                self.reconnectRemote(host: host, reason: reason)
                 return
             }
             guard !self.connectHost() else { return }
@@ -445,33 +505,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + HostRecovery.retryDelay) { [weak self] in
                 guard let self, !self.connectHost() else { return }
-                self.recover(reason)
+                self.recover(host: host, reason: reason)
             }
         }
     }
 
     /// A dropped ssh channel comes back through the same A→B→C probe. The remote host kept
     /// the panes, which is what makes a 30 s drop survivable at all.
-    private func reconnectRemote(_ reason: String) {
-        guard let session = remote else { return }
+    private func reconnectRemote(host: String, reason: String) {
+        guard let session = remotes[host] else { return }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             do {
                 // Never silently fall back to plain ssh here: that would replace the
                 // persistent session with one that dies with the window.
                 let outcome = try session.connect(allowDegraded: false)
-                DispatchQueue.main.async { self?.apply(outcome) }
+                DispatchQueue.main.async { [weak self] in self?.apply(outcome, host: host) }
             } catch {
                 DispatchQueue.main.async { [weak self] in
-                    self?.recover("\(reason) (\(error))")
+                    self?.recover(host: host, reason: "\(reason) (\(error))")
                 }
             }
         }
     }
 
     private func showStopped(_ reason: String) {
-        if let remote {
+        if activeHost != "local" {
             show(hostStatus: .stopped(
-                detail: "\(reason)\nCheck `ssh \(remote.host)`, then Retry."))
+                detail: "\(reason)\nCheck `ssh \(activeHost)`, then Retry."))
             return
         }
         show(hostStatus: .stopped(detail: "\(reason)\nStart it with: \(HostRecovery.startCommand)"))
@@ -486,14 +546,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func retryHost() {
-        recoveryAttempt = 0
-        if let remote {
-            recover("Reconnecting to \(remote.host)")
+        recovering[activeHost] = 0
+        if activeHost != "local" {
+            disconnect(host: activeHost)
+            startRemote(activeHost, select: true)
             return
         }
         if !connectHost() {
-            recover("No session host is running.")
+            recover(host: "local", reason: "No session host is running.")
         }
+    }
+
+    /// Hangs up one host without disturbing the others.
+    private func disconnect(host: String) {
+        clients[host]?.close()
+        clients[host] = nil
+        remotes[host]?.close()
+        remotes[host] = nil
+        rowsByHost[host] = nil
+        focusedByHost[host] = nil
+        seenByHost[host] = nil
+        requestedByHost[host] = nil
+        pendingByHost[host] = nil
     }
 
     private static func defaultSocketPath() -> String {
@@ -501,6 +575,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return runtime + "/pigeon.sock"
         }
         return "/tmp/pigeon-\(getuid()).sock"
+    }
+
+    // MARK: - host keys and sidebar ids
+
+    /// `"local"` plus every known remote, in a stable order.
+    private func hostKeys() -> [String] {
+        hostOrder = ["local"] + hosts.hosts.filter { $0 != "local" }
+        return hostOrder
+    }
+
+    private func hostKey(_ host: String?) -> String { host ?? "local" }
+
+    /// Sessions of different hosts both start at 1, so the sidebar id carries the host.
+    private func rowId(host: String, session: Int) -> Int {
+        let keys = hostKeys()
+        let index = keys.firstIndex(of: host).map { $0 + 1 } ?? keys.count + 1
+        return index * 100_000 + session
+    }
+
+    private func splitRowId(_ id: Int) -> (host: String, session: Int)? {
+        guard id > 0 else { return nil }
+        let keys = hostKeys()
+        let index = id / 100_000 - 1
+        guard keys.indices.contains(index) else { return nil }
+        return (keys[index], id % 100_000)
+    }
+
+    /// Unread counts are persisted per host; local keeps the old key so existing state works.
+    private func unreadKey(host: String, session: Int) -> String {
+        host == "local" ? String(session) : "\(host):\(session)"
     }
 
     private func requestID() -> UInt32 {
@@ -641,15 +745,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func select(_ id: Int) {
         lastSelectedId = id
-        if id < 0 {
-            // A `Machines` row: switch to that host (or back to this Mac).
-            guard let target = SidebarModel.host(forRow: id, hosts: hosts.hosts) else { return }
-            switchTo(host: target)
-            return
+        guard let (host, session) = splitRowId(id) else { return }
+        if host != activeHost {
+            activate(host: host)
         }
-        guard let row = rows[id] else { return }
-        debugLog("select id=\(id) activePane=\(row.activePane) panes=\(row.panes)")
-        selectedSession = id
+        activeHost = host
+        guard let row = rowsByHost[host]?[session] else { return }
+        debugLog("select host=\(host) id=\(session) activePane=\(row.activePane) panes=\(row.panes)")
+        selectedSession = session
         focusedPane = row.activePane
         // Clicking a session must hand the keyboard back to its terminal: the click left
         // focus on the sidebar table, and nothing else would move it back when the layout
@@ -657,10 +760,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         container.focusPane(row.activePane)
         for pane in row.panes { sendAttach(pane, force: true) }
         send({ message in Wire.set(message, u32: "pane_id", row.activePane) }, type: PG_MSG_FOCUS)
-        if var current = rows[id] {
+        if var current = rows[session] {
             current.unread = 0
-            rows[id] = current
-            state.unread[String(id)] = 0
+            rows[session] = current
+            state.unread[unreadKey(host: host, session: session)] = 0
             store.save(state)
             sendAck(current.activePane, current.seq)
         }
@@ -668,10 +771,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func closeSession(_ id: Int) {
+        guard let (host, session) = splitRowId(id) else { return }
+        closeSession(host: host, session: session)
+    }
+
+    /// Closing a session on a specific host (the pane-exited path knows which one).
+    private func closeSession(host: String, session: Int) {
+        let previous = activeHost
+        activeHost = host
+        defer { activeHost = previous }
+        let id = session
         guard let row = rows[id] else { return }
         for pane in row.panes { sendClosePane(pane) }
         rows.removeValue(forKey: id)
-        state.unread.removeValue(forKey: String(id))
+        state.unread.removeValue(forKey: unreadKey(host: host, session: session))
         store.save(state)
         if selectedSession == id { selectedSession = nil }
         refreshSidebar()
@@ -679,7 +792,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func markRead(_ id: Int) {
-        guard var row = rows[id] else { return }
+        guard let (host, session) = splitRowId(id) else { return }
+        activeHost = host
+        guard var row = rows[session] else { return }
         row.unread = 0
         rows[id] = row
         state.unread[String(id)] = 0
@@ -736,48 +851,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switchTo(host: host)
     }
 
-    /// One window is one connection, so switching hosts means hanging up first — and saying
-    /// so by clearing the old rows instead of half-showing them.
+    /// Brings a machine to the front. Every other host keeps its connection, so switching is
+    /// instant and their sessions stay live in the sidebar (`docs/remote.md` §4).
     private func switchTo(host: String?) {
-        debugLog("host switch to \(host ?? "local")")
-        client?.close()
-        client = nil
-        remote?.close()
-        remote = nil
-        localSession = nil
-        rows = [:]
-        haveSnapshot = []
-        requested = []
-        selectedSession = nil
-        pendingSnapshots = [:]
-        container.apply(.empty)
-        // A degraded session had pointed these at its local VT; without this, typing into the
-        // next connection would go to a dead process and look like "the terminal ignores me".
-        container.onPaneInput = { [weak self] pane, bytes in self?.sendKeys(pane, bytes) }
-        container.onPaneResize = { [weak self] pane, cols, rows in
-            self?.sendResize(pane, cols: cols, rows: rows)
+        let key = hostKey(host)
+        if key != "local", !hosts.hosts.contains(key) {
+            hosts.hosts.append(key)
+            buildMenu()
         }
-        if let host {
-            if !hosts.hosts.contains(host) {
-                hosts.hosts.append(host)
-            }
-            hosts.current = host
-        } else {
-            hosts.current = nil
-        }
+        hosts.current = key == "local" ? nil : key
         hostsStore.save(hosts)
-        buildMenu()
-        refreshSidebar()
-        if let host {
-            startRemote(host)
-        } else if !connectHost() {
-            hostLost("No session host is running.")
+        activate(host: key)
+    }
+
+    /// Shows `host`'s terminal, connecting it if it is not up yet.
+    private func activate(host: String) {
+        debugLog("activate host=\(host) from=\(activeHost)")
+        if host != activeHost {
+            activeHost = host
+            selectedSession = nil
+            localSession = nil
+            container.apply(.empty)
+            // A degraded session pointed these at its local VT; the protocol path takes over.
+            container.onPaneInput = { [weak self] pane, bytes in self?.sendKeys(pane, bytes) }
+            container.onPaneResize = { [weak self] pane, cols, rows in
+                self?.sendResize(pane, cols: cols, rows: rows)
+            }
         }
+        if clients[host] == nil {
+            if host == "local" {
+                if !connectHost() {
+                    hostLost(host: "local", "No session host is running.")
+                }
+            } else {
+                startRemote(host, select: true)
+            }
+        }
+        if selectedSession == nil, let first = (rowsByHost[host] ?? [:]).keys.sorted().first {
+            select(rowId(host: host, session: first))
+        }
+        refreshSidebar()
     }
 
     @objc private func nextNeedsYou(_ sender: Any?) {
         let sessions = sidebarSessions()
-        guard let next = SidebarModel.nextNeedsYou(sessions, after: selectedSession) else { return }
+        let current = selectedSession.map { rowId(host: activeHost, session: $0) }
+        guard let next = SidebarModel.nextNeedsYou(sessions, after: current) else { return }
         select(next.id)
     }
 
@@ -802,50 +921,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func sidebarSessions() -> [SidebarSession] {
-        // Machines first: one row per known host, so "where does this session live" and
-        // "switch to that machine" are the same list the sessions are grouped in.
-        var sessions = SidebarModel.hostRows(
-            hosts: hosts.hosts,
-            connected: hosts.current,
-            connecting: connectingHost)
-        // Dictionary order is random; sort by id so groups keep first-seen order across launches.
-        sessions += rows.values.sorted { $0.id < $1.id }.map { row in
-            SidebarSession(
-                id: row.id,
-                title: row.app,
-                group: row.group,
-                status: row.status,
-                unread: row.unread,
-                app: row.app,
-                cwd: row.cwd,
-                lastSeen: row.lastSeen,
-                reported: row.seq > 0,
-                sizeSource: row.sizeSource,
-                clients: row.clients,
-                host: row.host
-            )
+        var sessions: [SidebarSession] = []
+        // Sessions of every *connected* host, grouped under `host / project`. An offline host
+        // simply disappears from the sidebar; its sessions come back when it reconnects.
+        for key in hostKeys() where clients[key] != nil {
+            let hostRows = (rowsByHost[key] ?? [:]).values.sorted { $0.id < $1.id }
+            for row in hostRows {
+                sessions.append(
+                    SidebarSession(
+                        id: rowId(host: key, session: row.id),
+                        title: row.app,
+                        group: row.group,
+                        status: row.status,
+                        unread: row.unread,
+                        app: row.app,
+                        cwd: row.cwd,
+                        lastSeen: row.lastSeen,
+                        reported: row.seq > 0,
+                        sizeSource: row.sizeSource,
+                        clients: row.clients,
+                        host: key
+                    ))
+            }
         }
         return sessions
     }
 
     private func refreshSidebar() {
         let raw = SidebarModel.sections(sidebarSessions(), order: state.order)
-        let sections = raw.map { section in
-            (group: state.renamedGroups[section.group] ?? section.group, sessions: section.sessions)
+        let sections = raw.map { section -> (group: String, sessions: [SidebarSession]) in
+            var name = state.renamedGroups[section.group] ?? section.group
+            // The machine's connection state rides on its heading: there is no machine list.
+            if let host = section.sessions.first?.host, host != "local", host == connectingHost {
+                name += " · connecting"
+            }
+            return (group: name, sessions: section.sessions)
         }
         if ProcessInfo.processInfo.environment["PIGEON_DEBUG"] != nil {
             let needs = SidebarModel.needsYou(sidebarSessions())
-            let machines = sidebarSessions()
-                .filter { $0.group == SidebarModel.machinesGroup }
-                .map { "\($0.title)=\($0.statusText ?? "-")" }
+            let perHost = hostKeys()
+                .map { "\($0):\(rowsByHost[$0]?.count ?? -1)" }
                 .joined(separator: ",")
             debugLog(
-                "sidebar sessions=\(rows.count) needs=\(needs) "
+                "sidebar active=\(activeHost) perHost=\(perHost) sessions=\(rows.count) needs=\(needs) "
                     + "selected=\(selectedSession.map(String.init) ?? "-") "
-                    + "groups=\(sections.map(\.group).joined(separator: "|")) "
-                    + "machines=\(machines)")
+                    + "groups=\(sections.map(\.group).joined(separator: "|"))")
         }
-        sidebar.update(sections: sections, selected: selectedSession)
+        let selectedRow = selectedSession.map { rowId(host: activeHost, session: $0) }
+        sidebar.update(sections: sections, selected: selectedRow)
         // Idempotent: the self-test starts on the first refresh that has a session on screen
         // (more than one path can end a session-list update early).
         beginSelfTestIfNeeded()
@@ -895,14 +1018,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - protocol
 
-    private func handle(_ message: OpaquePointer) {
+    /// Routes one host's message through the handlers, which read and write "the active
+    /// host" state; the window itself only follows the visible host.
+    private func handle(_ message: OpaquePointer, host: String) {
+        let visible = host == activeHost
+        let previous = activeHost
+        activeHost = host
+        defer { activeHost = previous }
+        handleActive(message, visible: visible)
+    }
+
+    private func handleActive(_ message: OpaquePointer, visible: Bool) {
         switch Wire.type(message) {
         case PG_MSG_HELLO_ACK:
             // Tell the host what we are drawing with, so programs inside the panes can pick
             // their light or dark theme (`OSC 4/10/11`).
             sendAppearance()
         case PG_MSG_SESSIONS:
-            applySessions(message)
+            applySessions(message, visible: visible)
         case PG_MSG_CREATED:
             // Jump to the new session as soon as the refreshed list includes it.
             pendingSelectSession = Int(Wire.u32(message, "session_id"))
@@ -917,6 +1050,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             guard sessionID == selectedSession else { break }
             if model.focus != 0 { focusedPane = model.focus }
+            guard visible else { break }
             container.apply(model)
             flushPendingSnapshots()
             for pane in model.panes.map(\.id) { sendAttach(pane) }
@@ -925,6 +1059,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             defer { pg_snapshot_free(snapshot) }
             let pane = snapshot.pointee.pane_id
             focusedPane = focusedPane ?? pane
+            // Background hosts keep their rows and status; only the visible one draws.
+            guard visible else { break }
             if container.applySnapshot(snapshot) {
                 haveSnapshot.insert(pane)
                 // `scroll` answers carry where the view is; plain snapshots do not, and then
@@ -968,8 +1104,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func applySessions(_ message: OpaquePointer) {
+    private func applySessions(_ message: OpaquePointer, visible: Bool) {
         let count = pg_msg_sessions_count(message)
+        debugLog("sessions from active=\(activeHost) count=\(count)")
         var updated: [Int: Row] = [:]
         for index in 0..<count {
             var info = PgSessionInfo()
@@ -990,7 +1127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 title: "session \(id)",
                 status: previous?.status ?? .idle,
                 seq: previous?.seq ?? 0,
-                unread: previous?.unread ?? state.unread[String(id)] ?? 0,
+                unread: previous?.unread ?? state.unread[unreadKey(host: activeHost, session: id)] ?? 0,
                 lastSeen: previous?.lastSeen ?? Date(),
                 sizeSource: previous?.sizeSource ?? "",
                 clients: previous?.clients ?? 1,
@@ -1002,16 +1139,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let apps = rows.values.map { "\($0.id):\($0.app)" }.sorted().joined(separator: " ")
             FileHandle.standardError.write(Data("pigeon: sessions apps=\(apps)\n".utf8))
         }
-        if rows.isEmpty, !createdInitialSession {
-            // First launch on an empty host: one session instead of an empty window.
-            createdInitialSession = true
-            debugLog("no sessions on the host: creating one")
+        if rows.isEmpty, !createdInitialSessionFor.contains(activeHost) {
+            // An empty host gets one session instead of an empty group.
+            createdInitialSessionFor.insert(activeHost)
+            debugLog("no sessions on \(activeHost): creating one")
             sendNewSession(cwd: nil)
+            return
+        }
+        // A background host keeps its sessions and status; it must not steal the window.
+        guard visible else {
+            for row in rows.values { sendAttach(row.activePane) }
+            refreshSidebar()
             return
         }
         if let pending = pendingSelectSession, rows[pending] != nil {
             pendingSelectSession = nil
-            select(pending)
+            select(rowId(host: activeHost, session: pending))
             return
         }
         if selectedSession == nil || rows[selectedSession!] == nil {
@@ -1167,7 +1310,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case 5:
             // Click a session row the way a user does, then type again: this is the
             // "I clicked a session and the terminal stopped listening" case.
-            guard let session = rows.keys.min(), sidebar.selectRow(id: session) else {
+            guard let session = rows.keys.min(),
+                  sidebar.selectRow(id: rowId(host: activeHost, session: session))
+            else {
                 report(false, "session-click (no session row to select)")
                 return
             }
@@ -1186,15 +1331,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 report(false, "session-click then typing (no keys sent)")
             }
-        case 6:
-            let ok = sidebar.selectRow(id: -1)
-            // The selection runs synchronously through the table delegate into `select`.
-            if ok, lastSelectedId == -1 {
-                FileHandle.standardError.write(Data("SELFTEST ok step=6 machines-row\n".utf8))
-                FileHandle.standardError.write(Data("SELFTEST PASS\n".utf8))
-                exit(0)
-            }
-            report(false, "machines-row (row selection did not reach the app)")
         default:
             FileHandle.standardError.write(Data("SELFTEST PASS\n".utf8))
             exit(0)

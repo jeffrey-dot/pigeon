@@ -10,7 +10,22 @@ public enum Grouping {
         if let root = gitRoot, !root.isEmpty {
             return lastComponent(root)
         }
+        // A remote session spends its time in `$HOME`, and we only know *this* machine's
+        // home path, so both layouts are recognised: `/Users/<user>` and `/home/<user>`.
+        if isHome(cwd) {
+            return "~"
+        }
         return lastComponent(cwd)
+    }
+
+    /// `/Users/jeffrey`, `/home/jeffrey`, or a bare `~`.
+    public static func isHome(_ path: String) -> Bool {
+        let trimmed = path.hasSuffix("/") && path.count > 1
+            ? String(path.dropLast())
+            : path
+        if trimmed == "~" { return true }
+        let parts = trimmed.split(separator: "/").map(String.init)
+        return parts.count == 2 && (parts[0] == "Users" || parts[0] == "home")
     }
 
     /// "…/pigeon/core" → "core"; "/" → "/".

@@ -34,7 +34,7 @@ tools/m2-gui-check.sh                              # 全部 PASS（1 条 OS 按�
 | 版本拒绝 | `bad_version_is_rejected_with_hello_error`（宿主侧）；客户端把 `hello_error` 的 `reason`/`detail` 显示到提示里并停止重试 |
 | zoom | `layout::tests::zoom_gives_one_pane_the_whole_window_and_unzoom_restores_the_tree`（zoom 后该 pane rect = 整窗、焦点跟过去、unzoom 后嵌套比例逐字段还原、未知 pane 报 false）、`closing_the_zoomed_pane_drops_the_zoom`、`zooming_a_pane_gives_it_the_whole_window_and_unzoom_restores_the_split`（真宿主：`layout.zoom` 下发、`size_state` 变成整窗 80×24、unzoom 后叶子顺序不变、未知 pane 回 `no_such_pane`）、`zoom_messages_round_trip`（协议往返） |
 | zoom（客户端） | `ZoomTests`：`zoomRequest`（无焦点不发、未 zoom 发 `zoom_pane`、已 zoom 发 `unzoom`、换 pane 再 zoom）、`hides(pane:zoom:)`、菜单项真的是 `⌘⇧↩`（keyEquivalent `\r` + modifier + selector 存在）、无 zoom 时所有 pane 可见 |
-| Machines 侧栏 | `SidebarOrderingTests`：`Machines` 分组不受 host 前缀影响（不会出现 `arch / Machines`）、主机行状态 `connected/connecting/offline`、负 id 映射回主机 |
+| 多主机分组 | `SidebarOrderingTests`：分组标题带机器名（`arch / ~`）、本地组保持原名、同一项目在两台机器上分成两组；离线主机不产生会话行（整组收起） |
 | VT 对账 | `tools/vt-parity/`：8 条语料（basic/cursor/erase/wide/scroll-region/alt-screen/insert-delete/wrap）与 tmux `capture-pane` 逐行一致 |
 
 ## 2. GUI（真窗口，`tools/m2-gui-check.sh`）
@@ -54,7 +54,6 @@ PASS  self-test: menu split/zoom/unzoom, PageUp scroll, Machines row selection
       SELFTEST ok step=3 scroll
       SELFTEST ok step=4 typing
       SELFTEST ok step=5 session-click then typing
-      SELFTEST ok step=6 machines-row
       SELFTEST PASS
 PASS  the host really received <- split_pane from the window
 PASS  the host really received <- zoom_pane from the window
@@ -70,8 +69,8 @@ m2-gui-check: no failures
   `<- split_pane` / `<- zoom_pane` / `<- unzoom`。
 - 第一响应者：把 PageUp 事件交给当前 pane 的 `keyDown`，宿主收到 `<- scroll`；再打一个普通字符，宿主收到 `<- keys`。
 - 点会话行之后还能打字：用表格选中一个 session 行（等同用户点击），断言第一响应者回到该 pane 且按键仍产生 `<- keys`。
-- 侧栏：用 `NSTableView.selectRowIndexes` 选 `Machines` 行，走的是 `tableViewSelectionDidChange → onSelect`，
-  应用侧记录 `select(-1)`（步 4）。
+- 侧栏：用 `NSTableView.selectRowIndexes` 选中一个会话行，走的是 `tableViewSelectionDidChange → onSelect`
+  （步 5，并顺带验证选中后键盘回到终端）。
 
 为什么 OS 级按键是 SKIP：这个会话里任何应用都无法置前（`frontmost` 恒为 `loginwindow`，`NSRunningApplication.activate`
 返回 true 而 `isActive` 仍 false），而菜单快捷键由**活动应用**分发。`CGEventPostToPid` 能送键盘（审计侧用 PageUp 证实

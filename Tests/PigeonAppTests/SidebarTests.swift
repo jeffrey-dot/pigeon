@@ -170,34 +170,29 @@ final class SidebarOrderingTests: XCTestCase {
         XCTAssertEqual(SidebarModel.ageText(for: shared, now: now), "2× latest")
     }
 
-    func testMachinesSectionListsEveryHostWithItsState() {
-        let rows = SidebarModel.hostRows(hosts: ["arch", "build"], connected: "arch", connecting: nil)
-        XCTAssertEqual(rows.map(\.title), ["This Mac", "arch", "build"])
-        XCTAssertEqual(rows.map(\.statusText), ["offline", "connected", "offline"])
-        XCTAssertEqual(Set(rows.map(\.group)), [SidebarModel.machinesGroup])
-        XCTAssertTrue(rows.allSatisfy { $0.id < 0 }, "machine rows must not collide with sessions")
-
-        // While a remote probe runs, This Mac is still the current connection and the
-        // machine being tried says so.
-        let connecting = SidebarModel.hostRows(
-            hosts: ["arch"], connected: nil, connecting: "arch")
-        XCTAssertEqual(connecting.first?.statusText, "connected")
-        XCTAssertEqual(connecting.last?.statusText, "connecting")
+    func testHomeDirectoriesBecomeTildeOnEveryPlatform() {
+        XCTAssertEqual(Grouping.groupName(forCwd: "/Users/jeffrey"), "~")
+        XCTAssertEqual(Grouping.groupName(forCwd: "/home/jeffrey"), "~")
+        XCTAssertEqual(Grouping.groupName(forCwd: "/home/jeffrey/"), "~")
+        XCTAssertEqual(Grouping.groupName(forCwd: "~"), "~")
+        XCTAssertEqual(Grouping.groupName(forCwd: "/home/jeffrey/dev/pigeon"), "pigeon")
+        XCTAssertEqual(Grouping.groupName(forCwd: "/Users/jeffrey/dev/pigeon"), "pigeon")
+        XCTAssertEqual(Grouping.groupName(forCwd: "/tmp"), "tmp")
+        XCTAssertEqual(
+            Grouping.groupName(forCwd: "/home/jeffrey/dev/pigeon", gitRoot: "/home/jeffrey/dev/pigeon/core"),
+            "core", "a git root still wins over the cwd's own name")
     }
 
-    func testAMachineRowMapsBackToItsHost() {
-        XCTAssertEqual(SidebarModel.host(forRow: -1, hosts: ["arch"]), .some(nil))
-        XCTAssertEqual(SidebarModel.host(forRow: -2, hosts: ["arch", "build"]), .some("arch"))
-        XCTAssertEqual(SidebarModel.host(forRow: -3, hosts: ["arch", "build"]), .some("build"))
-        XCTAssertNil(SidebarModel.host(forRow: -9, hosts: ["arch"]), "no such row")
-        XCTAssertNil(SidebarModel.host(forRow: 7, hosts: ["arch"]), "sessions are not hosts")
-    }
-
-    func testTheMachineStateReplacesTheAgeText() {
-        let now = Date(timeIntervalSince1970: 1_000_000)
-        var row = self.row(1, .idle)
-        row.statusText = "offline"
-        XCTAssertEqual(SidebarModel.ageText(for: row, now: now), "offline")
+    func testTheGroupHeadingCarriesTheMachineName() {
+        // Local groups keep the plain project name; remote ones are `host / project`, so the
+        // machine is visible on the heading instead of in a separate machine list.
+        XCTAssertEqual(SidebarModel.groupLabel(host: "local", project: "~"), "~")
+        XCTAssertEqual(SidebarModel.groupLabel(host: "", project: "~"), "~")
+        XCTAssertEqual(SidebarModel.groupLabel(host: "arch", project: "~"), "arch / ~")
+        var remote = row(1, .idle)
+        remote.group = "~"
+        remote.host = "arch"
+        XCTAssertEqual(SidebarModel.sections([remote]).first?.group, "arch / ~")
     }
 
     func testRemoteSessionsCarryTheirHostInTheGroupHeading() {

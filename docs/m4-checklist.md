@@ -37,7 +37,7 @@ cargo build --release --target x86_64-unknown-linux-musl \
 | `--socket-path` | 客户端问二进制要默认 socket 路径，`ssh -L` 不再复刻这条规则 |
 | 窗口自检（`PIGEON_SELFTEST=1`） | 应用自己驱动菜单 action（`⌘D`/`⌘⇧↩`）、第一响应者 PageUp、侧栏 `Machines` 行选中；宿主日志确认收到 `<- split_pane`/`<- zoom_pane`/`<- unzoom`/`<- scroll`，见 `docs/m2-checklist.md` §2 |
 | zoom（客户端） | `ZoomTests`（`⌘⇧↩` 的 keyEquivalent/modifier/selector、`zoomRequest` → `zoom_pane`/`unzoom`、`hides(pane:zoom:)`）——上一轮审计指出的“zoom UI 客户端没有测试”已补 |
-| 多主机侧栏 | 侧栏顶部 `Machines` 分组：`This Mac` + 每台已知主机各一行，行尾 `connected`/`connecting`/`offline`，点一行即切换（`SidebarModel.hostRows`/`host(forRow:hosts:)`，id 用负数与 session 区分）；`HostsStoreTests` 3 条（往返/损坏回退/默认路径）、`SidebarOrderingTests` 的 groupLabel、`Machines` 行与状态映射、跨主机分组；菜单 `Hosts` 带勾选、`Use This Mac`、`Connect to Host…`（⌘⇧O） |
+| 多主机侧栏 | 每台已知主机启动即连接（实测 `perHost=local:1,arch:1`、`groups=~\|arch / jeffrey`），会话按 `host / project` 分组，机器名就在分组标题上；离线主机整组收起（不产生会话行），正在连接的主机标题带 `· connecting`；加机器走 `Hosts` 菜单（勾选、`Use This Mac`、`Connect to Host…` ⌘⇧O），`HostsStoreTests` 3 条 + `SidebarOrderingTests` 的分组标题用例 |
 | 自动安装 | `HostInstallerTests` 10 条：平台↔产物匹配（绝不把 Linux x86_64 推向别的平台）、远端脚本先校验再 `mv`、缺 `sha256sum` 时退回 `shasum`、内容和哈希目录、二次连接不再上传、拒绝安装、未知平台、远端哈希不符；**1 条真 ssh E2E**（见下） |
 | 远端断线重连（窗口） | `HostRecovery.plan(hasRemote:)` + `canRetryRemote`（20 次 × 1.5s ≈ 30s，远超本地 3×1s）；`PigeonApp.recover` 在远端模式以 `connect(allowDegraded: false)` 重新探测——**失败就重试，绝不悄悄退化成不持久的 C**；`RemoteSessionTests.testDegradingCanBeRefusedOutright` 卡住这条 |
 | 传输探测 | `RemoteSessionTests` 9 条：A→B→C 顺序、无宿主时退化并说明成本、A 用本地 `pigeon-host --stdio` 冒充远端跑通握手、C 的本地 VT 两条（直接喂字节 / 子进程管道 + 回调）、**3 条真 ssh**（bridge / 退回 ssh -L / 退化）+ **1 条 30s 断连恢复** |
@@ -117,7 +117,7 @@ testRealSshDropKeepsTheRemoteSessionAndItsScreen ... passed (40.0s)
 |---|---|---|
 | GUI 侧栏的多主机分组 | 纯逻辑单测（`groupLabel` + 分组拆分） | 真开 `PIGEON_REMOTE=arch pigeon-product` 看分组与截图；本轮没有 GUI 手测，checklist 里没有截图 |
 | 连接状态展示 | 退化时窗口标题 `pigeon — arch (not persistent)` + 头部徽标 `Not persistent`；A/B 无额外标识 | 侧栏行上区分“本机 / 远端 / 已断”的视觉 |
-| GUI 多主机与重连的*观感* | `PIGEON_REMOTE=arch` 的侧栏状态由脚本验证（`machines=This Mac=offline,arch=connected`、`groups=Machines\|arch / ~`）；`PIGEON_SELFTEST` 步 4 用 `NSTableView.selectRowIndexes` 选中 `Machines` 行，走的是真实 delegate → `onSelect` → 应用侧 `select(-1)` | 物理鼠标点击本身（本会话投递不进窗口；`tools/click-at-pid.swift` 留给正常桌面会话） |
+| GUI 多主机与重连的*观感* | `PIGEON_REMOTE=arch` 的侧栏分组由脚本验证（`groups=arch / jeffrey`）；`PIGEON_SELFTEST` 步 5 用 `NSTableView.selectRowIndexes` 选中会话行，走真实 delegate → `onSelect` | 物理鼠标点击本身（本会话投递不进窗口；`tools/click-at-pid.swift` 留给正常桌面会话） |
 | 退化模式（C）的窗口尺寸 | 本地 VT 会 resize | 远端 pty 尺寸仍是 ssh 分配的 80×24（客户端没有本地 pty 去转发 `TIOCSWINSZ`），见 plan §11 |
 | C 模式的 xctest 渲染断言 | 本地 VT 两条单测 + 手工 ssh 记录 | xctest 里把 ssh 的 pty 管道喂给 `LocalSession` 时读线程 25s 拿不到数据（本地子进程正常），原因未定位；不愿为它造假 |
 | 真的关掉 `AllowStreamLocalForwarding` 的主机 | 用拒绝 `--proxy` 模拟 A 失败 | 一台能改 sshd 配置的主机 |
