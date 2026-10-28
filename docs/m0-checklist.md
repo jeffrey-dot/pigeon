@@ -110,9 +110,30 @@ htop 的自动化用例（`htop_renders_its_panels_and_quits_on_q`）断言面�
 |---|---|
 | 重开窗口的像素级 diff | `alt-1.jpg`/`alt-2.jpg` 是关窗前后两屏（vim 备用屏 + 输入的文字），肉眼一致；逐 cell 相等由宿主测试 `comparable()` 断言，但没有做逐像素比较 |
 | 输入法 / 真实手速 | 本轮用系统事件注入按键，没测拼音候选窗（M6）与人类手速下的回显延迟 |
-| Ubuntu 实跑 | 本机无 Linux；CI matrix 已配 ubuntu + macos，交给 CI 首跑 |
-| GitHub Actions 实跑 | 仓库无 remote，未推送；四个作业的命令已在本机按同顺序跑过 |
+| ~~Ubuntu / GitHub Actions~~ | 已真跑，见下节「CI 首跑」 |
 
-## 4. 已知缺口
+## 4. CI 首跑（GitHub Actions，真跑）
+
+推送 `4adc398` 后 CI 一次通过：
+
+<https://github.com/jeffrey-dot/pigeon/actions/runs/40633073432>
+
+| 作业 | 结果 | 关键输出 |
+|---|---|---|
+| `docs` | success | 文档相对链接检查 `links ok` |
+| `rust (ubuntu-latest)` | success | `cargo test` **47 + 9 + 8 = 64 passed**（含 spawn 真实 PTY 的宿主用例） |
+| `rust (macos-latest)` | success | 同上 |
+| `header` | success | `cbindgen` 生成后 `diff -u` 为空 |
+| `swift` | success | `cargo build` → `swift build` → `swift test` **18 passed** |
+
+Ubuntu 侧的 `cargo test` 输出（CI 日志摘录）：
+
+```text
+test result: ok. 47 passed; 0 failed; 0 ignored; ...
+test result: ok. 9 passed; 0 failed; 0 ignored; ...
+test result: ok. 8 passed; 0 failed; 0 ignored; ...
+```
+
+## 5. 已知缺口
 
 见 `docs/plan.md` §11。

@@ -283,5 +283,6 @@ M0 落地后仍在的洞。
 | `swift test` 依赖完整 Xcode | `xcode-select` 指向 CommandLineTools 时 XCTest 缺失，需 `DEVELOPER_DIR` | 换成 swift-testing 或写进 README |
 
 **平台说明**：`pigeon-host` 在 macOS 与 Linux 用同一份代码；CI 的 `rust` 作业在 ubuntu 与 macos
-各跑一遍 `cargo test`（含 spawn 真实 PTY 的宿主用例）。本机只有 macOS，因此 Ubuntu 那一路尚未实测，
-这是环境限制而不是排期。
+各跑一遍 `cargo test`（含 spawn 真实 PTY 的宿主用例）。M0 的首跑记录：
+<https://github.com/jeffrey-dot/pigeon/actions/runs/40633073432>（`4adc398`，五个作业全绿，
+Ubuntu 侧 47 + 9 + 8 = 64 passed）。
