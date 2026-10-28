@@ -191,14 +191,14 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 
 ## 6. CI（GitHub Actions，真跑）
 
-HEAD `8920cd6`（OSC 4/10/11 回答 + 宿主默认深色板 + 手测暴露的五个问题）的 CI 五作业 success：
+HEAD `9f77d41`（OSC 4/10/11 回答 + 默认深色板 + 侧栏新造型 + 颜色查询只留一条 E2E）的 CI 五作业 success：
 
-<https://github.com/jeffrey-dot/pigeon/actions/runs/40704425412>
+<https://github.com/jeffrey-dot/pigeon/actions/runs/40708106094>
 
 | 作业 | 结果 |
 |---|---|
 | `docs` | success（相对链接检查） |
-| `rust (ubuntu-latest)` | success（`cargo test` **73 + 11 + 25 = 109 passed**） |
+| `rust (ubuntu-latest)` | success（`cargo test` **73 + 11 + 22 = 106 passed**） |
 | `rust (macos-latest)` | success |
 | `header` | success（cbindgen `diff -u` 为空） |
 | `swift` | success（`swift test` **55 passed**） |
@@ -208,20 +208,16 @@ HEAD `8920cd6`（OSC 4/10/11 回答 + 宿主默认深色板 + 手测暴露的五
 ```sh
 cargo fmt --check                                  # 通过
 cargo clippy --all-targets -- -D warnings          # 通过
-cargo test                                         # 73 + 11 + 25 = 109 passed
+cargo test                                         # 73 + 11 + 22 = 106 passed
 swift build && swift test                          # Build complete / 55 passed
 cargo build --release --bin pigeon-host            # 1,250,800 B（1.19 MiB ≤ 8 MiB）
 cbindgen … --output /tmp/pg9.h && diff -q …        # header: no diff
 ```
 
-`tools/m3-gui-check.sh` 转录（节选）：
+颜色查询的唯一端到端用例（0.3s，真宿主 + 真 PTY，shell 自己发 `OSC 11;?` 并打印答复）：
+`a_pane_asks_for_its_background_and_the_host_answers` → 断言 `rgb:0505/0505/0505`（内置 harp 深色板）。
 
-```text
-hot switch: appearance sent 1 -> 4 over 3 toggles
-appearance -> system appearance -> dark appearance -> light
-menu Close Session: close_pane 0 -> 1
-```
-
-历史上的两次红都记在这里以避免误读：`61239d3` 的 `rust (macos-latest)` 因既有用例
+历史红记录（避免误读）：`61239d3` 的 `rust (macos-latest)` 因既有用例
 `acked_status_is_not_replayed_after_reconnect` 的 `sleep(200ms)` 抢跑（已改成消息顺序屏障）；
-本机全量 `cargo test` 偶尔红一条既有时序用例（单跑与 CI 均通过）。
+本机全量 `cargo test` 偶尔红一条既有时序用例（`shell_outlives_the_client_and_the_screen_is_restored` /
+`three_panes_survive_a_disconnect_and_restore_layout_and_screens`，单跑与 CI 均通过）。
