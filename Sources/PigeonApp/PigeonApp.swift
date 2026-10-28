@@ -42,6 +42,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var recoveryAttempt = 0
     /// Why the host rejected this client (bad version, busy); retrying cannot help.
     private var refusedReason: String?
+    /// Messages this window has sent, by type: what the self-test asserts on.
+    private var sentCounts: [PgMsgType: Int] = [:]
+    /// `PIGEON_SELFTEST=1` drives the real menu/keyboard/sidebar paths once and exits.
+    private let selfTest = ProcessInfo.processInfo.environment["PIGEON_SELFTEST"] == "1"
+    private var selfTestRunning = false
+    /// The last row the sidebar asked to select (a `Machines` row uses a negative id).
+    private var lastSelectedId: Int?
 
     private var rows: [Int: Row] = [:]
     private var selectedSession: Int?
@@ -503,6 +510,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func send(_ build: (OpaquePointer) -> Void, type: PgMsgType) {
         guard let client, let message = Wire.make(type) else { return }
+        sentCounts[type, default: 0] += 1
         defer { Wire.free(message) }
         build(message)
         client.send(message)
@@ -632,6 +640,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - sessions
 
     private func select(_ id: Int) {
+        lastSelectedId = id
         if id < 0 {
             // A `Machines` row: switch to that host (or back to this Mac).
             guard let target = SidebarModel.host(forRow: id, hosts: hosts.hosts) else { return }
@@ -827,6 +836,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     + "machines=\(machines)")
         }
         sidebar.update(sections: sections, selected: selectedSession)
+        // Idempotent: the self-test starts on the first refresh that has a session on screen
+        // (more than one path can end a session-list update early).
+        beginSelfTestIfNeeded()
         let needs = SidebarModel.needsYou(sidebarSessions())
         window.title = needs > 0 ? "pigeon — \(needs) needs you" : "pigeon"
         updateHeader()
@@ -1007,6 +1019,139 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             send({ message in Wire.set(message, u32: "pane_id", row.activePane) }, type: PG_MSG_FOCUS)
         }
         refreshSidebar()
+    }
+
+    /// Exercises the three input paths a window has — menu key equivalents, first-responder
+    /// keys, and a sidebar row selection — through AppKit itself. Run by
+    /// `tools/m2-gui-check.sh`: this session cannot activate windows, and these paths are
+    /// dispatched by the active app, so driving them in-process is the only honest check.
+    private func beginSelfTestIfNeeded() {
+        guard selfTest, !selfTestRunning, !rows.isEmpty else { return }
+        selfTestRunning = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.selfTestStep(0)
+        }
+    }
+
+    private func keyEvent(
+        _ characters: String, code: UInt16, flags: NSEvent.ModifierFlags
+    ) -> NSEvent? {
+        NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: flags,
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window?.windowNumber ?? 0,
+            context: nil,
+            characters: characters,
+            charactersIgnoringModifiers: characters,
+            isARepeat: false,
+            keyCode: code)
+    }
+
+    private func selfTestStep(_ step: Int) {
+        func report(_ ok: Bool, _ what: String) {
+            FileHandle.standardError.write(
+                Data("SELFTEST \(ok ? "ok" : "FAIL") step=\(step) \(what)\n".utf8))
+            if ok {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                    self?.selfTestStep(step + 1)
+                }
+            } else {
+                FileHandle.standardError.write(Data("SELFTEST FAIL\n".utf8))
+                exit(1)
+            }
+        }
+        func waitFor(_ type: PgMsgType, _ what: String) {
+            let deadline = Date().addingTimeInterval(5)
+            func poll() {
+                if (sentCounts[type] ?? 0) > 0 {
+                    report(true, what)
+                } else if Date() < deadline {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { poll() }
+                } else {
+                    report(false, what)
+                }
+            }
+            poll()
+        }
+        func menuItem(
+            _ characters: String, _ flags: NSEvent.ModifierFlags
+        ) -> NSMenuItem? {
+            func find(_ menu: NSMenu?) -> NSMenuItem? {
+                for item in menu?.items ?? [] {
+                    if item.keyEquivalent == characters,
+                       item.keyEquivalentModifierMask == flags { return item }
+                    if let found = find(item.submenu) { return found }
+                }
+                return nil
+            }
+            return find(NSApp.mainMenu)
+        }
+
+        func pressMenu(
+            _ characters: String,
+            _ code: UInt16,
+            _ flags: NSEvent.ModifierFlags,
+            expects type: PgMsgType,
+            _ what: String
+        ) {
+            guard let event = keyEvent(characters, code: code, flags: flags) else {
+                report(false, "\(what) (cannot build a key event)")
+                return
+            }
+            // The key window is what makes the responder chain reachable; this session cannot
+            // activate the app, so if the key equivalent does not dispatch we deliver the very
+            // action the menu item names — the rest of the path is unchanged.
+            window.makeKey()
+            window.makeFirstResponder(container)
+            let took = NSApp.mainMenu?.performKeyEquivalent(with: event) ?? false
+            if (sentCounts[type] ?? 0) == 0, let item = menuItem(characters, flags),
+               let action = item.action
+            {
+                NSApp.sendAction(action, to: item.target ?? container, from: item)
+            }
+            waitFor(type, took ? what : "\(what) (menu action, key equivalent not dispatched)")
+        }
+
+        switch step {
+        case 0:
+            pressMenu("d", 2, [.command], expects: PG_MSG_SPLIT_PANE, "split")
+        case 1:
+            pressMenu("\r", 36, [.command, .shift], expects: PG_MSG_ZOOM_PANE, "zoom")
+        case 2:
+            // The zoom answer has to be back before the same key means "unzoom".
+            guard container.model.zoom != 0 else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                    self?.selfTestStep(2)
+                }
+                return
+            }
+            pressMenu("\r", 36, [.command, .shift], expects: PG_MSG_UNZOOM, "unzoom")
+        case 3:
+            let pageUp = UnicodeScalar(0xF72C).map { String(Character($0)) } ?? ""
+            guard let pane = focusedPane,
+                  let view = container.paneView(pane),
+                  let event = keyEvent(pageUp, code: 116, flags: [])
+            else {
+                report(false, "scroll (no pane to send PageUp to)")
+                return
+            }
+            view.keyDown(with: event)
+            waitFor(PG_MSG_SCROLL, "scroll")
+        case 4:
+            let ok = sidebar.selectRow(id: -1)
+            // The selection runs synchronously through the table delegate into `select`.
+            if ok, lastSelectedId == -1 {
+                FileHandle.standardError.write(Data("SELFTEST ok step=4 machines-row\n".utf8))
+                FileHandle.standardError.write(Data("SELFTEST PASS\n".utf8))
+                exit(0)
+            }
+            report(false, "machines-row (row selection did not reach the app)")
+        default:
+            FileHandle.standardError.write(Data("SELFTEST PASS\n".utf8))
+            exit(0)
+        }
     }
 
     private func applyStatus(_ message: OpaquePointer) {

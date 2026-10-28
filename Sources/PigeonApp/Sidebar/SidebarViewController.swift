@@ -19,6 +19,20 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
     private var suppressSelection = false
 
     var onSelect: ((Int) -> Void)?
+
+    /// Selects the row for `id` through the table, so the delegate path the user's click
+    /// takes is the one being exercised (used by the app's self-test).
+    @discardableResult
+    func selectRow(id: Int) -> Bool {
+        guard let index = rows.firstIndex(where: {
+            if case let .session(session) = $0 { return session.id == id }
+            return false
+        }) else { return false }
+        suppressSelection = false
+        table.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
+        tableViewSelectionDidChange(Notification(name: NSTableView.selectionDidChangeNotification))
+        return true
+    }
     var onClose: ((Int) -> Void)?
     var onMarkRead: ((Int) -> Void)?
     var onRename: ((Int, String) -> Void)?

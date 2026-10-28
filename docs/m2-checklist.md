@@ -17,7 +17,7 @@ swift build && swift test                          # 103 executed，5 skipped（
 PIGEON_SSH_HOST=arch PIGEON_HOST_ARTIFACTS=$PWD/core/target/x86_64-unknown-linux-musl/release \
   swift test                                       # 103 passed，0 skipped，exit 0
 tools/vt-parity/run.sh                             # 8/8 ok（tmux 3.8，80x24）
-tools/m2-gui-check.sh                              # 3 PASS + 5 FAIL（窗口拿不到焦点）+ 1 条远端 PASS，见 §2
+tools/m2-gui-check.sh                              # 全部 PASS（1 条 OS 按键 SKIP），含自检与远端侧栏，见 §2
 ```
 
 新增覆盖：
@@ -38,42 +38,43 @@ tools/m2-gui-check.sh                              # 3 PASS + 5 FAIL（窗口拿
 | VT 对账 | `tools/vt-parity/`：8 条语料（basic/cursor/erase/wide/scroll-region/alt-screen/insert-delete/wrap）与 tmux `capture-pane` 逐行一致 |
 
 ## 2. GUI（真窗口，`tools/m2-gui-check.sh`）
-脚本起真宿主 + 真 `Pigeon.app`，用**宿主自己的日志**（`PIGEON_DEBUG` 打印收到的每条消息）当证据，
-所以不需要截图。真实输出（macOS）：
+
+脚本起真宿主 + 真 `Pigeon.app`，证据是宿主日志（`PIGEON_DEBUG` 打印收到的每条消息）与 `PIGEON_SELFTEST=1`
+的自检输出。真实输出（macOS，`PIGEON_SSH_HOST=arch`）：
 
 ```text
 PASS  window attached to the local host
 PASS  a second window showed up as clients=2 in size_state
 PASS  kill -9: window noticed the dead host and restarted one
-FAIL  the window never became frontmost; the keyboard steps cannot be trusted
-FAIL  Cmd-D did not produce split_pane
-FAIL  Cmd-Shift-Return did not produce zoom_pane
-FAIL  the second Cmd-Shift-Return did not produce unzoom
-FAIL  PageUp did not produce a scroll message
-scroll messages recorded in this run: 0
-m2-gui-check: FAILURES
-```
-
-按键那几条在本机**验不了，但不是权限问题**：脚本用 pid 找到进程后 `set frontmost … to true` 返回成功，紧接着
-`get frontmost` 仍是 `false`（前台一直是 Chrome），也就是这个自动化会话拿不到窗口焦点。脚本已经把按键修正为
-菜单里真正的 `⌘⇧↩`（key code 36；之前误用 `⌘⇧D` 是“上下分屏”），并会把 System Events 的报错原样打出来。
-在有正常桌面会话的终端里跑同一脚本，预期是 `Cmd-D → <- split_pane`、`Cmd-Shift-Return → <- zoom_pane` / `<- unzoom`、
-`PageUp → <- scroll`。
-
-带 `PIGEON_SSH_HOST=arch` 再跑一次，远端那条是真跑通的（不依赖焦点，读的是应用自己的侧栏日志）：
-
-```text
+SKIP  OS keystrokes: this session cannot activate any window (frontmost stays loginwindow)
+PASS  self-test: menu split/zoom/unzoom, PageUp scroll, Machines row selection
+      SELFTEST ok step=0 split
+      SELFTEST ok step=1 zoom
+      SELFTEST ok step=2 unzoom
+      SELFTEST ok step=3 scroll
+      SELFTEST ok step=4 machines-row
+      SELFTEST PASS
+PASS  the host really received <- split_pane from the window
+PASS  the host really received <- zoom_pane from the window
+PASS  the host really received <- unzoom from the window
+PASS  the host really received <- scroll from the window
 PASS  PIGEON_REMOTE=arch: sidebar lists This Mac offline + that host connected
-pigeon: sidebar … groups=Machines machines=This Mac=offline,arch=connected
-pigeon: sidebar … groups=Machines|arch / ~ machines=This Mac=offline,arch=connected
+m2-gui-check: no failures
 ```
 
-顺带记下一条实测：`CGEventPostToPid` 能送键盘（审计用 PageUp 验证过），但**鼠标点击在这个会话里送不进去**
-（把点击投到 pane 上没有任何 `<- focus`），所以“点 Machines 行切换”只能在正常桌面会话里手测；
-`tools/click-at-pid.swift` 留着给那种会话用。
+`PIGEON_SELFTEST=1` 让窗口自己跑一遍输入路径，跑完 `exit 0/1`：
+- 菜单：按 key equivalent 找菜单项（`⌘D`、`⌘⇧↩`），key window 拿得到等价键就直接派发；这个会话激活不了窗口时，
+  改派该菜单项自己声明的 action（目标仍是 `SplitContainerView`）——两条都真的走到 `send()`，宿主日志里能看到
+  `<- split_pane` / `<- zoom_pane` / `<- unzoom`。
+- 第一响应者：把 PageUp 事件交给当前 pane 的 `keyDown`，宿主收到 `<- scroll`。
+- 侧栏：用 `NSTableView.selectRowIndexes` 选 `Machines` 行，走的是 `tableViewSelectionDidChange → onSelect`，
+  应用侧记录 `select(-1)`（步 4）。
 
-- 两个窗口 = 两个 size owner：第二个实例连上后宿主日志里出现 `size_state … clients=2`。
-- `kill -9` 宿主：窗口日志出现 `host unreachable`，随后**自己把宿主拉起来**（socket 重新出现、`pgrep pigeon-host` 有进程）。
+为什么 OS 级按键是 SKIP：这个会话里任何应用都无法置前（`frontmost` 恒为 `loginwindow`，`NSRunningApplication.activate`
+返回 true 而 `isActive` 仍 false），而菜单快捷键由**活动应用**分发。`CGEventPostToPid` 能送键盘（审计侧用 PageUp 证实
+`<- scroll` 能到宿主），但送不了鼠标点击（把点击投到 pane 上没有任何 `<- focus`）。所以：
+- **按键 → 协议消息**这条链路上面的自检覆盖了；
+- **窗口服务把物理键盘/鼠标交给本窗口**这一步只能在正常桌面会话里验，`tools/click-at-pid.swift` 留给那种会话。
 
 ## 3. 这轮抓到的真 bug（都已修）
 | 问题 | 表现 | 位置 |
@@ -88,8 +89,8 @@ pigeon: sidebar … groups=Machines|arch / ~ machines=This Mac=offline,arch=conn
 
 | 项 | 自动化到哪一步 | 还缺什么 |
 |---|---|---|
-| ⌘D / ⌘⇧↩ / PageUp 的按键通路 | §2 的脚本与按键映射已修正；本机窗口拿不到焦点（`frontmost` 恒为 false） | 在正常桌面会话里跑 `tools/m2-gui-check.sh` |
-| 滚轮（真实触控板） | 像素累积与方向单测；`scroll` 消息宿主端 E2E | 触控板真的滚一下；`alt` 屏里（vim）确认键还归程序 |
+| 物理键盘/鼠标投递 | **按键 → 协议消息**已由 `PIGEON_SELFTEST` 覆盖（菜单 action、第一响应者 PageUp、侧栏选中），宿主日志确认收到 `split_pane`/`zoom_pane`/`unzoom`/`scroll` | 窗口服务把物理事件交给本窗口（本会话无法激活任何应用）；在正常桌面会话里跑 `tools/m2-gui-check.sh` 会走 OS 那一段并 PASS/FAIL |
+| 滚轮（真实触控板） | 像素累积/方向单测 + `scrollRequest` 的 alt 规则 + 自检里 PageUp 到 `scroll` | 触控板真的滚一下；`alt` 屏里（vim）确认键还归程序 |
 | `size_state` 在侧栏 age 位的显示 | 纯逻辑单测（`10m · 2× latest`） | 两个窗口下看一眼侧栏文案 |
 | 多客户端首次 attach 决定策略 | `locked`/`smallest` 用两个客户端验过 | 客户端目前不发送 `size_policy`（默认 `latest`），要在 UI 里选策略才有意义 |
 

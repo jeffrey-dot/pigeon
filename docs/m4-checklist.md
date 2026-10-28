@@ -35,6 +35,7 @@ cargo build --release --target x86_64-unknown-linux-musl \
 | `--stdio` | `stdio_mode_serves_a_client_and_keeps_the_socket_for_later`：stdio 客户端建的会话，socket 客户端也能看到（同一进程两种入口） |
 | `--proxy` | `proxy_mode_bridges_stdio_to_a_running_host`：经代理跑 `echo $((6*7))`，真宿主回 `42` |
 | `--socket-path` | 客户端问二进制要默认 socket 路径，`ssh -L` 不再复刻这条规则 |
+| 窗口自检（`PIGEON_SELFTEST=1`） | 应用自己驱动菜单 action（`⌘D`/`⌘⇧↩`）、第一响应者 PageUp、侧栏 `Machines` 行选中；宿主日志确认收到 `<- split_pane`/`<- zoom_pane`/`<- unzoom`/`<- scroll`，见 `docs/m2-checklist.md` §2 |
 | zoom（客户端） | `ZoomTests`（`⌘⇧↩` 的 keyEquivalent/modifier/selector、`zoomRequest` → `zoom_pane`/`unzoom`、`hides(pane:zoom:)`）——上一轮审计指出的“zoom UI 客户端没有测试”已补 |
 | 多主机侧栏 | 侧栏顶部 `Machines` 分组：`This Mac` + 每台已知主机各一行，行尾 `connected`/`connecting`/`offline`，点一行即切换（`SidebarModel.hostRows`/`host(forRow:hosts:)`，id 用负数与 session 区分）；`HostsStoreTests` 3 条（往返/损坏回退/默认路径）、`SidebarOrderingTests` 的 groupLabel、`Machines` 行与状态映射、跨主机分组；菜单 `Hosts` 带勾选、`Use This Mac`、`Connect to Host…`（⌘⇧O） |
 | 自动安装 | `HostInstallerTests` 10 条：平台↔产物匹配（绝不把 Linux x86_64 推向别的平台）、远端脚本先校验再 `mv`、缺 `sha256sum` 时退回 `shasum`、内容和哈希目录、二次连接不再上传、拒绝安装、未知平台、远端哈希不符；**1 条真 ssh E2E**（见下） |
@@ -116,7 +117,7 @@ testRealSshDropKeepsTheRemoteSessionAndItsScreen ... passed (40.0s)
 |---|---|---|
 | GUI 侧栏的多主机分组 | 纯逻辑单测（`groupLabel` + 分组拆分） | 真开 `PIGEON_REMOTE=arch pigeon-product` 看分组与截图；本轮没有 GUI 手测，checklist 里没有截图 |
 | 连接状态展示 | 退化时窗口标题 `pigeon — arch (not persistent)` + 头部徽标 `Not persistent`；A/B 无额外标识 | 侧栏行上区分“本机 / 远端 / 已断”的视觉 |
-| GUI 多主机与重连的*观感* | `PIGEON_REMOTE=arch` 的侧栏状态已由脚本验证（`machines=This Mac=offline,arch=connected`、`groups=Machines\|arch / ~`）；按键类 GUI 检查本机 FAIL（窗口拿不到焦点），点 `Machines` 行切换只能在正常桌面会话手测（pid 鼠标事件在这个会话送不进去） | 正常桌面会话里跑 `tools/m2-gui-check.sh`，点一次主机行 |
+| GUI 多主机与重连的*观感* | `PIGEON_REMOTE=arch` 的侧栏状态由脚本验证（`machines=This Mac=offline,arch=connected`、`groups=Machines\|arch / ~`）；`PIGEON_SELFTEST` 步 4 用 `NSTableView.selectRowIndexes` 选中 `Machines` 行，走的是真实 delegate → `onSelect` → 应用侧 `select(-1)` | 物理鼠标点击本身（本会话投递不进窗口；`tools/click-at-pid.swift` 留给正常桌面会话） |
 | 退化模式（C）的窗口尺寸 | 本地 VT 会 resize | 远端 pty 尺寸仍是 ssh 分配的 80×24（客户端没有本地 pty 去转发 `TIOCSWINSZ`），见 plan §11 |
 | C 模式的 xctest 渲染断言 | 本地 VT 两条单测 + 手工 ssh 记录 | xctest 里把 ssh 的 pty 管道喂给 `LocalSession` 时读线程 25s 拿不到数据（本地子进程正常），原因未定位；不愿为它造假 |
 | 真的关掉 `AllowStreamLocalForwarding` 的主机 | 用拒绝 `--proxy` 模拟 A 失败 | 一台能改 sshd 配置的主机 |

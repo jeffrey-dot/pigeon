@@ -110,32 +110,51 @@ HOST_PID=$(pgrep -f 'pigeon-host' | head -1)
 # (where PIGEON_DEBUG writes). Everything from here on is read from there.
 LOG="$APP_LOG"
 
-# --- two: real keystrokes: split, zoom, unzoom ------------------------------------------
-# The menu's zoom item is Cmd-Shift-Return (key code 36), not Cmd-Shift-D: that one is
-# "Split Top/Bottom" and would never produce a zoom_pane.
+# --- two: real OS keystrokes. Only possible when the session can activate a window at all;
+# when it cannot, the self-test below covers the same code paths in-process.
 if frontmost; then
     pass "the window came to the front"
+    keycode 2 "command down" && wait_for 10 grep -q "<- split_pane" "$LOG" &&
+        pass "Cmd-D reached the host as split_pane" ||
+        bad "Cmd-D did not produce split_pane"
+    keycode 36 "command down, shift down" && wait_for 10 grep -q "<- zoom_pane" "$LOG" &&
+        pass "Cmd-Shift-Return reached the host as zoom_pane" ||
+        bad "Cmd-Shift-Return did not produce zoom_pane"
+    keycode 36 "command down, shift down" && wait_for 10 grep -q "<- unzoom" "$LOG" &&
+        pass "Cmd-Shift-Return again sent unzoom" ||
+        bad "the second Cmd-Shift-Return did not produce unzoom"
+    keycode 116 "" && wait_for 10 grep -q "<- scroll" "$LOG" &&
+        pass "PageUp reached the host as scroll" ||
+        bad "PageUp did not produce a scroll message"
 else
-    bad "the window never became frontmost; the keyboard steps cannot be trusted"
+    skip "OS keystrokes: this session cannot activate any window (frontmost stays loginwindow)"
 fi
-keycode 2 "command down" && wait_for 10 grep -q "<- split_pane" "$LOG" &&
-    pass "Cmd-D reached the host as split_pane" ||
-    bad "Cmd-D did not produce split_pane"
-keycode 36 "command down, shift down" && wait_for 10 grep -q "<- zoom_pane" "$LOG" &&
-    pass "Cmd-Shift-Return reached the host as zoom_pane" ||
-    bad "Cmd-Shift-Return did not produce zoom_pane"
-keycode 36 "command down, shift down" && wait_for 10 grep -q "<- unzoom" "$LOG" &&
-    pass "Cmd-Shift-Return again sent unzoom" ||
-    bad "the second Cmd-Shift-Return did not produce unzoom"
 
-# --- three: PageUp asks the host to look back ------------------------------------------
-keycode 116 "" && wait_for 10 grep -q "<- scroll" "$LOG" &&
-    pass "PageUp reached the host as scroll" ||
-    bad "PageUp did not produce a scroll message"
-keycode 121 "" || true   # PageDown
-note "scroll messages recorded in this run: $(grep -c '<- scroll' "$LOG")"
+# --- four: the app drives its own menu / keyboard / sidebar paths ----------------------
+# This session cannot activate windows, and key equivalents are dispatched by the active
+# app, so the app has a self-test mode that runs the same paths in-process.
+kill "$APP_PID" 2>/dev/null
+wait "$APP_PID" 2>/dev/null
+PIGEON_DEBUG=1 PIGEON_SELFTEST=1 "$APP" >"$R/selftest.log" 2>&1 &
+SELFTEST_PID=$!
+if wait_for 40 grep -q "^SELFTEST PASS" "$R/selftest.log"; then
+    pass "self-test: menu split/zoom/unzoom, PageUp scroll, Machines row selection"
+    grep "^SELFTEST" "$R/selftest.log" | sed 's/^/      /'
+else
+    bad "self-test did not pass"
+    grep "^SELFTEST" "$R/selftest.log" | tail -6
+fi
+kill "$SELFTEST_PID" 2>/dev/null
+wait "$SELFTEST_PID" 2>/dev/null
+for step in split_pane zoom_pane unzoom scroll; do
+    if grep -q "<- $step" "$LOG" 2>/dev/null || grep -q "<- $step" "$R/selftest.log" 2>/dev/null; then
+        pass "the host really received <- $step from the window"
+    else
+        bad "the host never saw <- $step"
+    fi
+done
 
-# --- four: `PIGEON_REMOTE` must put the host in the `Machines` list (sidebar state, no
+# --- five: `PIGEON_REMOTE` must put the host in the `Machines` list (sidebar state, no
 # focus needed: the app logs the groups and the machine rows it built) -------------------
 kill "$APP_PID" 2>/dev/null
 wait "$APP_PID" 2>/dev/null
