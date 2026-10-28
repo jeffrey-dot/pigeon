@@ -155,6 +155,21 @@ final class SidebarOrderingTests: XCTestCase {
         XCTAssertEqual(SidebarModel.ageText(for: quiet, now: now), "10m")
     }
 
+    func testAgeNamesTheSizeOwnerOnlyWhenMoreThanOneWindowWatches() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        var shared = row(1, .working)
+        shared.reported = true
+        shared.lastSeen = now.addingTimeInterval(-600)
+        // One window: the age alone, exactly as before.
+        XCTAssertEqual(SidebarModel.ageText(for: shared, now: now), "10m")
+        shared.clients = 2
+        shared.sizeSource = "latest"
+        XCTAssertEqual(SidebarModel.ageText(for: shared, now: now), "10m · 2× latest")
+        // Nothing reported yet: the size owner is still worth showing.
+        shared.reported = false
+        XCTAssertEqual(SidebarModel.ageText(for: shared, now: now), "2× latest")
+    }
+
     func testStatusSymbolsCoverEveryStateWithNoSymbolForIdle() {
         let symbols = SidebarSession.Status.allCases.map { status in
             SidebarModel.statusSymbol(for: row(1, status))

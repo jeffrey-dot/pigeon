@@ -439,6 +439,174 @@ fn resize_reaches_the_shell() {
     });
 }
 
+/// Attaches `client` to `pane`, optionally asking for a size policy.
+fn attach(client: &mut Client, pane: u32, policy: Option<&str>) {
+    client.send(&Message::Attach {
+        id: 2,
+        pane_id: pane,
+        size_policy: policy.map(str::to_owned),
+    });
+}
+
+/// Creates a session and attaches it with the given policy (the first attach decides it).
+fn attach_first_with_policy(client: &mut Client, policy: Option<&str>) -> u32 {
+    client.send(&Message::NewSession {
+        id: 1,
+        cwd: None,
+        shell: None,
+        env: None,
+    });
+    let Message::Created { pane_id, .. } =
+        client.wait_for(|m| matches!(m, Message::Created { .. }))
+    else {
+        unreachable!()
+    };
+    attach(client, pane_id, policy);
+    let _ = snapshot(client);
+    pane_id
+}
+
+/// Waits for a `size_state` for `pane` that says exactly this. Announcements from
+/// earlier attaches are skipped, so the assertion is about the resize under test.
+fn expect_size_state(client: &mut Client, pane: u32, want: (u16, u16, &str, u8)) {
+    client.wait_for(|m| match m {
+        Message::SizeState {
+            pane_id,
+            cols,
+            rows,
+            source,
+            clients,
+        } => *pane_id == pane && (*cols, *rows, source.as_str(), *clients) == want,
+        _ => false,
+    });
+}
+
+/// `stty size` inside the pane: what the PTY actually got, not what was asked for.
+fn pty_size(client: &mut Client, pane: u32) -> String {
+    client.send(&Message::Keys {
+        pane_id: pane,
+        bytes: b"stty size\r".to_vec(),
+    });
+    let signal = client.wait_for(|message| match message {
+        Message::Snapshot { .. } => screen_text(message).lines().any(|line| {
+            let line = line.trim();
+            line.split_once(' ').is_some_and(|(rows, cols)| {
+                rows.parse::<u16>().is_ok() && cols.parse::<u16>().is_ok()
+            })
+        }),
+        _ => false,
+    });
+    screen_text(&signal)
+        .lines()
+        .map(str::trim)
+        .rev()
+        .find(|line| {
+            line.split_once(' ').is_some_and(|(rows, cols)| {
+                rows.parse::<u16>().is_ok() && cols.parse::<u16>().is_ok()
+            })
+        })
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// Protocol §6 `smallest`: two windows of different sizes get the smaller box, and both
+/// are told who won and how many clients are watching.
+#[test]
+fn size_policy_smallest_shrinks_to_the_smallest_client() {
+    let _serial = one_at_a_time();
+    let host = start_host();
+    let mut first = Client::connect(&host.socket);
+    hello(&mut first);
+    let pane = attach_first_with_policy(&mut first, Some("smallest"));
+
+    first.send(&Message::ResizePane {
+        pane_id: pane,
+        cols: 100,
+        rows: 30,
+    });
+    expect_size_state(&mut first, pane, (100, 30, "smallest", 1));
+
+    let mut second = Client::connect(&host.socket);
+    hello(&mut second);
+    attach(&mut second, pane, None);
+    let _ = snapshot(&mut second);
+    second.send(&Message::ResizePane {
+        pane_id: pane,
+        cols: 60,
+        rows: 20,
+    });
+
+    expect_size_state(&mut first, pane, (60, 20, "smallest", 2));
+    expect_size_state(&mut second, pane, (60, 20, "smallest", 2));
+    assert_eq!(pty_size(&mut first, pane), "20 60");
+}
+
+/// Protocol §6 `latest`: whoever typed last owns the size.
+#[test]
+fn size_policy_latest_gives_the_box_back_to_the_typing_client() {
+    let _serial = one_at_a_time();
+    let host = start_host();
+    let mut first = Client::connect(&host.socket);
+    hello(&mut first);
+    let pane = attach_first_with_policy(&mut first, Some("latest"));
+
+    first.send(&Message::ResizePane {
+        pane_id: pane,
+        cols: 100,
+        rows: 30,
+    });
+    expect_size_state(&mut first, pane, (100, 30, "latest", 1));
+
+    let mut second = Client::connect(&host.socket);
+    hello(&mut second);
+    attach(&mut second, pane, None);
+    let _ = snapshot(&mut second);
+    second.send(&Message::ResizePane {
+        pane_id: pane,
+        cols: 60,
+        rows: 20,
+    });
+    expect_size_state(&mut first, pane, (60, 20, "latest", 2));
+
+    // Typing in the first window takes the size back.
+    first.send(&Message::Keys {
+        pane_id: pane,
+        bytes: b"\r".to_vec(),
+    });
+    expect_size_state(&mut first, pane, (100, 30, "latest", 2));
+    assert_eq!(pty_size(&mut first, pane), "30 100");
+}
+
+/// Protocol §6 `locked`: the second client's resize is reported back as ignored.
+#[test]
+fn size_policy_locked_ignores_the_newcomer() {
+    let _serial = one_at_a_time();
+    let host = start_host();
+    let mut first = Client::connect(&host.socket);
+    hello(&mut first);
+    let pane = attach_first_with_policy(&mut first, Some("locked"));
+
+    first.send(&Message::ResizePane {
+        pane_id: pane,
+        cols: 100,
+        rows: 30,
+    });
+    expect_size_state(&mut first, pane, (100, 30, "locked", 1));
+
+    let mut second = Client::connect(&host.socket);
+    hello(&mut second);
+    // A later `attach` only confirms the policy the first one set.
+    attach(&mut second, pane, Some("smallest"));
+    let _ = snapshot(&mut second);
+    second.send(&Message::ResizePane {
+        pane_id: pane,
+        cols: 60,
+        rows: 20,
+    });
+    expect_size_state(&mut second, pane, (100, 30, "locked", 2));
+    assert_eq!(pty_size(&mut first, pane), "30 100");
+}
+
 /// Writes an executable shell script so a pane can run a program with arguments.
 fn script(body: &str) -> std::path::PathBuf {
     use std::os::unix::fs::PermissionsExt;

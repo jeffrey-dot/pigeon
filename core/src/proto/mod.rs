@@ -288,6 +288,15 @@ pub enum Message {
         cols: u16,
         rows: u16,
     },
+    /// Broadcast after every size change: who won the size policy and how many
+    /// clients are watching (protocol §6).
+    SizeState {
+        pane_id: u32,
+        cols: u16,
+        rows: u16,
+        source: String,
+        clients: u8,
+    },
     PaneExited {
         pane_id: u32,
         code: i32,
@@ -343,6 +352,7 @@ impl Message {
             Self::Appearance { .. } => "appearance",
             Self::Keys { .. } => "keys",
             Self::ResizePane { .. } => "resize_pane",
+            Self::SizeState { .. } => "size_state",
             Self::PaneExited { .. } => "pane_exited",
             Self::Status { .. } => "status",
             Self::AckStatus { .. } => "ack_status",
@@ -435,6 +445,7 @@ fn is_known(tag: &str) -> bool {
             | "appearance"
             | "keys"
             | "resize_pane"
+            | "size_state"
             | "pane_exited"
             | "status"
             | "ack_status"
@@ -620,6 +631,13 @@ mod tests {
                 pane_id: 1,
                 cols: 120,
                 rows: 40,
+            },
+            Message::SizeState {
+                pane_id: 1,
+                cols: 120,
+                rows: 40,
+                source: "latest".into(),
+                clients: 2,
             },
             Message::PaneExited {
                 pane_id: 1,

@@ -50,6 +50,7 @@ pub enum PgMsgType {
     PG_MSG_STATUS = 22,
     PG_MSG_ACK_STATUS = 23,
     PG_MSG_APPEARANCE = 24,
+    PG_MSG_SIZE_STATE = 25,
 }
 
 /// Wire name ↔ enum. Kept in one place so the two can never drift.
@@ -78,6 +79,7 @@ const NAMES: &[(PgMsgType, &str)] = &[
     (PgMsgType::PG_MSG_STATUS, "status"),
     (PgMsgType::PG_MSG_ACK_STATUS, "ack_status"),
     (PgMsgType::PG_MSG_APPEARANCE, "appearance"),
+    (PgMsgType::PG_MSG_SIZE_STATE, "size_state"),
 ];
 
 fn name_of(msg_type: PgMsgType) -> Option<&'static str> {

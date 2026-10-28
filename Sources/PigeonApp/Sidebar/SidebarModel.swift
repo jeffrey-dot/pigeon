@@ -27,6 +27,10 @@ public struct SidebarSession: Equatable {
     public var lastSeen: Date
     /// Whether an OSC 7501 record ever arrived; without one there is no state to show.
     public var reported: Bool
+    /// How the host picked this pane's size (`latest`/`smallest`/`locked`), and how many
+    /// windows are watching it (protocol §6). One client means there is nothing to explain.
+    public var sizeSource: String
+    public var clients: Int
 
     public init(
         id: Int,
@@ -37,7 +41,9 @@ public struct SidebarSession: Equatable {
         app: String = "shell",
         cwd: String = "",
         lastSeen: Date = Date(),
-        reported: Bool = false
+        reported: Bool = false,
+        sizeSource: String = "",
+        clients: Int = 1
     ) {
         self.id = id
         self.title = title
@@ -48,6 +54,8 @@ public struct SidebarSession: Equatable {
         self.cwd = cwd
         self.lastSeen = lastSeen
         self.reported = reported
+        self.sizeSource = sizeSource
+        self.clients = clients
     }
 }
 
@@ -163,8 +171,12 @@ public enum SidebarModel {
 
     /// The row's trailing age; empty when the pane never reported, because the only
     /// date we have is when the row appeared — not when the program last spoke.
+    /// With more than one window attached it also names who owns the size (protocol §6).
     public static func ageText(for session: SidebarSession, now: Date = Date()) -> String {
-        session.reported ? relativeTime(session.lastSeen, now: now) : ""
+        let age = session.reported ? relativeTime(session.lastSeen, now: now) : ""
+        guard session.clients > 1 else { return age }
+        let owner = "\(session.clients)× \(session.sizeSource)"
+        return age.isEmpty ? owner : "\(age) · \(owner)"
     }
 
     /// What a pane is running, for the row's leading circle icon (harp draws a per-kind icon;

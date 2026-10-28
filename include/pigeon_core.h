@@ -178,6 +178,7 @@ typedef enum PgMsgType {
     PG_MSG_STATUS = 22,
     PG_MSG_ACK_STATUS = 23,
     PG_MSG_APPEARANCE = 24,
+    PG_MSG_SIZE_STATE = 25,
 } PgMsgType;
 
 typedef enum PgStatusKind {

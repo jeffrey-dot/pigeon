@@ -34,12 +34,49 @@ const DEFAULT_ROWS: u16 = 24;
 
 /// Pane ids are unique for the whole process, not per session.
 static NEXT_PANE: AtomicU32 = AtomicU32::new(1);
+/// Connection ids the host hands out in `hello_ack` (protocol §3.1).
+static NEXT_CLIENT: AtomicU32 = AtomicU32::new(1);
 
 /// Metadata a pane reports about itself (program-driven, not guessed).
 #[derive(Clone, Default)]
 struct PaneMeta {
     cwd: Option<String>,
     title: Option<String>,
+}
+
+/// How a session's box is picked when more than one client is attached (protocol §6).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SizePolicy {
+    /// Whoever last focused, typed or resized owns the size.
+    Latest,
+    /// The smallest box any attached client asked for, so nothing is cut off.
+    Smallest,
+    /// Only the client that first attached may resize.
+    Locked,
+}
+
+impl SizePolicy {
+    fn from_name(name: Option<&str>) -> Self {
+        match name {
+            Some("smallest") => Self::Smallest,
+            Some("locked") => Self::Locked,
+            _ => Self::Latest,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Latest => "latest",
+            Self::Smallest => "smallest",
+            Self::Locked => "locked",
+        }
+    }
+}
+
+/// The box one attached client needs for its own grid.
+struct Subscriber {
+    cols: u16,
+    rows: u16,
 }
 
 /// One session: one layout tree plus the panes its leaves point at.
@@ -50,9 +87,16 @@ struct Session {
     shell: String,
     /// cwd the session was created with (OSC 7 overrides it per pane).
     cwd: String,
-    /// The session box in cells, derived from whichever pane last reported.
+    /// The session box in cells, chosen by the size policy below.
     cols: u16,
     rows: u16,
+    policy: SizePolicy,
+    /// The client that decided `policy`; the only one `locked` listens to.
+    owner: u32,
+    /// The client `latest` currently honours.
+    active: u32,
+    /// Every attached client and the box it asked for.
+    clients: HashMap<u32, Subscriber>,
 }
 
 type Meta = Arc<Mutex<HashMap<u32, PaneMeta>>>;
@@ -73,6 +117,11 @@ enum Event {
         code: i32,
     },
     Layout {
+        session_id: u32,
+        message: Message,
+    },
+    /// A pane's size changed: who won the policy and how many clients watch (protocol §6).
+    SizeState {
         session_id: u32,
         message: Message,
     },
@@ -177,6 +226,8 @@ async fn run() -> Result<(), String> {
 
 #[derive(Default)]
 struct ClientState {
+    /// Connection id this host assigned in `hello_ack`, unique per connection.
+    client_id: u32,
     greeted: bool,
     /// Panes this connection gets live output for → negotiated `delta`.
     watched: HashMap<u32, bool>,
@@ -194,10 +245,34 @@ async fn handle_client(
     palette: PaletteSlot,
     shell: String,
 ) -> Result<(), String> {
+    let client_id = NEXT_CLIENT.fetch_add(1, Ordering::Relaxed);
+    let result = client_loop(
+        stream, &sessions, &events, &meta, &palette, &shell, client_id,
+    )
+    .await;
+    // A closed window must stop counting towards the session's size policy, or
+    // `smallest` would stay pinned to a box nobody can see any more.
+    forget_client(&sessions, &events, client_id).await;
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn client_loop(
+    stream: UnixStream,
+    sessions: &Sessions,
+    events: &broadcast::Sender<Event>,
+    meta: &Meta,
+    palette: &PaletteSlot,
+    shell: &str,
+    client_id: u32,
+) -> Result<(), String> {
     let (mut reader, mut writer) = stream.into_split();
     let mut inbox = Vec::new();
     let mut subscribed = events.subscribe();
-    let mut state = ClientState::default();
+    let mut state = ClientState {
+        client_id,
+        ..Default::default()
+    };
 
     loop {
         tokio::select! {
@@ -214,7 +289,7 @@ async fn handle_client(
                                 eprintln!("pigeon-host: <- {}", message.name());
                             }
                             if let Some(reply) =
-                                dispatch(message, &sessions, &events, &meta, &palette, &shell, &mut state)
+                                dispatch(message, sessions, events, meta, palette, shell, &mut state)
                                     .await
                             {
                                 let handshake = matches!(reply, Message::HelloAck { .. });
@@ -224,7 +299,7 @@ async fn handle_client(
                                 };
                                 send(&mut writer, &reply).await?;
                                 if let Some(pane_id) = attached_pane {
-                                    if let Some(status) = latest_status(&sessions, pane_id).await {
+                                    if let Some(status) = latest_status(sessions, pane_id).await {
                                         send(&mut writer, &status).await?;
                                     }
                                 }
@@ -232,11 +307,11 @@ async fn handle_client(
                                 if handshake {
                                     if let Some(list) = dispatch(
                                         Message::Sessions { items: Vec::new() },
-                                        &sessions,
-                                        &events,
-                                        &meta,
-                                        &palette,
-                                        &shell,
+                                        sessions,
+                                        events,
+                                        meta,
+                                        palette,
+                                        shell,
                                         &mut state,
                                     )
                                     .await
@@ -270,6 +345,11 @@ async fn handle_client(
                             send(&mut writer, &message).await?;
                         }
                     }
+                    Event::SizeState { session_id, message } => {
+                        if state.session == Some(session_id) {
+                            send(&mut writer, &message).await?;
+                        }
+                    }
                     Event::Exited { pane_id, code } => {
                         if state.watched.contains_key(&pane_id) {
                             send(&mut writer, &Message::PaneExited { pane_id, code }).await?;
@@ -283,11 +363,11 @@ async fn handle_client(
                     Event::SessionsChanged => {
                         if let Some(list) = dispatch(
                             Message::Sessions { items: Vec::new() },
-                            &sessions,
-                            &events,
-                            &meta,
-                            &palette,
-                            &shell,
+                            sessions,
+                            events,
+                            meta,
+                            palette,
+                            shell,
                             &mut state,
                         )
                         .await
@@ -301,7 +381,7 @@ async fn handle_client(
                         };
                         if delta_ok {
                             send(&mut writer, &message).await?;
-                        } else if let Some(snapshot) = snapshot_of(&sessions, pane_id, false).await {
+                        } else if let Some(snapshot) = snapshot_of(sessions, pane_id, false).await {
                             send(&mut writer, &snapshot).await?;
                         }
                     }
@@ -378,11 +458,18 @@ fn to_proto_tree(node: LayoutNode) -> Node {
     }
 }
 
+/// One pane's box in cells: its share of the session box, clamped to the minimums the
+/// VM needs (a 1×0 grid is not a terminal).
+fn pane_size(session: &Session, rect: &pigeon_core::layout::Rect) -> (u16, u16) {
+    let cols = ((rect.w * f32::from(session.cols)).round() as u16).max(2);
+    let rows = ((rect.h * f32::from(session.rows)).round() as u16).max(1);
+    (cols, rows)
+}
+
 /// Re-fits every pane to its rect and tells clients what the tree looks like.
 fn apply_layout(session_id: u32, session: &mut Session, events: &broadcast::Sender<Event>) {
     for (pane_id, rect) in session.layout.rects() {
-        let cols = ((rect.w * f32::from(session.cols)).round() as u16).max(2);
-        let rows = ((rect.h * f32::from(session.rows)).round() as u16).max(1);
+        let (cols, rows) = pane_size(session, &rect);
         if let Some(sender) = session.panes.get(&pane_id) {
             // try_send: never block while holding the sessions lock.
             let _ = sender.try_send(Cmd::Resize(cols, rows));
@@ -392,6 +479,97 @@ fn apply_layout(session_id: u32, session: &mut Session, events: &broadcast::Send
         session_id,
         message: layout_message(session_id, session),
     });
+    broadcast_size(session_id, session, events);
+}
+
+/// Protocol §6: every size change is announced with its `source` and the number of
+/// clients, so each window can show who is in charge.
+fn broadcast_size(session_id: u32, session: &Session, events: &broadcast::Sender<Event>) {
+    let clients = session.clients.len().min(usize::from(u8::MAX)) as u8;
+    for (pane_id, rect) in session.layout.rects() {
+        let (cols, rows) = pane_size(session, &rect);
+        let _ = events.send(Event::SizeState {
+            session_id,
+            message: Message::SizeState {
+                pane_id,
+                cols,
+                rows,
+                source: session.policy.as_str().to_owned(),
+                clients,
+            },
+        });
+    }
+}
+
+/// The session box the current policy asks for, given what each client last reported.
+fn negotiated_box(session: &Session) -> (u16, u16) {
+    match session.policy {
+        SizePolicy::Smallest => session
+            .clients
+            .values()
+            .fold((u16::MAX, u16::MAX), |(cols, rows), client| {
+                (cols.min(client.cols), rows.min(client.rows))
+            }),
+        // `locked` only lets the owner report, and `active` is pinned to it on attach.
+        SizePolicy::Latest | SizePolicy::Locked => session
+            .clients
+            .get(&session.active)
+            .map(|client| (client.cols, client.rows))
+            .unwrap_or((session.cols, session.rows)),
+    }
+}
+
+fn box_changed(session: &mut Session) -> bool {
+    let (cols, rows) = negotiated_box(session);
+    let changed = (cols, rows) != (session.cols, session.rows) && cols != u16::MAX;
+    if changed {
+        session.cols = cols;
+        session.rows = rows;
+    }
+    changed
+}
+
+/// Protocol §6 `latest`: whoever last focused, typed or resized owns the size.
+async fn note_activity(
+    sessions: &Sessions,
+    events: &broadcast::Sender<Event>,
+    client_id: u32,
+    pane_id: u32,
+) {
+    let mut map = sessions.lock().await;
+    let Some(session_id) = session_of(&map, pane_id) else {
+        return;
+    };
+    let Some(session) = map.get_mut(&session_id) else {
+        return;
+    };
+    if session.policy != SizePolicy::Latest
+        || session.active == client_id
+        || !session.clients.contains_key(&client_id)
+    {
+        return;
+    }
+    session.active = client_id;
+    if box_changed(session) {
+        apply_layout(session_id, session, events);
+    }
+}
+
+/// Drops a closed connection from every session and re-fits whatever the remaining
+/// clients ask for.
+async fn forget_client(sessions: &Sessions, events: &broadcast::Sender<Event>, client_id: u32) {
+    let mut map = sessions.lock().await;
+    for (session_id, session) in map.iter_mut() {
+        if session.clients.remove(&client_id).is_none() {
+            continue;
+        }
+        if session.active == client_id {
+            session.active = session.clients.keys().copied().min().unwrap_or(0);
+        }
+        if box_changed(session) {
+            apply_layout(*session_id, session, events);
+        }
+    }
 }
 
 async fn dispatch(
@@ -434,7 +612,7 @@ async fn dispatch(
                 server: format!("pigeon-host {}", env!("CARGO_PKG_VERSION")),
                 features: offered,
                 host_id: hostname(),
-                client_id: 1,
+                client_id: state.client_id,
             })
         }
         Message::Sessions { .. } => {
@@ -517,6 +695,10 @@ async fn dispatch(
                 cwd: launch_cwd,
                 cols: DEFAULT_COLS,
                 rows: DEFAULT_ROWS,
+                policy: SizePolicy::Latest,
+                owner: 0,
+                active: 0,
+                clients: HashMap::new(),
             };
             sessions.lock().await.insert(pane_id, session);
             Some(Message::Created {
@@ -525,7 +707,11 @@ async fn dispatch(
                 pane_id,
             })
         }
-        Message::Attach { id, pane_id, .. } => {
+        Message::Attach {
+            id,
+            pane_id,
+            size_policy,
+        } => {
             let session_id = {
                 let map = sessions.lock().await;
                 session_of(&map, pane_id)
@@ -546,16 +732,31 @@ async fn dispatch(
             };
             state.watched.insert(pane_id, state.delta_ok);
             state.session = Some(session_id);
-            // The tree follows the snapshot, so a reconnecting window redraws
-            // the same split geometry.
-            {
-                let map = sessions.lock().await;
-                if let Some(session) = map.get(&session_id) {
-                    let _ = events.send(Event::Layout {
-                        session_id,
-                        message: layout_message(session_id, session),
-                    });
+            // Protocol §6: the first `attach` decides the policy; later ones merely join.
+            let mut map = sessions.lock().await;
+            if let Some(session) = map.get_mut(&session_id) {
+                if session.clients.is_empty() {
+                    session.policy = SizePolicy::from_name(size_policy.as_deref());
+                    session.owner = state.client_id;
+                    session.active = state.client_id;
                 }
+                session.clients.insert(
+                    state.client_id,
+                    Subscriber {
+                        cols: session.cols,
+                        rows: session.rows,
+                    },
+                );
+                if session.policy == SizePolicy::Locked {
+                    session.active = session.owner;
+                }
+                // The tree follows the snapshot, so a reconnecting window redraws
+                // the same split geometry and learns who owns the size.
+                let _ = events.send(Event::Layout {
+                    session_id,
+                    message: layout_message(session_id, session),
+                });
+                broadcast_size(session_id, session, events);
             }
             Some(snapshot)
         }
@@ -650,6 +851,13 @@ async fn dispatch(
             let session_id = session_of(&map, pane_id)?;
             let session = map.get_mut(&session_id)?;
             session.layout.focus(pane_id);
+            // `latest`: focusing is what makes a window the one that owns the size.
+            if session.policy != SizePolicy::Locked
+                && session.clients.contains_key(&state.client_id)
+            {
+                session.active = state.client_id;
+                box_changed(session);
+            }
             apply_layout(session_id, session, events);
             None
         }
@@ -657,6 +865,7 @@ async fn dispatch(
             if let Some(sender) = sender_of(sessions, pane_id).await {
                 let _ = sender.send(Cmd::Input(bytes)).await;
             }
+            note_activity(sessions, events, state.client_id, pane_id).await;
             None
         }
         Message::ResizePane {
@@ -665,31 +874,46 @@ async fn dispatch(
             rows,
         } => {
             let mut map = sessions.lock().await;
-            if let Some(session_id) = session_of(&map, pane_id) {
-                if let Some(session) = map.get_mut(&session_id) {
-                    // Derive the session box from the pane's own rect.
-                    if let Some((_, rect)) = session
-                        .layout
-                        .rects()
-                        .into_iter()
-                        .find(|(id, _)| *id == pane_id)
-                    {
-                        if rect.w > 0.0 {
-                            session.cols = ((f32::from(cols) / rect.w).round() as u16).max(2);
-                        }
-                        if rect.h > 0.0 {
-                            session.rows = ((f32::from(rows) / rect.h).round() as u16).max(1);
-                        }
-                    }
+            let session_id = session_of(&map, pane_id)?;
+            let client_id = state.client_id;
+            let session = map.get_mut(&session_id)?;
+            // The box this client's grid implies for the whole session.
+            let rect = session
+                .layout
+                .rects()
+                .into_iter()
+                .find(|(id, _)| *id == pane_id)
+                .map(|(_, rect)| rect);
+            let rect = rect?;
+            let (cols, rows) = (
+                if rect.w > 0.0 {
+                    ((f32::from(cols) / rect.w).round() as u16).max(2)
+                } else {
+                    session.cols
+                },
+                if rect.h > 0.0 {
+                    ((f32::from(rows) / rect.h).round() as u16).max(1)
+                } else {
+                    session.rows
+                },
+            );
+            if let Some(subscriber) = session.clients.get_mut(&client_id) {
+                subscriber.cols = cols;
+                subscriber.rows = rows;
+            }
+            // `locked`: the client that set the policy is the only one that may resize.
+            if session.policy == SizePolicy::Locked {
+                if client_id == session.owner {
+                    session.active = client_id;
                 }
-                if let Some(sender) = map
-                    .get(&session_id)
-                    .and_then(|session| session.panes.get(&pane_id))
-                    .cloned()
-                {
-                    drop(map);
-                    let _ = sender.send(Cmd::Resize(cols, rows)).await;
-                }
+            } else {
+                session.active = client_id;
+            }
+            if box_changed(session) {
+                apply_layout(session_id, session, events);
+            } else {
+                // The request stands or was overruled either way: say which (protocol §3.2).
+                broadcast_size(session_id, session, events);
             }
             None
         }

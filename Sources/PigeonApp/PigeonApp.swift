@@ -15,6 +15,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var seq: UInt32
         var unread: Int
         var lastSeen: Date
+        /// Who owns the size when more than one window watches this session (protocol §6).
+        var sizeSource: String = ""
+        var clients: Int = 1
 
         var group: String {
             guard !cwd.isEmpty else { return "~" }
@@ -67,6 +70,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - window
 
     private func buildWindow() {
+        // No hardcoded origin: the first launch centres on screen, later launches restore the
+        // frame the user left behind (`setFrameAutosaveName`).
         let frame = NSRect(x: 0, y: 0, width: 1100, height: 600)
         window = NSWindow(
             contentRect: frame,
@@ -157,6 +162,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             lessThanOrEqualToConstant: SidebarMetrics.widthRange.upperBound).isActive = true
 
         window.contentView = splitView
+        if !window.setFrameUsingName("pigeon.main") {
+            window.center()
+        }
+        window.setFrameAutosaveName("pigeon.main")
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(container)
         NSApp.activate(ignoringOtherApps: true)
@@ -463,7 +472,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 app: row.app,
                 cwd: row.cwd,
                 lastSeen: row.lastSeen,
-                reported: row.seq > 0
+                reported: row.seq > 0,
+                sizeSource: row.sizeSource,
+                clients: row.clients
             )
         }
     }
@@ -563,6 +574,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         case PG_MSG_STATUS:
             applyStatus(message)
+        case PG_MSG_SIZE_STATE:
+            // Protocol §6: more than one window means the user should be able to tell who
+            // decided the size, so it rides along in the row's age label.
+            let pane = Wire.u32(message, "pane_id")
+            guard let id = rows.first(where: { $0.value.panes.contains(pane) })?.key,
+                  var row = rows[id]
+            else { break }
+            row.sizeSource = Wire.string(message, "source")
+            row.clients = Int(Wire.u32(message, "clients"))
+            rows[id] = row
+            refreshSidebar()
         case PG_MSG_PANE_EXITED:
             // The shell is gone (`exit`, Ctrl-D, a crash). The host keeps an exited pane until
             // `close_pane`, so dropping the row locally is not enough — closing the session is
@@ -603,7 +625,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 status: previous?.status ?? .idle,
                 seq: previous?.seq ?? 0,
                 unread: previous?.unread ?? state.unread[String(id)] ?? 0,
-                lastSeen: previous?.lastSeen ?? Date()
+                lastSeen: previous?.lastSeen ?? Date(),
+                sizeSource: previous?.sizeSource ?? "",
+                clients: previous?.clients ?? 1
             )
         }
         rows = updated
