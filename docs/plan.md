@@ -267,14 +267,15 @@ M3 落地后仍在的洞。
 | 布局只有单 pane | `core/src/layout/` 的布局树 + `pg_layout_*` 全实现；宿主每 pane 独立 PTY/actor；客户端按 `PgRect` 分屏 |
 | `zoom_pane` / `unzoom` 未实现 | 协议按规范回 `unsupported` 且不断开（解码与宿主各有用例）；UI 见下表 |
 | 多客户端尺寸策略未实现 | 单客户端下由 pane rect 反推会话 box；多客户端的 `size_state` 仍留给 M2 |
-| 侧栏（M3） | 已落地：`SidebarModel`/`Grouping`（git 根）+ 侧栏、OSC 7501 `status` 广播 + `ack_status`、OSC 7/标题、未读/needs-you、⌘J/⌘T/⌘⇧W、右键菜单、**行标题=应用名 / 分组可改名 / 不折叠**、排序持久化（见 `docs/m3-checklist.md`） |
+| 侧栏（M3） | 已落地：`SidebarModel`/`Grouping`（git 根）+ 侧栏、OSC 7501 `status` 广播 + `ack_status`、OSC 7/标题、未读/needs-you、⌘J/⌘T/⌘⇧W、右键菜单、**行标题=应用名 / 分组可改名 / 不折叠**、排序持久化；视觉按参考图对齐：单行行版式（`now/1m` + `◐ ◷ ✓ !`）、组头橙色 `N needs you`、侧栏顶部折叠/新建按钮、空态、右栏头部徽标（见 `docs/m3-checklist.md` §2.1、`docs/ui.md` §6） |
 
 **仍在**：
 
 | 缺口 | 现状 | 何时关闭 |
 |---|---|---|
 | `zoom_pane` / `unzoom` 的 UI | 宿主与协议都回 `unsupported`，客户端未绑定快捷键 | M2 |
-| 侧栏 UI | `SidebarModel` / `Grouping` 纯逻辑与单测已有，界面属 M3 | M3 |
+| 悬停 `×` 关闭 / 透明标题栏 | `docs/ui.md` §2.1/§2.3 写了，未实现：关闭走右键菜单或 `⌘⇧W`；红绿灯仍在原生标题栏 | 改窗口 chrome（`titlebarAppearsTransparent`）时 |
+| 未上报 session 的相对时间 | 没有 OSC 7501 记录的 session 行尾留空，不拿创建时间冒充“最后活动时间” | 宿主能上报 pane 活动时间时（M4） |
 | `tools/vt-parity/run.sh` 与 golden 语料未建 | 靠 `core/tests/` 的确定性用例兜底 | M2 接真实程序对账时 |
 | OSC 8 超链接被丢弃 | `PgCell.hyperlink_id` 恒为 0，`cell[4]` 不上线 | 需要按链接跳转时 |
 | DECSTBM 滚动区恒等于整屏 | `alacritty_terminal` 不暴露 `scroll_region` | 需要客户端画滚动条时 |
