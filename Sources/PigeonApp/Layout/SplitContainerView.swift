@@ -44,7 +44,7 @@ final class SplitContainerView: NSView {
             view.frame = frame(for: pane.rect)
             // A zoomed pane covers the window; the siblings stay alive behind it so
             // unzoom is instant and their contents keep up to date.
-            view.isHidden = model.zoom != 0 && pane.id != model.zoom
+            view.isHidden = Self.hides(pane: pane.id, zoom: model.zoom)
             panes[pane.id] = view
         }
         if let focused = panes[model.focus], window?.firstResponder !== focused {
@@ -150,6 +150,29 @@ final class SplitContainerView: NSView {
     @objc func splitHorizontal(_ sender: Any?) { onSplit?(PG_AXIS_HORIZONTAL) }
     @objc func closeFocused(_ sender: Any?) { onClose?() }
     @objc func toggleZoom(_ sender: Any?) { onToggleZoom?() }
+
+    /// What ⌘⇧↩ should send for the current layout. Pure so the shortcut's *meaning* can be
+    /// tested without a window: no focused pane means no request, otherwise zoom toggles.
+    static func zoomRequest(currentZoom: UInt32, focused: UInt32) -> PgMsgType? {
+        guard focused != 0 else { return nil }
+        return currentZoom == focused ? PG_MSG_UNZOOM : PG_MSG_ZOOM_PANE
+    }
+
+    /// In a zoomed layout only the zoomed pane is visible.
+    static func hides(pane: UInt32, zoom: UInt32) -> Bool {
+        zoom != 0 && pane != zoom
+    }
+
+    /// The View ▸ Zoom Pane item. A factory so a test can check the shortcut the menu
+    /// really carries (`\r` with ⌘⇧: Cmd-Shift-Return, not Cmd-Shift-D, which is split).
+    static func zoomMenuItem() -> NSMenuItem {
+        let item = NSMenuItem(
+            title: "Zoom Pane",
+            action: #selector(SplitContainerView.toggleZoom(_:)),
+            keyEquivalent: "\r")
+        item.keyEquivalentModifierMask = [.command, .shift]
+        return item
+    }
     @objc func focusPrevious(_ sender: Any?) {
         if let next = model.nextFocus(forward: false) {
             focusPane(next)

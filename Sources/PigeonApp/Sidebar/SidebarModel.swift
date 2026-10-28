@@ -80,8 +80,11 @@ public enum SidebarModel {
         var grouped: [String: [SidebarSession]] = [:]
         for session in sessions {
             // The same project on two machines is two groups: renaming one must not rename
-            // the other, and a remote row must not hide among local ones.
-            let key = groupLabel(host: session.host, project: session.group)
+            // the other, and a remote row must not hide among local ones. Machine rows are
+            // already a group of their own — prefixing them would read "arch / Machines".
+            let key = session.group == machinesGroup
+                ? machinesGroup
+                : groupLabel(host: session.host, project: session.group)
             if grouped[key] == nil {
                 groups.append(key)
             }

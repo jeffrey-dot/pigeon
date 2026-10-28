@@ -13,11 +13,11 @@ cargo build --release --bin pigeon-host            # 1,350,240 B（1.29 MiB ≤ 
 cargo build --lib --no-default-features            # 通过（库本体不引用 tokio/portable-pty）
 cbindgen --config core/cbindgen.toml --crate pigeon-core \
          --output /tmp/pg-m2.h core && diff -q include/pigeon_core.h /tmp/pg-m2.h   # 无差异
-swift build && swift test                          # 99 executed，5 skipped（远端用例默认跳过）
+swift build && swift test                          # 103 executed，5 skipped（远端用例默认跳过）
 PIGEON_SSH_HOST=arch PIGEON_HOST_ARTIFACTS=$PWD/core/target/x86_64-unknown-linux-musl/release \
-  swift test                                       # 99 passed，0 skipped，exit 0
+  swift test                                       # 103 passed，0 skipped，exit 0
 tools/vt-parity/run.sh                             # 8/8 ok（tmux 3.8，80x24）
-tools/m2-gui-check.sh                              # 见 §2（4 PASS，4 SKIP：本机没给 System Events 辅助功能权限）
+tools/m2-gui-check.sh                              # 3 PASS + 5 FAIL（窗口拿不到焦点）+ 1 条远端 PASS，见 §2
 ```
 
 新增覆盖：
@@ -33,6 +33,8 @@ tools/m2-gui-check.sh                              # 见 §2（4 PASS，4 SKIP�
 | 宿主断连 | `HostRecoveryTests.testAClosedHostSocketIsReported`（真实 unix socket 对端消失 ⇒ `onClose` 在 5s 内触发，这就是 `kill -9` 在客户端眼里的样子）、`testLaunchStartsARealProcess`（真的把进程拉起来并等它写下标记文件）、`testFindSkipsMissingBinaries` / `testLauncherPrefersTheExplicitPathThenTheWorkingDirectory`（候选顺序）、重试策略 4 条（3 次给不给按钮、放弃时机、banner 文案、`startCommand`） |
 | 版本拒绝 | `bad_version_is_rejected_with_hello_error`（宿主侧）；客户端把 `hello_error` 的 `reason`/`detail` 显示到提示里并停止重试 |
 | zoom | `layout::tests::zoom_gives_one_pane_the_whole_window_and_unzoom_restores_the_tree`（zoom 后该 pane rect = 整窗、焦点跟过去、unzoom 后嵌套比例逐字段还原、未知 pane 报 false）、`closing_the_zoomed_pane_drops_the_zoom`、`zooming_a_pane_gives_it_the_whole_window_and_unzoom_restores_the_split`（真宿主：`layout.zoom` 下发、`size_state` 变成整窗 80×24、unzoom 后叶子顺序不变、未知 pane 回 `no_such_pane`）、`zoom_messages_round_trip`（协议往返） |
+| zoom（客户端） | `ZoomTests`：`zoomRequest`（无焦点不发、未 zoom 发 `zoom_pane`、已 zoom 发 `unzoom`、换 pane 再 zoom）、`hides(pane:zoom:)`、菜单项真的是 `⌘⇧↩`（keyEquivalent `\r` + modifier + selector 存在）、无 zoom 时所有 pane 可见 |
+| Machines 侧栏 | `SidebarOrderingTests`：`Machines` 分组不受 host 前缀影响（不会出现 `arch / Machines`）、主机行状态 `connected/connecting/offline`、负 id 映射回主机 |
 | VT 对账 | `tools/vt-parity/`：8 条语料（basic/cursor/erase/wide/scroll-region/alt-screen/insert-delete/wrap）与 tmux `capture-pane` 逐行一致 |
 
 ## 2. GUI（真窗口，`tools/m2-gui-check.sh`）
@@ -57,6 +59,18 @@ m2-gui-check: FAILURES
 菜单里真正的 `⌘⇧↩`（key code 36；之前误用 `⌘⇧D` 是“上下分屏”），并会把 System Events 的报错原样打出来。
 在有正常桌面会话的终端里跑同一脚本，预期是 `Cmd-D → <- split_pane`、`Cmd-Shift-Return → <- zoom_pane` / `<- unzoom`、
 `PageUp → <- scroll`。
+
+带 `PIGEON_SSH_HOST=arch` 再跑一次，远端那条是真跑通的（不依赖焦点，读的是应用自己的侧栏日志）：
+
+```text
+PASS  PIGEON_REMOTE=arch: sidebar lists This Mac offline + that host connected
+pigeon: sidebar … groups=Machines machines=This Mac=offline,arch=connected
+pigeon: sidebar … groups=Machines|arch / ~ machines=This Mac=offline,arch=connected
+```
+
+顺带记下一条实测：`CGEventPostToPid` 能送键盘（审计用 PageUp 验证过），但**鼠标点击在这个会话里送不进去**
+（把点击投到 pane 上没有任何 `<- focus`），所以“点 Machines 行切换”只能在正常桌面会话里手测；
+`tools/click-at-pid.swift` 留着给那种会话用。
 
 - 两个窗口 = 两个 size owner：第二个实例连上后宿主日志里出现 `size_state … clients=2`。
 - `kill -9` 宿主：窗口日志出现 `host unreachable`，随后**自己把宿主拉起来**（socket 重新出现、`pgrep pigeon-host` 有进程）。
@@ -84,5 +98,5 @@ m2-gui-check: FAILURES
 
 ## 5. CI
 本轮改动尚未推 CI（本地 macOS 全绿）。推上去后应看两处：`rust` 作业的 `cargo test`（含 3 条新尺寸策略用例）与
-`swift` 作业的 99 个用例；`tools/vt-parity/run.sh` 没进 CI——golden 来自本机 tmux 3.8，Linux 上 tmux 版本不同
+`swift` 作业的 103 个用例；`tools/vt-parity/run.sh` 没进 CI——golden 来自本机 tmux 3.8，Linux 上 tmux 版本不同
 可能给出不同渲染，手工跑更诚实。

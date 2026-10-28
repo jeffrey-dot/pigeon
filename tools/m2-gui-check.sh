@@ -16,6 +16,10 @@ APP=${APP:-.build/debug/pigeon}
 HOST=${HOST:-core/target/release/pigeon-host}
 R=$(mktemp -d /tmp/pigeon-m2-XXXXXX)
 export XDG_RUNTIME_DIR="$R"
+# Isolate persisted state: a leftover `hosts.json` would start the app on some other host
+# and every local check below would be measuring the wrong connection.
+export PIGEON_CONFIG_DIR="$R/config"
+mkdir -p "$PIGEON_CONFIG_DIR"
 SOCKET="$R/pigeon.sock"
 LOG="$R/host.log"
 APP_LOG="$R/app.log"
@@ -130,6 +134,26 @@ keycode 116 "" && wait_for 10 grep -q "<- scroll" "$LOG" &&
     bad "PageUp did not produce a scroll message"
 keycode 121 "" || true   # PageDown
 note "scroll messages recorded in this run: $(grep -c '<- scroll' "$LOG")"
+
+# --- four: `PIGEON_REMOTE` must put the host in the `Machines` list (sidebar state, no
+# focus needed: the app logs the groups and the machine rows it built) -------------------
+kill "$APP_PID" 2>/dev/null
+wait "$APP_PID" 2>/dev/null
+if [ -n "${PIGEON_SSH_HOST:-}" ]; then
+    PIGEON_DEBUG=1 PIGEON_REMOTE="$PIGEON_SSH_HOST" "$APP" >"$R/remote.log" 2>&1 &
+    REMOTE_PID=$!
+    if wait_for 60 grep -q "machines=This Mac=offline,$PIGEON_SSH_HOST=connected" "$R/remote.log"; then
+        pass "PIGEON_REMOTE=$PIGEON_SSH_HOST: sidebar lists This Mac offline + that host connected"
+        grep -m1 "machines=" "$R/remote.log" | tail -c 160
+    else
+        bad "PIGEON_REMOTE=$PIGEON_SSH_HOST did not put the host in the Machines list"
+        grep -E "machines=" "$R/remote.log" | tail -2
+    fi
+    kill "$REMOTE_PID" 2>/dev/null
+    wait "$REMOTE_PID" 2>/dev/null
+else
+    skip "remote Machines rows need PIGEON_SSH_HOST (e.g. PIGEON_SSH_HOST=arch $0)"
+fi
 
 note "--- host log (messages the GUI produced) ---"
 grep -E "<- (split_pane|zoom_pane|unzoom|scroll|attach|resize_pane)|size_state" "$LOG" | tail -20

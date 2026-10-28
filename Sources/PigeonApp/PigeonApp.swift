@@ -245,10 +245,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         toggleSidebarItem.target = self
         viewMenu.addItem(toggleSidebarItem)
         viewMenu.addItem(withTitle: "Close Pane", action: #selector(SplitContainerView.closeFocused(_:)), keyEquivalent: "w")
-        let zoomItem = NSMenuItem(
-            title: "Zoom Pane", action: #selector(SplitContainerView.toggleZoom(_:)), keyEquivalent: "\r")
-        zoomItem.keyEquivalentModifierMask = [.command, .shift]
-        viewMenu.addItem(zoomItem)
+        viewMenu.addItem(SplitContainerView.zoomMenuItem())
         viewMenu.addItem(withTitle: "Previous Pane", action: #selector(SplitContainerView.focusPrevious(_:)), keyEquivalent: "[")
         viewMenu.addItem(withTitle: "Next Pane", action: #selector(SplitContainerView.focusNext(_:)), keyEquivalent: "]")
         viewItem.submenu = viewMenu
@@ -302,6 +299,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// (`docs/remote.md` §1). Probing runs off the main thread — ssh takes a second and the
     /// window must appear first.
     private func startRemote(_ host: String) {
+        // Remember the machine even when it was reached through `PIGEON_REMOTE` or the
+        // remembered-host path: otherwise the Machines list would not show it at all.
+        if !hosts.hosts.contains(host) {
+            hosts.hosts.append(host)
+        }
+        if hosts.current != host {
+            hosts.current = host
+            hostsStore.save(hosts)
+        }
         let session = RemoteSession(host: host)
         remote = session
         connectingHost = host
@@ -720,6 +726,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// One window is one connection, so switching hosts means hanging up first — and saying
     /// so by clearing the old rows instead of half-showing them.
     private func switchTo(host: String?) {
+        debugLog("host switch to \(host ?? "local")")
         client?.close()
         client = nil
         remote?.close()
@@ -761,12 +768,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// ⌘⇧↩ zooms the focused pane; pressing it again gives the siblings their space back.
     private func toggleZoom() {
-        guard let pane = focusedPane else { return }
-        let zooms = container.model.zoom != pane
+        guard let type = SplitContainerView.zoomRequest(
+            currentZoom: container.model.zoom, focused: focusedPane ?? 0)
+        else { return }
         send({ message in
             Wire.set(message, u32: "id", requestID())
-            Wire.set(message, u32: "pane_id", pane)
-        }, type: zooms ? PG_MSG_ZOOM_PANE : PG_MSG_UNZOOM)
+            Wire.set(message, u32: "pane_id", focusedPane ?? 0)
+        }, type: type)
     }
 
     @objc private func closeSelectedSession(_ sender: Any?) {
@@ -808,9 +816,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if ProcessInfo.processInfo.environment["PIGEON_DEBUG"] != nil {
             let needs = SidebarModel.needsYou(sidebarSessions())
-            FileHandle.standardError.write(Data(
-                "pigeon: sidebar sessions=\(rows.count) needs=\(needs) selected=\(selectedSession.map(String.init) ?? "-")\n".utf8
-            ))
+            let machines = sidebarSessions()
+                .filter { $0.group == SidebarModel.machinesGroup }
+                .map { "\($0.title)=\($0.statusText ?? "-")" }
+                .joined(separator: ",")
+            debugLog(
+                "sidebar sessions=\(rows.count) needs=\(needs) "
+                    + "selected=\(selectedSession.map(String.init) ?? "-") "
+                    + "groups=\(sections.map(\.group).joined(separator: "|")) "
+                    + "machines=\(machines)")
         }
         sidebar.update(sections: sections, selected: selectedSession)
         let needs = SidebarModel.needsYou(sidebarSessions())
