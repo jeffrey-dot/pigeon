@@ -90,9 +90,9 @@ reopened window: 3 panes restored, 10 grid redraws with content
 
 ## 5. CI（GitHub Actions，真跑）
 
-代码提交 `cd77988` 的 CI 一次通过（docs-only 的跟进提交同样全绿）：
+代码提交 `dd99d1d` 的 CI 一次通过（docs-only 的跟进提交同样全绿）：
 
-<https://github.com/jeffrey-dot/pigeon/actions/runs/40638447394>
+<https://github.com/jeffrey-dot/pigeon/actions/runs/40638955437>
 
 | 作业 | 结果 | 关键输出 |
 |---|---|---|
