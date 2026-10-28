@@ -9,8 +9,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var client: HostClient?
     private var sessionID: UInt32?
     private var focusedPane: UInt32?
-    /// Panes this window has already asked for a snapshot of.
-    private var attached: Set<UInt32> = []
+    /// Panes this window has asked for a snapshot of.
+    private var requested: Set<UInt32> = []
+    /// Panes whose snapshot actually reached a view.
+    private var haveSnapshot: Set<UInt32> = []
+    /// Snapshots that arrived before their pane view existed (layout still in flight).
+    private var pendingSnapshots: [UInt32: Data] = [:]
     private var nextRequest: UInt32 = 1
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -135,7 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func sendAttach(_ pane: UInt32) {
-        guard attached.insert(pane).inserted else { return }
+        guard !haveSnapshot.contains(pane), requested.insert(pane).inserted else { return }
         send({ message in
             Wire.set(message, u32: "id", requestID())
             Wire.set(message, u32: "pane_id", pane)
@@ -192,6 +196,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - protocol
 
+    /// Re-applies snapshots that arrived before their pane view existed.
+    private func flushPendingSnapshots() {
+        for (pane, frame) in pendingSnapshots {
+            var consumed = 0
+            var decoded: OpaquePointer?
+            frame.withUnsafeBytes { raw in
+                decoded = pg_msg_decode_frame(
+                    raw.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                    raw.count,
+                    &consumed
+                )
+            }
+            guard let decoded else { continue }
+            defer { Wire.free(decoded) }
+            guard let snapshot = pg_msg_snapshot(decoded) else { continue }
+            defer { pg_snapshot_free(snapshot) }
+            if container.applySnapshot(snapshot) {
+                haveSnapshot.insert(pane)
+                pendingSnapshots.removeValue(forKey: pane)
+            }
+        }
+    }
+
     private func handle(_ message: OpaquePointer) {
         if ProcessInfo.processInfo.environment["PIGEON_DEBUG"] != nil {
             FileHandle.standardError.write(
@@ -226,17 +253,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if model.focus != 0 {
                 focusedPane = model.focus
             }
-            // Every pane needs its own snapshot; the layout tells us which exist.
+            // Views first, then snapshots: the layout tells us which panes exist.
+            container.apply(model)
+            flushPendingSnapshots()
             for pane in model.panes.map(\.id) {
                 sendAttach(pane)
             }
-            container.apply(model)
         case PG_MSG_SNAPSHOT:
             guard let snapshot = pg_msg_snapshot(message) else { break }
             defer { pg_snapshot_free(snapshot) }
             let pane = snapshot.pointee.pane_id
             focusedPane = focusedPane ?? pane
-            _ = container.applySnapshot(snapshot)
+            if container.applySnapshot(snapshot) {
+                haveSnapshot.insert(pane)
+            } else if let frame = Wire.frame(message) {
+                // The view for this pane does not exist yet; replay it after the
+                // layout creates the views instead of losing the screen.
+                pendingSnapshots[pane] = frame
+            }
         case PG_MSG_PANE_EXITED:
             NSLog("pigeon: pane exited with code \(Wire.i32(message, "code"))")
         case PG_MSG_HELLO_ERROR:

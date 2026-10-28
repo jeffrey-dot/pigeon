@@ -198,10 +198,28 @@ impl Layout {
         cols: u16,
         rows: u16,
     ) -> PgResult<()> {
+        let root = self.root.as_ref().ok_or(PgError::NoSuchSplit)?;
+        // A nested split divides its own box, so the minimum is measured there.
+        let box_rect = find_split_box(
+            root,
+            split_id,
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 1.0,
+                h: 1.0,
+            },
+        )
+        .ok_or(PgError::NoSuchSplit)?;
+        let box_cols = ((box_rect.w * f32::from(cols)).round() as u16).max(2);
+        let box_rows = ((box_rect.h * f32::from(rows)).round() as u16).max(1);
         let root = self.root.as_mut().ok_or(PgError::NoSuchSplit)?;
         let min_cols = self.min_cols;
         let min_rows = self.min_rows;
-        resize_in(root, split_id, ratio, cols, rows, min_cols, min_rows).ok_or(PgError::NoSuchSplit)
+        resize_in(
+            root, split_id, ratio, box_cols, box_rows, min_cols, min_rows,
+        )
+        .ok_or(PgError::NoSuchSplit)
     }
 
     /// Normalized rects for every pane, in tree order.
@@ -347,6 +365,25 @@ impl LayoutNode {
             let (first, second) = split_rects(rect, *axis, *ratio);
             a.collect_splits(first, out);
             b.collect_splits(second, out);
+        }
+    }
+}
+
+fn find_split_box(node: &Node, split_id: SplitId, rect: Rect) -> Option<Rect> {
+    match node {
+        Node::Leaf(_) => None,
+        Node::Split {
+            id,
+            axis,
+            ratio,
+            a,
+            b,
+        } => {
+            if *id == split_id {
+                return Some(rect);
+            }
+            let (first, second) = split_rects(rect, *axis, *ratio);
+            find_split_box(a, split_id, first).or_else(|| find_split_box(b, split_id, second))
         }
     }
 }
@@ -681,6 +718,27 @@ mod tests {
             tree.set_ratio(split + 99, 0.5, 100, 30),
             Err(PgError::NoSuchSplit)
         );
+    }
+
+    #[test]
+    fn nested_split_clamps_against_its_own_box() {
+        let mut tree = Layout::new(1).with_minimums(10, 3);
+        // Root split divides 100 columns in half; the inner split owns 50.
+        tree.split(1, 2, Axis::Vertical, 0.5, 100, 30)
+            .expect("split");
+        let inner = tree
+            .split(2, 3, Axis::Vertical, 0.5, 100, 30)
+            .expect("split");
+        tree.set_ratio(inner, 0.95, 100, 30).expect("resize");
+        let rects = tree.rects();
+        // 10 of the inner box's 50 columns is 0.2, so the ratio tops out at 0.8:
+        // leaf 2 gets 0.5 * 0.8 = 0.4 of the session, leaf 3 gets 0.1.
+        assert!(
+            (rects[1].1.w - 0.4).abs() < 1e-4,
+            "leaf 2 should be 0.4 wide, got {}",
+            rects[1].1.w
+        );
+        assert!((rects[2].1.w - 0.1).abs() < 1e-4);
     }
 
     #[test]

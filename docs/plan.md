@@ -257,32 +257,35 @@ M0–M1 可以直接复用现有代码：内核的对账语料（来自 tmux 阶
 
 ## 11. 已知缺口
 
-M0 落地后仍在的洞。
+M1 落地后仍在的洞。
 
-**已关闭**（上一版列出的文档层缺口）：
+**已关闭**：
 
 | 旧缺口 | 关闭方式 |
 |---|---|
-| `core/Cargo.toml` / `core/src/` / `Package.swift` 不存在，CI 作业全是 no-op | 三样都存在，CI 四个作业都在做事（`docs` 链接、`rust` fmt/clippy/test/体积、`header` cbindgen diff、`swift` cargo+swift build/test） |
-| `include/pigeon_core.h` 是手写预览 | 由 `cbindgen` 从 `core/src/ffi/mod.rs` 生成，`diff -u` 为空 |
-| `core/cbindgen.toml` 不存在 | 已建，配置与 CI 命令一致 |
-| 客户端如何经 C ABI 编解码未定 | `pg_msg_*`（new/free/type/set/get/encode/decode/snapshot/sessions），Swift 侧零 CBOR |
-| `Tests/` 规划未落地 | `Tests/PigeonAppTests`（KeyEncoder / AppKit 按键映射 / Grouping / SidebarModel / 渲染列定位，18 个用例） |
+| M0 文档层：`core/`、`Package.swift`、生成的头文件、`cbindgen.toml`、`Tests/`、C ABI 编解码 | 全部落地，见 `docs/m0-checklist.md` |
+| 布局只有单 pane | `core/src/layout/` 的布局树 + `pg_layout_*` 全实现；宿主每 pane 独立 PTY/actor；客户端按 `PgRect` 分屏 |
+| `zoom_pane` / `unzoom` 未实现 | 协议按规范回 `unsupported` 且不断开（解码与宿主各有用例）；UI 见下表 |
+| 多客户端尺寸策略未实现 | 单客户端下由 pane rect 反推会话 box；多客户端的 `size_state` 仍留给 M2 |
+
+**仍在**：
 
 | 缺口 | 现状 | 何时关闭 |
 |---|---|---|
-| `tools/vt-parity/run.sh` 与 golden 语料未建 | 只在 `AGENTS.md` 里被引用；目前靠 `core/tests/` 的确定性测试兜底 | M1 接真实程序对账时 |
-| OSC 8 超链接被丢弃 | `PgCell.hyperlink_id` 恒为 0，`cell[4]` 不上线（协议已留位） | 需要按链接跳转时 |
-| DECSTBM 滚动区恒等于整屏 | `alacritty_terminal` 不暴露 `scroll_region`；`snapshot.scroll` 发 `(0, rows-1)` | 需要客户端画滚动条时 |
-| `ColorRequest`（OSC 4/10/11 查询）不回应 | `core/src/term/alacritty.rs` 明确忽略；程序会退回默认色 | 有人反馈配色查询不准时 |
-| Swift 客户端不协商 `delta` | 只收 `snapshot`（协议 §5 允许）；每次变化一份全屏 | M1 做性能时开启增量 |
-| IME 候选窗未实现 | 走 AppKit 默认 `keyDown`；拼音候选定位于 M6 | M6 |
+| `zoom_pane` / `unzoom` 的 UI | 宿主与协议都回 `unsupported`，客户端未绑定快捷键 | M2 |
+| 侧栏 UI | `SidebarModel` / `Grouping` 纯逻辑与单测已有，界面属 M3 | M3 |
+| `tools/vt-parity/run.sh` 与 golden 语料未建 | 靠 `core/tests/` 的确定性用例兜底 | M2 接真实程序对账时 |
+| OSC 8 超链接被丢弃 | `PgCell.hyperlink_id` 恒为 0，`cell[4]` 不上线 | 需要按链接跳转时 |
+| DECSTBM 滚动区恒等于整屏 | `alacritty_terminal` 不暴露 `scroll_region` | 需要客户端画滚动条时 |
+| `ColorRequest`（OSC 4/10/11）不回应 | 代码里显式忽略 | 有人反馈配色查询不准时 |
+| Swift 客户端不协商 `delta` | 只收 `snapshot`（协议 §5 允许） | 做性能时开启增量 |
+| IME 候选窗未实现 | 走 AppKit 默认 `keyDown` | M6 |
 | `zstd` 能力只定义了帧内 tag | 阈值、何时启用未定 | M4 远端实测后 |
-| CI 没有可移植性静态检查 | 现在有：fmt / clippy / test / `! rg "use (tokio|portable_pty)"` / `--lib --no-default-features` 构建 / 体积上限 / 头文件 diff / swift build+test；仍缺 `unsafe` 与平台专属 crate 的 grep | 加 `unsafe`/`cfg(target_os)` 检查时 |
-| PTY 走 `portable-pty` 而不是原始 fd | 为了让 `core/src`（除 `ffi/`）零 `unsafe`；拿到的是已有 fd 的 reader/writer 句柄 | 需要原始 fd 做特殊 ioctl 时 |
-| `swift test` 依赖完整 Xcode | `xcode-select` 指向 CommandLineTools 时 XCTest 缺失，需 `DEVELOPER_DIR` | 换成 swift-testing 或写进 README |
+| CI 缺 `unsafe` / 平台 crate 的静态检查 | 现有：fmt / clippy / test / tokio+portable-pty 引用检查 / `--lib --no-default-features` / 体积 / 头文件 diff / swift | 加 `unsafe`/`cfg(target_os)` 检查时 |
+| PTY 走 `portable-pty` 而不是原始 fd | 为了让 `core/src`（除 `ffi/`）零 `unsafe` | 需要原始 fd 做特殊 ioctl 时 |
+| `swift test` 依赖完整 Xcode | `xcode-select` 指向 CLT 时需 `DEVELOPER_DIR` | 换 swift-testing 或写进 README |
 
-**平台说明**：`pigeon-host` 在 macOS 与 Linux 用同一份代码；CI 的 `rust` 作业在 ubuntu 与 macos
-各跑一遍 `cargo test`（含 spawn 真实 PTY 的宿主用例）。M0 的首跑记录：
-<https://github.com/jeffrey-dot/pigeon/actions/runs/40633073432>（`4adc398`，五个作业全绿，
-Ubuntu 侧 47 + 9 + 8 = 64 passed）。
+**平台说明**：`pigeon-host` 在 macOS 与 Linux 用同一份代码；CI 的 `rust` 作业在 ubuntu 与 macos 各跑一遍
+`cargo test`（含 spawn 真实 PTY 的宿主用例）。首跑记录：
+M0 <https://github.com/jeffrey-dot/pigeon/actions/runs/40633073432>（`4adc398`，64 passed）、
+M1 <https://github.com/jeffrey-dot/pigeon/actions/runs/40635575813>（`6637f5c`，86 passed）。

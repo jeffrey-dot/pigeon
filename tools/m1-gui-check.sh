@@ -51,11 +51,21 @@ cliclick c:200,328
 sleep 1
 echo "focus messages: $(grep -c focus "$R/host.log")"
 
+# Cmd-W closes the focused pane (the last split), then Cmd-[ / Cmd-] move focus.
+key w "command down"; sleep 1
+shoot "$OUT/closed-pane.jpg"
+echo "after Cmd-W: $(panes) shells, close_pane sent $(grep -c close_pane "$R/host.log")"
+key "]" "command down"; sleep 1
+key "[" "command down"; sleep 1
+echo "focus messages after Cmd-] and Cmd-[: $(grep -c focus "$R/host.log")"
+
 # Drag the first vertical divider from x=450 to x=600 (title bar is 28px).
+before=$(grep -c resize_pane "$R/host.log")
 cliclick dd:450,328 dm:560,328 du:600,328
 sleep 1
+after=$(grep -c resize_pane "$R/host.log")
 shoot "$OUT/dragged.jpg"
-echo "resize_split messages: $(grep -c resize_split "$R/host.log")"
+echo "resize_split messages: $(grep -c resize_split "$R/host.log"), resize_pane ${before} -> ${after}"
 
 # Close the window: every shell keeps running.
 kill "$APP_PID" 2>/dev/null; sleep 1
@@ -67,7 +77,8 @@ osa -e 'tell application "System Events" to tell process "pigeon" to set positio
 sleep 1
 shoot "$OUT/reopen.jpg"
 restored=$(grep -o "pigeon: layout [0-9]* panes" "$R/app2.log" | awk '{print $3}' | sort -n | tail -1)
-echo "reopened window: ${restored:-0} panes restored"
+drawn=$(grep -c 'pigeon: grid [0-9]*x[0-9]* cursor=[0-9]*,[0-9]* row0=[^ ]' "$R/app2.log")
+echo "reopened window: ${restored:-0} panes restored, ${drawn} grid redraws with content"
 kill "$APP_PID" 2>/dev/null
 kill "$HOST_PID" 2>/dev/null
 echo "screenshots in $OUT: $(ls "$OUT" | tr '\n' ' ')"

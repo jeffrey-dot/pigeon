@@ -857,3 +857,106 @@ fn resizing_a_split_changes_the_tree_and_the_panes() {
         assert!(cols > 0 && rows > 0);
     }
 }
+
+#[test]
+fn vim_alternate_screen_survives_a_reconnect() {
+    let _serial = one_at_a_time();
+    let demo = std::env::temp_dir().join(format!("pigeon-vim-alt-{}.txt", std::process::id()));
+    std::fs::write(&demo, "hello alt screen\nsecond line\n").expect("demo");
+
+    let host = start_host();
+    let mut client = Client::connect(&host.socket);
+    hello(&mut client);
+    let first = attach_first(&mut client);
+    let (vim_pane, _) = split(&mut client, first, proto::SplitAxis::Vertical, 0.5, 2);
+
+    client.send(&Message::Attach {
+        id: 95,
+        pane_id: vim_pane,
+        size_policy: None,
+    });
+    let _ = snapshot(&mut client);
+    client.send(&Message::Keys {
+        pane_id: vim_pane,
+        bytes: format!("vim -u NONE -n {}\r", demo.display()).into_bytes(),
+    });
+    // vim can open with a "Press ENTER" prompt; answer it like a user would.
+    client.send(&Message::Keys {
+        pane_id: vim_pane,
+        bytes: vec![b'\r'],
+    });
+
+    // Wait until the pane really is on the alternate screen with the buffer drawn.
+    let snapshot_with_alt = client.wait_for(|m| match m {
+        Message::Snapshot { alt, screen, .. } => {
+            *alt && screen.iter().any(|row| {
+                row.iter()
+                    .map(|cell| char::from_u32(cell.codepoint).unwrap_or(' '))
+                    .collect::<String>()
+                    .contains("hello alt screen")
+            })
+        }
+        _ => false,
+    });
+    let before = comparable(&snapshot_with_alt);
+    assert!(matches!(
+        snapshot_with_alt,
+        Message::Snapshot { alt: true, .. }
+    ));
+
+    drop(client);
+    std::thread::sleep(Duration::from_millis(300));
+
+    let mut after = Client::connect(&host.socket);
+    hello(&mut after);
+    after.send(&Message::Attach {
+        id: 96,
+        pane_id: vim_pane,
+        size_policy: None,
+    });
+    let restored = comparable(&stable_snapshot(&mut after, vim_pane));
+    assert_eq!(
+        restored, before,
+        "vim's alternate screen and cursor come back"
+    );
+    let _ = std::fs::remove_file(&demo);
+}
+
+#[test]
+fn zoom_messages_are_unsupported_at_the_host() {
+    let _serial = one_at_a_time();
+    let host = start_host();
+    let mut client = Client::connect(&host.socket);
+    hello(&mut client);
+
+    for tag in ["zoom_pane", "unzoom"] {
+        let payload = ciborium::value::Value::Map(vec![
+            (
+                ciborium::value::Value::Text("t".into()),
+                ciborium::value::Value::Text(tag.into()),
+            ),
+            (
+                ciborium::value::Value::Text("pane_id".into()),
+                ciborium::value::Value::Integer(1u32.into()),
+            ),
+        ]);
+        let mut body = Vec::new();
+        ciborium::into_writer(&payload, &mut body).expect("encode");
+        let mut frame = (body.len() as u32).to_le_bytes().to_vec();
+        frame.extend_from_slice(&body);
+        client.stream.write_all(&frame).expect("write");
+        let Message::Unsupported { t_of } =
+            client.wait_for(|m| matches!(m, Message::Unsupported { .. }))
+        else {
+            unreachable!()
+        };
+        assert_eq!(t_of, tag);
+    }
+
+    // The connection is still healthy afterwards.
+    client.send(&Message::Ping { ts: 11 });
+    let Message::Pong { ts } = client.wait_for(|m| matches!(m, Message::Pong { .. })) else {
+        unreachable!()
+    };
+    assert_eq!(ts, 11);
+}
