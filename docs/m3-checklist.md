@@ -127,9 +127,9 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 
 ## 6. CI（GitHub Actions，真跑）
 
-代码提交 `b4252f2`（右栏卡片 + 审计修正）的 CI 五作业 success：
+代码提交 `362c8c7`（审计修正：56pt 头部、卡片 32pt 缩进、真实悬停/热切换截图）的 CI 五作业 success：
 
-<https://github.com/jeffrey-dot/pigeon/actions/runs/40657902538>
+<https://github.com/jeffrey-dot/pigeon/actions/runs/40660387885>
 
 | 作业 | 结果 |
 |---|---|
@@ -139,8 +139,8 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 | `header` | success（cbindgen `diff -u` 为空） |
 | `swift` | success（`swift test` **40 passed**） |
 
-之前的 `0480738` 曾在 `swift` 作业红过一次：`SidebarRenderingTests` 的未读点像素断言在 CI 的彩色配置下差 1
-（`[58,58,59]` vs `[58,58,60]`），已改成 ±2 容差；精确值仍由 `SidebarThemeTests` 钉住。
+之前 `0480738` 的 `swift` 作业红过一次（未读点像素断言在 CI 彩色配置下差 1，已改 ±2 容差）、
+`b4252f2` 五作业 success 但被审计挑出规格/截图不一致，随后由 `362c8c7` 修完。
 
 本机同一提交的全量输出：
 
