@@ -21,6 +21,10 @@ enum SidebarMetrics {
     static let rowInsetLeft: CGFloat = 12
     static let rowInsetRight: CGFloat = 8
     static let rowSpacing: CGFloat = 8
+    /// Half-pixel inset so the 0.5pt selected edge is not clipped by the row bounds.
+    static let rowPillInset: CGFloat = 0.25
+    static let selectedShadowBlur: CGFloat = 2
+    static let selectedShadowOffsetY: CGFloat = -1
 
     static let sectionHeaderHeight: CGFloat = 28
     static let sectionInsetLeft: CGFloat = 12

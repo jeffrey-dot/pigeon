@@ -38,12 +38,14 @@ enum SidebarTheme {
     /// The card's 0.5pt edge and its shadow (`VT:9226-9227`).
     static let cardEdge = overlay(light: 0x000000, alpha: 26, dark: 0xffffff, alpha: 26)
     static let cardShadow = overlay(light: 0x000000, alpha: 13, dark: 0x000000, alpha: 64)
-    /// The card is the terminal's own surface, so it stays dark in both appearances; its
-    /// header therefore uses the dark-theme ink rather than the appearance-driven tokens.
-    static let cardSurface = dynamic(light: 0x1c1c21, dark: 0x1c1c21)
-    static let cardInk = dynamic(light: 0xf5f5f7, dark: 0xf5f5f7)
-    static let cardGray = dynamic(light: 0x8e8e93, dark: 0x8e8e93)
-    static let cardDivider = dynamic(light: 0x3a3a3c, dark: 0x3a3a3c)
+    /// harp's card is painted with the theme background (`view.rs:22241`), so the card and
+    /// the terminal are one surface in both appearances: white under a light theme, near
+    /// black under a dark one (`default_themes.rs:262/275`).
+    static let terminalBackground = dynamic(light: 0xffffff, dark: 0x050505)
+    /// The default text colour for cells that carry none (`theme.foreground()`).
+    static let terminalForeground = dynamic(light: 0x111111, dark: 0xffffff)
+    /// The card header's hairline (`VT:9212`), same token as harp's `DIVIDER`.
+    static let divider = dynamic(light: 0xececef, dark: 0x3a3a3c)
 
     /// harp folds a failed agent into `Done`; pigeon keeps `error` distinct, so this
     /// one token has no harp counterpart and stays a system color.

@@ -177,7 +177,7 @@ Pane(id, title, status, status_at, kind, msg)   # 直接来自 OSC 7501 记录
 | 顶部按钮 | `VT:10146-10162` | 28×28、圆角 7、图标 17、悬停 `HOVER` 填充 | 28×28、圆角 7、图标 17、`SidebarHeaderButton` 自绘悬停填充 |
 | 右栏头部高 | `VT:9125` `CARD_HEADER_HEIGHT` | 40 | 40 |
 | 右栏头部左右留白 | `VT:9127-9128` `CARD_HEADER_PAD_OPEN/CLOSED`、`VT:10945` | 左 32（侧栏开）/ 84（侧栏关），右 20 | 左 32 / 右 20 |
-| 右栏头部下边线 | `VT:10945` `Border::new(0.5)` + `DIVIDER` | 0.5pt / `#3a3a3c`（卡片是深色） | 0.5pt，`cardDivider` 固定 `#3a3a3c`（卡片底色固定是终端背景，不能用跟随外观的 `DIVIDER`） |
+| 右栏头部下边线 | `VT:10945` `Border::new(0.5)` + `DIVIDER` | 0.5pt，颜色跟主题（浅 `#ececef` / 深 `#3a3a3c`） | 0.5pt，`SidebarTheme.divider`（跟外观） |
 | 窗口红绿灯区 | `TL:74` `TrafficLightData{width:64, side:Left}` | 左侧 64 宽，harp 自己画窗口所以要留位 | 用 macOS 原生红绿灯：它们本来就在左上 64pt 区里，pigeon 不需要额外占位；折叠/新建芯片按原生按钮中心对齐 |
 | 右栏卡片圆角 | `view.rs:579` `FRAMED_CARD_CORNER_RADIUS` | 10 | 10（`CardView` 内层 `cornerCurve = .continuous`） |
 | 右栏卡片外缩 | `view.rs:22258-22262` `inset_framed_card()` | 上/右/下各 8，左边贴分隔线 | 同上（8pt 缝露出侧栏底色） |
@@ -185,6 +185,11 @@ Pane(id, title, status, status_at, kind, msg)   # 直接来自 OSC 7501 记录
 | 右栏卡片投影 | `view.rs:22247-22252` `css_shadow(CARD_SHADOW, 4., 16.)` | 下移 4、模糊 16 | 下移 4、模糊 16（`cardShadow`，`shadowRadius = 8`） |
 | 卡片内容左内边距 | `view.rs:585` `FRAMED_CARD_CONTENT_LEFT_PADDING` | 32 | 32（头部与终端内容） |
 | 侧栏底部 footer | `VT:9112` `FOOTER_HEIGHT` | 44 | 不做（pigeon 没有 harp 的 footer，见 §6） |
+| 终端默认背景 | `default_themes.rs:262` `dark_theme()` / `:275` `light_theme()` 的 `background` | 深 `#050505` / 浅 `#ffffff` | `SidebarTheme.terminalBackground`：浅 `#ffffff`、深 `#050505`（pane 底色与默认格子背景都用它） |
+| 终端默认前景 | 同上，`foreground` | 深 `#ffffff` / 浅 `#111111` | `SidebarTheme.terminalForeground`：浅 `#111111`、深 `#ffffff`（只作用于“没有显式颜色”的格子，ANSI 16/256 色不动） |
+| 卡片底色 | `view.rs:22241` `with_background(appearance.theme().background())` | = 主题背景 | = `terminalBackground`（浅白、深 `#050505`），所以侧栏与卡片同色系 |
+| 未读点 | harp 没有这个元素：它用「标题 Semibold + 实心 done 盘」表达未读（`VT:9544-9555`） | — | 5pt 圆点、`ICON_STRONG`（浅 `#3a3a3c` / 深 `#e5e5ea`），画在标题左侧 5pt；同时标题 Semibold。出处是本档 §2.1 |
+| 空态 | harp 没有：列表为空时只剩组头 | — | “No sessions yet” 12pt `GRAY` + 圆角 “New Session” 按钮，垂直居中。出处是本档 §2.3 |
 
 ### 7.2 颜色（浅 / 深）
 
@@ -205,14 +210,16 @@ Pane(id, title, status, status_at, kind, msg)   # 直接来自 OSC 7501 记录
 | `RING` | 已读 done 的勾、idle 月亮 | `#a1a1a6` | `#636366` |
 | `TRACK` | working 的转圈轨道 | `#e0e0e4` | `#3a3a3e` | harp 有，pigeon 不用：working 用一个 SF Symbol |
 | `WHITE` | 选中行底色 | `#ffffff` | `#3a3a3d` |
-| `QUIET_SELECTED` | 窗口失焦时的选中底色 | `#f4f4f5` | `#2f2f32` |
+| `QUIET_SELECTED` | 窗口失焦时的选中底色（`isEmphasized == false`） | `#f4f4f5` | `#2f2f32` |
 | `HOVER` | 悬停底色 | 黑 5%（alpha 13） | 白 6%（alpha 15） |
 | `SELECTED_EDGE` | 选中行 0.5pt 描边 | 黑 8% | 白 10% |
 | `SELECTED_SHADOW` | 选中行投影 | 黑 6% | 黑 25% |
-| `DIVIDER` | 右栏头部下边线 | `#ececef` | `#3a3a3c` | harp 有；pigeon 用固定深色 `cardDivider`（卡片底色恒为终端背景），不用这个随外观走的 token |
+| `DIVIDER` | 右栏头部下边线 | `#ececef` | `#3a3a3c` | 与 harp 一致：`SidebarTheme.divider`（跟外观） |
 | `SIDEBAR` | 侧栏不透明底色 | `#e8e8eb` | `#232326` |
 | `GLASS_TINT` | 侧栏材质上的半透明罩（`sidebar_fill()`） | `rgba(250,250,252,140)` | `rgba(30,30,32,140)` |
 | `BADGE_TEXT` | 顶部按钮角标文字 | `#3a2300` | `#3a2300` | harp 有，pigeon 不用：没有角标 |
+| 主题 `background()` | 卡片与终端底色（`view.rs:22241`、`default_themes.rs:262/275`） | `#ffffff` | `#050505` |
+| 主题 `foreground()` | 终端默认前景（同上） | `#111111` | `#ffffff` |
 | `CARD_EDGE` | 右栏卡片 0.5pt 描边（`view.rs:22245`） | 黑 10%（alpha 26） | 白 10%（alpha 26） |
 | `CARD_SHADOW` | 右栏卡片投影（`view.rs:22247`） | 黑 5%（alpha 13） | 黑 25%（alpha 64） |
 

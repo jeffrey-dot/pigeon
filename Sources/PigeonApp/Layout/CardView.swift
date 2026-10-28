@@ -47,6 +47,12 @@ final class CardView: NSView {
 
     override var isOpaque: Bool { false }
 
+    /// The colour the inner surface is painted with, for tests: layer colours are snapshots,
+    /// so this is how the appearance switch is verified without a screen.
+    var surfaceColorForTesting: NSColor? {
+        surface.layer?.backgroundColor.flatMap { NSColor(cgColor: $0)?.usingColorSpace(.sRGB) }
+    }
+
     /// Layer colors are snapshots, so the dynamic tokens are resolved here on every change.
     private func applyAppearance() {
         effectiveAppearance.performAsCurrentDrawingAppearance {
@@ -61,7 +67,7 @@ final class CardView: NSView {
             inner.masksToBounds = true
             inner.borderWidth = SidebarMetrics.cardEdgeWidth
             inner.borderColor = SidebarTheme.cardEdge.cgColor
-            inner.backgroundColor = SidebarTheme.cardSurface.cgColor
+            inner.backgroundColor = SidebarTheme.terminalBackground.cgColor
         }
     }
 }

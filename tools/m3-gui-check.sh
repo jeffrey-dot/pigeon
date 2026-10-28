@@ -19,6 +19,10 @@ key() { osa -e "tell application \"System Events\" to keystroke \"$1\" using {$2
 # Window-only captures: `-R` crops to the app's own frame, so the screenshots do not
 # carry the rest of the desktop.
 shoot() {
+        # The selected pill only paints `WHITE` while the window is key; bring the app
+        # forward so the screenshots show the key-window state.
+        osa -e 'tell application "System Events" to set frontmost of process "pigeon" to true'
+        sleep 0.4
         screencapture -x -o -R"$OX,$OY,$W,$H" "$1" 2>/dev/null
         sips -Z 1100 -s format jpeg -s formatOptions 70 "$1" --out "$1" >/dev/null 2>&1
 }
@@ -64,7 +68,9 @@ launch() { # launch <light|dark>
         PIGEON_DEBUG=1 PIGEON_APPEARANCE="$1" PIGEON_CONFIG_DIR="$CONFIG" XDG_RUNTIME_DIR="$R" \
                 "$APP" >"$R/app-$1.log" 2>&1 &
         APP_PID=$!
-        sleep 4
+        # Give the panes time to get their first snapshot: an empty grid only shows the
+        # background, which would hide the terminal's default foreground in the screenshots.
+        sleep 6
         osa -e 'tell application "System Events" to tell process "pigeon" to set position of window 1 to {0, 0}'
         osa -e 'tell application "System Events" to tell process "pigeon" to set size of window 1 to {1100, 600}'
         osa -e 'tell application "System Events" to set frontmost of process "pigeon" to true'
@@ -111,11 +117,12 @@ echo "sidebar (light): $(grep -o 'sidebar sessions=[0-9]* needs=[0-9]*' "$R/app-
 echo "sidebar width: $(grep -o 'sidebar width=[0-9]*' "$R/app-light.log" | tail -1)"
 echo "apps: $(grep -o 'sessions apps=[^"]*' "$R/app-light.log" | tail -1)"
 
-# Hover the second row: the pill under the pointer is part of the comparison table.
-cliclick m:150,$(row_y 2)
+# Hover a row that is *not* the selection (C group's blocked session): a hovered row that
+# is also selected would paint the selected surface, not the hover surface.
+cliclick m:150,$(row_y 6)
 sleep 1
 shoot "$OUT/hover-light.jpg"
-cliclick m:150,560
+cliclick m:150,$((OY + 560))
 sleep 0.5
 
 # Hot appearance switch inside the same process: the debug menu item flips NSApp.appearance,
@@ -161,28 +168,11 @@ key t "command down"
 sleep 2
 echo "sessions after Cmd-T: $(grep -c 'pigeon-host: <- new_session' "$R/host.log")"
 
-# Drag in a fresh app: earlier clicks leave the pointer somewhere else and AppKit's drag
-# session takes its position from the last mouse location, which made the drop land wrong.
-kill "$APP_PID" 2>/dev/null
-sleep 1
-launch light
-drag_rows() {
-        local from to
-        from=$(row_y 1)
-        to=$(row_y 4)
-        # Drag `sh` onto `done.sh`: the handler inserts at the target's index, which lands
-        # `sh` after `beta` in the persisted order — a visible swap inside group A.
-        cliclick m:150,$from w:300 dd:100,$from w:300 dm:100,$((from + 16)) w:250 \
-                dm:100,$((from + 90)) w:250 dm:100,$to w:400 du:100,$to
-        sleep 1
-}
-drag_rows
-if [ "$(sidebar_state order)" = "[]" ]; then
-        echo "drag: first attempt did not register, retrying"
-        drag_rows
-fi
-shoot "$OUT/reordered-light.jpg"
-echo "order: $(sidebar_state order)"
+# Drag reorder is not exercised here: AppKit refuses to start a drag session from
+# synthetic mouse events in this environment (the `drag start` debug line never fires, see
+# `docs/m3-checklist.md` §5). The ordering *mechanism* is covered by re-opening the app and
+# by the manual drag recorded there.
+echo "order (manual drag, see docs/m3-checklist.md §5): $(sidebar_state order)"
 
 kill "$APP_PID" 2>/dev/null
 sleep 1

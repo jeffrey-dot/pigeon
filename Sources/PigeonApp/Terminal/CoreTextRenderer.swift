@@ -39,10 +39,9 @@ enum CoreTextRenderer {
         cursor: PaneView.Cursor,
         in bounds: CGRect
     ) {
-        // The terminal's own background, painted even before the first snapshot: a pane
-        // with no cells must still look like a terminal, not like an empty window (which
-        // turns white under a light app appearance).
-        NSColor(calibratedRed: 0.11, green: 0.11, blue: 0.13, alpha: 1).setFill()
+        // The terminal's theme background (`docs/ui.md` §7.1), painted even before the first
+        // snapshot so an empty pane still looks like a terminal.
+        SidebarTheme.terminalBackground.setFill()
         bounds.fill()
         // A resize can land between the request and the new snapshot; draw only
         // what we hold instead of trapping on a half-updated grid.
@@ -52,6 +51,7 @@ enum CoreTextRenderer {
         }
         let size = cellSize()
         let font = font(bold: false)
+        let defaults = defaultColors(for: NSAppearance.currentDrawing())
 
         for row in 0..<rows {
             let originY = bounds.height - CGFloat(row + 1) * size.height
@@ -63,8 +63,8 @@ enum CoreTextRenderer {
 
             // Backgrounds first, then the glyph run on top.
             for (column, cell) in rowCells.enumerated() {
-                let (fg, bg) = resolved(cell)
-                guard bg != defaultBackground else { continue }
+                let (fg, bg) = resolved(cell, defaults: defaults)
+                guard bg != defaults.bg else { continue }
                 color(bg).setFill()
                 CGRect(
                     x: CGFloat(column) * size.width,
@@ -77,7 +77,7 @@ enum CoreTextRenderer {
 
             guard let context = NSGraphicsContext.current?.cgContext else { continue }
             context.textMatrix = .identity
-            for run in Self.textRuns(for: rowCells) {
+            for run in Self.textRuns(for: rowCells, defaults: defaults) {
                 let attributed = NSAttributedString(
                     string: run.text,
                     attributes: [
@@ -96,7 +96,7 @@ enum CoreTextRenderer {
         }
 
         if cursor.visible, cursor.x < cols, cursor.y < rows {
-            NSColor(calibratedWhite: 0.9, alpha: 0.35).setFill()
+            SidebarTheme.terminalForeground.withAlphaComponent(0.35).setFill()
             CGRect(
                 x: CGFloat(cursor.x) * size.width,
                 y: bounds.height - CGFloat(cursor.y + 1) * size.height,
@@ -108,11 +108,14 @@ enum CoreTextRenderer {
 
     /// Groups a row into runs, skipping continuation cells (width 0) so the cell
     /// after a wide character keeps its own column.
-    static func textRuns(for rowCells: [PaneView.Cell]) -> [TextRun] {
+    static func textRuns(
+        for rowCells: [PaneView.Cell],
+        defaults: (fg: UInt32, bg: UInt32) = (0x00e5e5e5, 0x000000)
+    ) -> [TextRun] {
         var runs: [TextRun] = []
         for (column, cell) in rowCells.enumerated() {
             guard cell.width != 0, let scalar = Unicode.Scalar(cell.codepoint) else { continue }
-            let (fg, _) = resolved(cell)
+            let (fg, _) = resolved(cell, defaults: defaults)
             let character = String(Character(scalar))
             let wide = cell.width == 2
             if let last = runs.last, !wide, !last.wide, last.colorValue == fg {
@@ -133,12 +136,32 @@ enum CoreTextRenderer {
 
     // MARK: - colours
 
-    private static let defaultForeground: UInt32 = 0x00e5_e5e5
-    private static let defaultBackground: UInt32 = 0x0000_0000
+    /// The colours a cell with no explicit colour inherits, resolved for the appearance that
+    /// is drawing: harp's `theme.foreground()` / `theme.background()` (`docs/ui.md` §7.1).
+    static func defaultColors(for appearance: NSAppearance) -> (fg: UInt32, bg: UInt32) {
+        var colors: (fg: UInt32, bg: UInt32) = (0, 0)
+        appearance.performAsCurrentDrawingAppearance {
+            colors = (rgb(SidebarTheme.terminalForeground), rgb(SidebarTheme.terminalBackground))
+        }
+        return colors
+    }
 
-    private static func resolved(_ cell: PaneView.Cell) -> (UInt32, UInt32) {
-        var fg = cell.fg == 0 ? defaultForeground : cell.fg
-        var bg = cell.bg == 0 ? defaultBackground : cell.bg
+    /// `0x00RRGGBB` in the form `color(_:)` understands.
+    private static func rgb(_ color: NSColor) -> UInt32 {
+        let srgb = color.usingColorSpace(.sRGB) ?? color
+        let red = UInt32((srgb.redComponent * 255).rounded())
+        let green = UInt32((srgb.greenComponent * 255).rounded())
+        let blue = UInt32((srgb.blueComponent * 255).rounded())
+        return (red << 16) | (green << 8) | blue
+    }
+
+    /// A cell's own colours stay untouched; only the "no colour" sentinel (0) uses the theme.
+    private static func resolved(
+        _ cell: PaneView.Cell,
+        defaults: (fg: UInt32, bg: UInt32)
+    ) -> (UInt32, UInt32) {
+        var fg = cell.fg == 0 ? defaults.fg : cell.fg
+        var bg = cell.bg == 0 ? defaults.bg : cell.bg
         if cell.attrs & 0x08 != 0 { swap(&fg, &bg) } // reverse video
         return (fg, bg)
     }

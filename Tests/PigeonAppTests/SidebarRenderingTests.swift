@@ -31,6 +31,37 @@ final class SidebarRenderingTests: XCTestCase {
         XCTAssertEqual(dark.2, 0xea, accuracy: 2)
     }
 
+    /// The card is painted with the theme background (harp `view.rs:22241`), so under a
+    /// light appearance it must be white, not the old fixed dark surface.
+    func testTheCardSurfaceFollowsTheAppearance() {
+        let card = CardView(frame: NSRect(x: 0, y: 0, width: 80, height: 60))
+        func rgb(_ appearance: NSAppearance.Name) -> (Int, Int, Int) {
+            card.appearance = NSAppearance(named: appearance)
+            card.viewDidChangeEffectiveAppearance()
+            let color = card.surfaceColorForTesting!
+            return (
+                Int((color.redComponent * 255).rounded()),
+                Int((color.greenComponent * 255).rounded()),
+                Int((color.blueComponent * 255).rounded())
+            )
+        }
+        XCTAssertEqual(rgb(.aqua).0, 0xff) // theme background light
+        XCTAssertEqual(rgb(.aqua).2, 0xff)
+        XCTAssertEqual(rgb(.darkAqua).0, 0x05) // theme background dark
+        XCTAssertEqual(rgb(.darkAqua).2, 0x05)
+    }
+
+    /// Cells without an explicit colour take the theme's foreground/background, resolved for
+    /// the appearance that is drawing (harp `default_themes.rs:262/275`).
+    func testTerminalDefaultsFollowTheAppearance() {
+        let light = CoreTextRenderer.defaultColors(for: NSAppearance(named: .aqua)!)
+        let dark = CoreTextRenderer.defaultColors(for: NSAppearance(named: .darkAqua)!)
+        XCTAssertEqual(light.fg, 0x0011_1111) // #111111
+        XCTAssertEqual(light.bg, 0x00ff_ffff) // #ffffff
+        XCTAssertEqual(dark.fg, 0x00ff_ffff) // #ffffff
+        XCTAssertEqual(dark.bg, 0x0005_0505) // #050505
+    }
+
     func testTheSidebarSurfaceFollowsTheAppearanceOnTheSameView() {
         let view = SidebarBackgroundView(frame: NSRect(x: 0, y: 0, width: 120, height: 80))
         let light = pixel(of: view, appearance: .aqua)

@@ -27,6 +27,9 @@ final class SidebarThemeTests: XCTestCase {
             ("iconStrong", SidebarTheme.iconStrong, 0x3a, 0x3a, 0x3c, 0xe5, 0xe5, 0xea),
             ("sidebar", SidebarTheme.sidebar, 0xe8, 0xe8, 0xeb, 0x23, 0x23, 0x26),
             ("selected", SidebarTheme.selected, 0xff, 0xff, 0xff, 0x3a, 0x3a, 0x3d),
+            ("terminalBackground", SidebarTheme.terminalBackground, 0xff, 0xff, 0xff, 0x05, 0x05, 0x05),
+            ("terminalForeground", SidebarTheme.terminalForeground, 0x11, 0x11, 0x11, 0xff, 0xff, 0xff),
+            ("divider", SidebarTheme.divider, 0xec, 0xec, 0xef, 0x3a, 0x3a, 0x3c),
         ]
         for (name, color, lr, lg, lb, dr, dg, db) in cases {
             let light = resolved(color, dark: false)

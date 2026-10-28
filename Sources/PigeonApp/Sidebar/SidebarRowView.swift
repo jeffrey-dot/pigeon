@@ -38,17 +38,23 @@ final class SidebarRowView: NSTableRowView {
     override func drawBackground(in dirtyRect: NSRect) {
         guard isSelected || hovered else { return }
         // Rows sit inside the list's 10pt side padding, so the pill keeps that much air.
-        let pill = bounds.insetBy(dx: SidebarMetrics.listSidePadding, dy: 0).insetBy(dx: 0.25, dy: 0.25)
+        let pill = bounds
+            .insetBy(dx: SidebarMetrics.listSidePadding, dy: 0)
+            .insetBy(dx: SidebarMetrics.rowPillInset, dy: SidebarMetrics.rowPillInset)
         let path = NSBezierPath(roundedRect: pill, xRadius: SidebarMetrics.rowRadius, yRadius: SidebarMetrics.rowRadius)
+        // harp's `SelectedQuiet` is for a window that is not key, not for "this table is not
+        // first responder": the terminal pane holds focus in pigeon, so `isEmphasized` alone
+        // would paint the quiet surface in a perfectly active window.
+        let key = window?.isKeyWindow ?? false
         let fill = isSelected
-            ? (isEmphasized ? SidebarTheme.selected : SidebarTheme.quietSelected)
+            ? (key ? SidebarTheme.selected : SidebarTheme.quietSelected)
             : SidebarTheme.hover
         if isSelected && isEmphasized {
             NSGraphicsContext.saveGraphicsState()
             let shadow = NSShadow()
             shadow.shadowColor = SidebarTheme.selectedShadow
-            shadow.shadowBlurRadius = 2
-            shadow.shadowOffset = NSSize(width: 0, height: -1)
+            shadow.shadowBlurRadius = SidebarMetrics.selectedShadowBlur
+            shadow.shadowOffset = NSSize(width: 0, height: SidebarMetrics.selectedShadowOffsetY)
             shadow.set()
             fill.setFill()
             path.fill()

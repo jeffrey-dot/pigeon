@@ -40,19 +40,22 @@ Cmd-J focus messages: 0 -> 1 (ack: 1)
 selected before close: selected=4
 Cmd-Shift-W Close Session: close_pane 0 -> 1
 sessions after Cmd-T: 5
-order: [2, 1, 3, 5]
+order (manual drag, see docs/m3-checklist.md §5): []
 reopened: sidebar sessions=4 needs=0
-state file: …/config/sidebar.json (89 bytes)
+state file: …/config/sidebar.json (82 bytes)
 sidebar (dark): sidebar sessions=4 needs=0
 ```
 
-`order: [2, 3, 1, 4]` 是脚本把 `A` 组的第 1 行拖到 `C` 组那一行（[reordered-light](images/m3/reordered-light.jpg) 里 `A` 组两行对调），
+拖拽排序在这个环境**无法自动化**：合成的鼠标事件不会让 AppKit 启动拖拽会话——
+`SidebarViewController.pasteboardWriterForRow` 里的 `drag start` 调试行，在一次完整跑里出现 **0 次**
+（`grep -c 'drag start' /tmp/pigeon-m3-*/app-light.log` → `0`），所以脚本只打印一句提示，不再伪造 `reordered` 截图。
+持久化机制本身有用例与手验：`acceptDrop` → `onReorder` → `SidebarStore` 原子写（`SidebarStoreTests`），
+更早一次人手拖拽把 `sidebar.json` 写成 `{"order":[1,3,2],…}` 并重开生效（见 §5）。
 
 交互证据：[右键菜单](images/m3/menu-light.jpg)（关闭 / 标记已读 / 重命名）、
 [分组右键](images/m3/group-menu-light.jpg)（`Rename Group…`）、
-[关窗重开](images/m3/reopen-light.jpg)（分组、未读、排序原样回来）、
-[拖拽后](images/m3/reordered-light.jpg)。
-不是人手操作。截图坐标按 §7.1 的几何算：56pt 头部 + 4pt 顶部留白 + 组行 42 + 会话行 31。
+[关窗重开](images/m3/reopen-light.jpg)（分组、未读、排序原样回来）。
+截图坐标按 §7.1 的几何算：56pt 头部 + 4pt 顶部留白 + 组行 42 + 会话行 31。
 
 ### 2.1 与 harp 的逐项对照（criterion 2）
 
@@ -60,14 +63,14 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 
 | 项 | harp（出处 / 取值） | 我们的实现 | 截图 |
 |---|---|---|---|
-| 侧栏宽度 | `VT:9111` `SIDEBAR_WIDTH` 272 | 默认 272，`splitView.setPosition(272)` 真正落位（`PIGEON_DEBUG` 打出 `sidebar width=272`），可拖 200–360 | [sidebar-light](images/m3/sidebar-light.jpg) |
+| 侧栏宽度 | `VT:9110` `SIDEBAR_WIDTH` 272 | 默认 272，`splitView.setPosition(272)` 真正落位（`PIGEON_DEBUG` 打出 `sidebar width=272`），可拖 200–360 | [sidebar-light](images/m3/sidebar-light.jpg) |
 | 侧栏底色 | `VT:9209` `SIDEBAR` `#e8e8eb` / `#232326`；`GLASS_TINT` 半透明罩 | `SidebarBackgroundView` 动态色填同样两值（不叠加玻璃模糊，见 §7.5） | [sidebar-light](images/m3/sidebar-light.jpg) / [sidebar-dark](images/m3/sidebar-dark.jpg) |
 | 窗口 chrome | `TL:64` 左侧 64pt 红绿灯区、标题栏透明；`view.rs:581` 红绿灯中心 28pt、与侧栏按钮同排 | `.fullSizeContentView` + `titlebarAppearsTransparent` + `titleVisibility = .hidden`；侧栏顶到窗口顶端；折叠/新建按钮按**原生红绿灯中心**对齐（macOS 自己摆红绿灯，我们跟随它的行） | [sidebar-light](images/m3/sidebar-light.jpg) / [sidebar-dark](images/m3/sidebar-dark.jpg) |
 | 组头项目名 + 条数 | `VT:9123` 11.5 Semibold `SECTION_NAME`；`VT:10092` 11.5 `SECTION_COUNT`；首字母大写 | 同名 token；`A 2` / `B 1` / `C 1` | [sidebar-light](images/m3/sidebar-light.jpg) |
 | 组头 `needs you` | `VT:10101` 12pt `NEEDS_TEXT`；单数 `1 needs you`、复数 `N need you` | `SidebarTheme.needsLabel` 同文案同色 | [sidebar-light](images/m3/sidebar-light.jpg)（B、C 组） |
-| 行高 / 行距 | `VT:9118` 30、`VT:9117` 1 | `rowHeight 30` + `intercellSpacing 1` | [sidebar-light](images/m3/sidebar-light.jpg) |
+| 行高 / 行距 | `VT:9117` 30、`VT:9116` 1 | `rowHeight 30` + `intercellSpacing 1` | [sidebar-light](images/m3/sidebar-light.jpg) |
 | 组间距 | `VT:9115` 间距 14 + `VT:9122` 组头 28 | 组行 42：14pt 空档在**上**、标签占下面 28pt（组头与首个行之间为 0） | [sidebar-light](images/m3/sidebar-light.jpg)（B/C 组上方的空档） |
-| 行圆角 / 选中 | `VT:9121` 8、`VT:9205` `WHITE`、`SELECTED_EDGE` 0.5、`SELECTED_SHADOW` | `SidebarRowView` 自绘胶囊：8pt、动态色、0.5pt 描边、投影；`selectionHighlightStyle = .none` | [sidebar-light](images/m3/sidebar-light.jpg) / [sidebar-dark](images/m3/sidebar-dark.jpg) |
+| 行圆角 / 选中 | `VT:9120` 8、`VT:9204` `WHITE`、`SELECTED_EDGE` 0.5、`SELECTED_SHADOW`（`VT:9214`） | `SidebarRowView` 自绘胶囊：8pt、动态色、0.5pt 描边、投影；`selectionHighlightStyle = .none`；窗口失焦时才用 `QUIET_SELECTED`（§2.2 取样 `#ffffff` / `#3a393e`） | [sidebar-light](images/m3/sidebar-light.jpg) / [sidebar-dark](images/m3/sidebar-dark.jpg) |
 | 悬停 | `VT:9210` `HOVER` 黑 5% / 白 6% | `SidebarRowView` 的 tracking area 用同一 token；脚本把指针移到行上再截 | [hover-light](images/m3/hover-light.jpg) |
 | 行内缩进 / 右列 | `VT:10031` 左 12 / 右 8，`VT:9114` 列表左右 10 | 标题左 22pt、状态图标右缘 18pt、元素间距 8pt | [sidebar-light](images/m3/sidebar-light.jpg) |
 | 标题字号 / 字重 | `VT:9120` 13、未读 Semibold、`VT:9193` `INK` | 13pt / Semibold / `SidebarTheme.ink` | [sidebar-light](images/m3/sidebar-light.jpg)（`done.sh` 行） |
@@ -75,10 +78,24 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 | 状态图标 | `VT:9544-9604` 15pt 字形 / 16pt 槽；needs 用 `ICON_NEEDS_RING`/`ICON_NEEDS_DOT`（`VT:9222-9223`） | SF Symbols：`circle.dashed` / `exclamationmark.circle` / `checkmark.circle.fill` / `checkmark` / 无；needs 用 `iconNeedsRing`（浅 `#c98314`、深 `#e8a33d`） | [sidebar-light](images/m3/sidebar-light.jpg) / [jump-light](images/m3/jump-light.jpg) |
 | 未读 | `VT:9849` 标题 Semibold + 实心 done 盘 | 同上，加 `docs/ui.md` §2.1 要求的行首 5pt 圆点（harp 没有这个点） | [sidebar-light](images/m3/sidebar-light.jpg)（`done.sh` 行） |
 | 顶部按钮 | `VT:10146-10162` 28×28、圆角 7、图标 17、`GRAY`、悬停 `HOVER` 填充 | `SidebarHeaderButton`：28×28、自绘 7pt 圆角悬停填充、图标 17、右对齐 14pt | [sidebar-light](images/m3/sidebar-light.jpg) |
-| 右栏头部 | `VT:9125` 40pt、12.5 Semibold `INK` + 12.5 `GRAY` 路径（行首截断）+ 12 `GRAY` 状态、左 32 / 右 20、0.5 `DIVIDER` | `SessionHeaderView` 同值；下边线是 0.5pt `DividerView`（`cardDivider` `#3a3a3c`），侧栏收起时左内边距 84（`VT:9127`） | [sidebar-light](images/m3/sidebar-light.jpg) / [jump-light](images/m3/jump-light.jpg) |
+| 右栏头部 | `VT:9125` 40pt、12.5 Semibold `INK` + 12.5 `GRAY` 路径（行首截断）+ 12 `GRAY` 状态、左 32 / 右 20、0.5 `DIVIDER` | `SessionHeaderView` 同值；下边线是 0.5pt `DividerView`（`divider`，浅 `#ececef` / 深 `#3a3a3c`，跟外观），侧栏收起时左内边距 84（`VT:9127`） | [sidebar-light](images/m3/sidebar-light.jpg) / [jump-light](images/m3/jump-light.jpg) |
 | 空态 | harp 没有 | `docs/ui.md` §2.3：“No sessions yet” + New Session | [empty-light](images/m3/empty-light.jpg) / [empty-dark](images/m3/empty-dark.jpg) |
-| 右栏卡片 | `view.rs:579` 圆角 10；`view.rs:22245` 0.5pt `CARD_EDGE`；`view.rs:22247` `CARD_SHADOW` 投影（下移 4、模糊 16）；`view.rs:22258-22262` 上/右/下各 8pt 外缩 | `CardView`：内层 `cornerRadius 10` + `masksToBounds`（防终端底色破角）、外层投影，上/右/下各 8pt，左边贴分隔线；终端内容再左缩 32pt；卡片底色 = 终端背景，头部用卡片上的浅色 ink | [sidebar-light](images/m3/sidebar-light.jpg) / [jump-light](images/m3/jump-light.jpg) |
+| 右栏卡片 | `view.rs:579` 圆角 10；`view.rs:22245` 0.5pt `CARD_EDGE`；`view.rs:22247` `CARD_SHADOW` 投影（下移 4、模糊 16）；`view.rs:22258-22262` 上/右/下各 8pt 外缩 | `CardView`：内层 `cornerRadius 10` + `masksToBounds`（防终端底色破角）、外层投影，上/右/下各 8pt，左边贴分隔线；终端内容再左缩 32pt；**卡片底色 = 主题背景**（`terminalBackground`，浅 `#ffffff` / 深 `#050505`），头部用 `ink`/`gray`（跟外观） | [sidebar-light](images/m3/sidebar-light.jpg) / [jump-light](images/m3/jump-light.jpg) |
+| 终端默认底/字 | `default_themes.rs:262` `dark_theme()`（bg `#050505`、fg `#ffffff`）/ `:275` `light_theme()`（bg `#ffffff`、fg `#111111`）；卡片背景 `view.rs:22241` = 主题背景 | `SidebarTheme.terminalBackground` 浅 `#ffffff` / 深 `#050505`，`terminalForeground` 浅 `#111111` / 深 `#ffffff`；只作用于“没有显式颜色”的格子，ANSI 16/256 色不动（`CoreTextRenderer.defaultColors(for:)`） | [sidebar-light](images/m3/sidebar-light.jpg) / [sidebar-dark](images/m3/sidebar-dark.jpg) |
 | 外观切换 | — | 脚本在**同一个进程**里按 ⌥⌘A 触发 `NSApp.appearance` 翻转（`PIGEON_DEBUG` 下的调试菜单项），前后各截一张；`CardView` 在 `viewDidChangeEffectiveAppearance` 里重解析 layer 色，侧栏/未读点由 `SidebarRenderingTests` 断言 | [hot-switch-dark](images/m3/hot-switch-dark.jpg) → [hot-switch-light](images/m3/hot-switch-light.jpg) |
+
+### 2.2 像素抽查（同一份截图取样，`/tmp/pxbin` 读 JPEG）
+
+| 外观 | 侧栏 (20,320) | 卡片 (700,300) | 选中胶囊 (130,143) | 期望（`docs/ui.md` §7） | 结论 |
+|---|---|---|---|---|---|
+| 浅色 | `#e8e7ec` | `#ffffff` | `#ffffff` | 侧栏 `#e8e8eb`、卡片/终端 `#ffffff`、选中 `WHITE` | 一致（JPEG 压缩 ±3） |
+| 深色 | `#232227` | `#050505` | `#3a393e` | 侧栏 `#232326`、卡片/终端 `#050505`、选中 `#3a3a3d` | 一致（JPEG 压缩 ±3） |
+
+选中胶囊这一列同时验证了 `QUIET_SELECTED` 的语义：只有窗口不是 key window 时才用 `#f4f4f5` / `#2f2f32`，
+脚本截图前会把 app 置前，所以读到的是 `WHITE`。
+
+取色方式：`screencapture -R`（窗口级）→ `sips` 转 JPEG → `CGImageSource` 读像素。这组数值就是“一半白一半黑”修好之后的证据：
+浅色下侧栏与卡片同属浅色（`#e8e8eb` / `#ffffff`），深色下同属深色（`#232326` / `#050505`）。
 
 ## 3. 产品调整（用户要求，2026-10-28）
 
@@ -117,7 +134,8 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 
 | 项 | 说明 |
 |---|---|
-| ~~拖拽排序~~ | 已自动化：脚本把 `A` 组第 1 行拖到 `C` 组那一行，`order` 写成 `[2, 3, 1, 4]`（[reordered-light](images/m3/reordered-light.jpg) 可见两行对调）。仍依赖固定行高/坐标，分组或行数一变就得同步脚本里的 `KINDS`/`ROW_TOP` |
+| 拖拽排序（自动化） | 合成鼠标事件无法启动 AppKit 拖拽：`SidebarViewController.pasteboardWriterForRow` 里的 `drag start` 调试行，在一次完整跑（`PIGEON_DEBUG=1 tools/m3-gui-check.sh`）的 app 日志里是 **0 次**（`grep -c 'drag start' /tmp/pigeon-m3-*/app-light.log`）。`cliclick` 的 `dd/dm/du`、单进程连发、先 `m:` 定位都试过，落点仍停在起始行。机制本身可用：`acceptDrop` → `onReorder` → `SidebarStore` 原子写，`SidebarStoreTests` 覆盖往返；更早一次人手拖拽把 `sidebar.json` 写成 `{"order":[1,3,2],…}` 并重开生效 |
+| 拖拽排序（人手） | 需要真人拖一次才能给出可视化证据；脚本不产出 `reordered` 截图（旧图已删） |
 | ~~右键 Close Session~~ | 已稳定：`close_pane 0 -> 1` |
 | 悬停 `×` 关闭 | ui.md §2.1 提到，未实现；关闭走右键菜单 / ⌘⇧W |
 | 相对时间的“最后输出时间” | 未上报的行留空（§4.9）。harp 用终端最后一条命令的时间（`VT:9410` `age_from`），我们要宿主上报 pane 活动才做得到（M4） |

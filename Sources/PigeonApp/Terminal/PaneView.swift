@@ -40,6 +40,13 @@ final class PaneView: NSView {
         CoreTextRenderer.draw(cells: cells, cols: cols, rows: rows, cursor: cursor, in: bounds)
     }
 
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        // The grid's default fg/bg come from the theme, so a system appearance switch has to
+        // repaint the cells (explicit colours are unaffected).
+        needsDisplay = true
+    }
+
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         syncGrid()

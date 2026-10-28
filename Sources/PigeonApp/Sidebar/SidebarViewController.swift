@@ -297,6 +297,13 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
     }
 
     /// Status colors from harp's token table (`docs/ui.md` §7.4).
+    /// PIGEON_DEBUG only: the drag path is invisible otherwise, and the GUI check script
+    /// prints these lines as evidence.
+    private func debugLog(_ text: String) {
+        guard ProcessInfo.processInfo.environment["PIGEON_DEBUG"] != nil else { return }
+        FileHandle.standardError.write(Data("pigeon: \(text)\n".utf8))
+    }
+
     private func statusColor(_ session: SidebarSession) -> NSColor {
         switch session.status {
         case .blocked: return SidebarTheme.iconNeedsRing
@@ -363,6 +370,7 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
 
     func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
         guard let session = session(at: row) else { return nil }
+        debugLog("drag start row=\(row) id=\(session.id)")
         let item = NSPasteboardItem()
         item.setString(String(session.id), forType: .string)
         return item
@@ -394,6 +402,7 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
         let target = session(at: row)?.id ?? session(at: max(row - 1, 0))?.id
         let index = target.flatMap { ids.firstIndex(of: $0) } ?? ids.count
         ids.insert(id, at: min(index, ids.count))
+        debugLog("drop row=\(row) target=\(target.map(String.init) ?? "-") order=\(ids)")
         onReorder?(ids)
         return true
     }
