@@ -124,7 +124,9 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
     @objc private func toggleSidebarClicked() { onToggleSidebar?() }
 
     @objc private func newSessionClicked() {
-        FileHandle.standardError.write(Data("pigeon: + clicked\n".utf8))
+        if ProcessInfo.processInfo.environment["PIGEON_DEBUG"] != nil {
+            FileHandle.standardError.write(Data("pigeon: + clicked\n".utf8))
+        }
         onNewSession?()
     }
 

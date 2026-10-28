@@ -36,6 +36,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var haveSnapshot: Set<UInt32> = []
     private var pendingSnapshots: [UInt32: Data] = [:]
     private var nextRequest: UInt32 = 1
+    /// Session created by `+` / ⌘T: select it once the refreshed list contains it.
+    private var pendingSelectSession: Int?
 
     private var appearanceObservation: NSKeyValueObservation?
     private let store = SidebarStore()
@@ -511,6 +513,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func toggleSidebar(_ sender: Any?) {
         sidebar.view.isHidden.toggle()
+        // A hidden arranged subview comes back at width 0, which looks like "cannot reopen".
+        if !sidebar.view.isHidden {
+            splitView.setPosition(SidebarMetrics.width, ofDividerAt: 0)
+        }
         // With no sidebar the traffic lights sit over the right pane, so its header
         // pads past them (harp's `CARD_HEADER_PAD_CLOSED`).
         header.setSidebarCollapsed(sidebar.view.isHidden)
@@ -527,6 +533,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case PG_MSG_SESSIONS:
             applySessions(message)
         case PG_MSG_CREATED:
+            // Jump to the new session as soon as the refreshed list includes it.
+            pendingSelectSession = Int(Wire.u32(message, "session_id"))
             requestSessions()
         case PG_MSG_LAYOUT:
             guard let model = LayoutModel(message: message) else { break }
@@ -600,6 +608,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if ProcessInfo.processInfo.environment["PIGEON_DEBUG"] != nil {
             let apps = rows.values.map { "\($0.id):\($0.app)" }.sorted().joined(separator: " ")
             FileHandle.standardError.write(Data("pigeon: sessions apps=\(apps)\n".utf8))
+        }
+        if let pending = pendingSelectSession, rows[pending] != nil {
+            pendingSelectSession = nil
+            select(pending)
+            return
         }
         if selectedSession == nil || rows[selectedSession!] == nil {
             selectedSession = rows.keys.sorted().first

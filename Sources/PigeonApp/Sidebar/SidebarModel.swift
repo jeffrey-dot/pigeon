@@ -75,21 +75,7 @@ public enum SidebarModel {
                 if leftRank != rightRank { return leftRank < rightRank }
                 return left.title.localizedStandardCompare(right.title) == .orderedAscending
             }
-            return (group: group, sessions: disambiguated(rows))
-        }
-    }
-
-    /// Two shells in the same project are both called `zsh`; without a number the rows are
-    /// indistinguishable and look like the same session. The first keeps the plain title.
-    public static func disambiguated(_ sessions: [SidebarSession]) -> [SidebarSession] {
-        var seen: [String: Int] = [:]
-        return sessions.map { session in
-            let count = seen[session.title, default: 0] + 1
-            seen[session.title] = count
-            guard count > 1 else { return session }
-            var copy = session
-            copy.title = "\(session.title) \(count)"
-            return copy
+            return (group: group, sessions: rows)
         }
     }
 
