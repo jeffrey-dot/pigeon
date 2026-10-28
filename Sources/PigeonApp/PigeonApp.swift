@@ -65,7 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sidebar.onClose = { [weak self] id in self?.closeSession(id) }
         sidebar.onMarkRead = { [weak self] id in self?.markRead(id) }
         sidebar.onRename = { [weak self] id, name in self?.rename(id, name) }
-        sidebar.onToggleGroup = { [weak self] group in self?.toggleGroup(group) }
+        sidebar.onRenameGroup = { [weak self] group, name in self?.renameGroup(group, name) }
         sidebar.onReorder = { [weak self] order in self?.reorder(order) }
 
         container = SplitContainerView(frame: frame)
@@ -293,15 +293,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshSidebar()
     }
 
-    private func toggleGroup(_ group: String) {
-        if ProcessInfo.processInfo.environment["PIGEON_DEBUG"] != nil {
-            FileHandle.standardError.write(Data("pigeon: sidebar toggle \(group)\n".utf8))
-        }
-        if state.collapsed.contains(group) {
-            state.collapsed.removeAll { $0 == group }
-        } else {
-            state.collapsed.append(group)
-        }
+    private func renameGroup(_ group: String, _ name: String) {
+        state.renamedGroups[group] = name
         store.save(state)
         refreshSidebar()
     }
@@ -334,7 +327,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rows.values.map { row in
             SidebarSession(
                 id: row.id,
-                title: state.renamed[String(row.id)] ?? row.title,
+                title: row.app,
                 group: row.group,
                 status: row.status,
                 unread: row.unread,
@@ -346,14 +339,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func refreshSidebar() {
-        let sections = SidebarModel.sections(sidebarSessions(), order: state.order)
+        let raw = SidebarModel.sections(sidebarSessions(), order: state.order)
+        let sections = raw.map { section in
+            (group: state.renamedGroups[section.group] ?? section.group, sessions: section.sessions)
+        }
         if ProcessInfo.processInfo.environment["PIGEON_DEBUG"] != nil {
             let needs = SidebarModel.needsYou(sidebarSessions())
             FileHandle.standardError.write(Data(
                 "pigeon: sidebar sessions=\(rows.count) needs=\(needs) selected=\(selectedSession.map(String.init) ?? "-")\n".utf8
             ))
         }
-        sidebar.update(sections: sections, selected: selectedSession, collapsed: state.collapsedSet)
+        sidebar.update(sections: sections, selected: selectedSession)
         let needs = SidebarModel.needsYou(sidebarSessions())
         window.title = needs > 0 ? "pigeon — \(needs) needs you" : "pigeon"
     }

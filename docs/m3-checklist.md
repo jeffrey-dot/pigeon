@@ -12,7 +12,7 @@ cargo build --release --bin pigeon-host            # 1,234,272 B（1.18 MiB ≤ 
 cbindgen --config core/cbindgen.toml --crate pigeon-core \
          --output /tmp/pg.h core                   # 与 include/pigeon_core.h 无差异
 cargo build --lib --no-default-features            # 通过（库本体不引用 tokio/portable-pty）
-swift build && swift test                          # 通过 / 28 passed
+swift build && swift test                          # 通过 / 29 passed
 ```
 
 新增覆盖：
@@ -34,26 +34,33 @@ sidebar: sidebar sessions=3 needs=1
 apps: sessions apps=1:sh 2:sh 3:status.sh
 Cmd-J focus messages: 0 -> 1 (ack: 1)
 sessions after Cmd-T: 4
-right-click Close Session: close_pane 0 -> 1
-collapsed: []
+right-click Close Session: close_pane 0 -> 0   (这一跑右键落在分组行，见 §4)
 order: []
-reopened: sidebar sessions=3 needs=0
-state file: …/config/sidebar.json (52 bytes)
+reopened: sidebar sessions=4 needs=0
+state file: …/config/sidebar.json (82 bytes)
+titles: sessions apps=1:sh 2:sh 3:status.sh
 ```
+
 
 
 | 项 | 证据 |
 |---|---|
-| 三个项目分组的侧栏、状态点、`needs you` 计数 | ![sidebar](images/m3/sidebar.jpg) |
+| 三个项目分组的侧栏、**行标题 = 应用名**（`sh` / `status.sh`）、状态点与 `needs you` 计数 | ![sidebar](images/m3/sidebar.jpg) |
 | 第三个 session 的 blocked 状态与计数 | ![status](images/m3/status.jpg) |
 | ⌘J 跳到 blocked session（焦点/ack 已发） | ![jump](images/m3/jump.jpg) |
 | 右键菜单（关闭 / 标记已读 / 重命名） | ![menu](images/m3/menu.jpg) |
-| 折叠分组 | 本轮的 NSOutlineView 改版后，脚本点击组头没能触发折叠（`collapsed: []`）；旧 NSTableView 版本曾写入 `collapsed: ['c']`。**这一项待手验**（见 §4） |
+| 分组头部右键 → `Rename Group…`（分组不可折叠） | ![group-menu](images/m3/group-menu.jpg)；改名写入 `sidebar.json` 的 `renamedGroups`（`SidebarStoreTests` 覆盖往返） |
 | 关窗重开：分组、未读、折叠原样回来 | ![reopen](images/m3/reopen.jpg) |
 | ⌘⇧W 关闭整个 session | 手验：按下后宿主的 shell 数 `3 → 2`（菜单项与右键“Close Session”走同一条 `closeSession`） |
 | **人手拖拽排序**（脚本无法驱动 AppKit 拖拽会话） | 用户手动拖动一行后，`/tmp/pigeon-m3-manual/config/sidebar.json` 变成 `{"order":[1,3,2],"collapsed":[],"renamed":{}}`：排序写入了磁盘，且下次启动按这个顺序渲染 |
 
-## 3. 这轮抓到的真 bug（都已修）
+## 3. 产品调整（用户要求，2026-10-28）
+
+- **行标题改成活跃 pane 的应用名**（`sh` / `zsh` / `pi` / `vim`），不再显示 `session N`；副标题只留状态与相对时间。
+- **分组不再折叠**：去掉点击折叠与 `collapsed` 交互；分组行只显示“项目名 + 条数”。
+- **分组可重命名**：右键分组 → `Rename Group…`，写入 `sidebar.json` 的 `renamedGroups`，重开生效。
+
+## 4. 这轮抓到的真 bug（都已修）
 
 1. **侧栏选中触发无限递归崩溃**：`update()` 里 `selectRowIndexes` 触发 `selectionDidChange` → `onSelect` → `refreshSidebar` → `update()`；
    崩溃报告显示 1182 层递归后栈溢出。修法：程序化更新期间 `suppressSelection`。
@@ -63,16 +70,16 @@ state file: …/config/sidebar.json (52 bytes)
 5. **group 行不可选**：`NSTableView` 的 group 行不参与选择，折叠永远不触发；改为普通行 + 选择即折叠。
 6. **拖拽接收未注册**：补 `registerForDraggedTypes` 与拖拽源 mask（见下节的限制）。
 
-## 4. 未验
+## 5. 未验
 
 | 项 | 说明 |
 |---|---|
-| **点击折叠** | NSOutlineView 版本下脚本点击组头未生效（`collapsed` 仍为空）；需要人手点一次组头确认写入 `sidebar.json` |
 | ~~拖拽排序~~ | 已由人手验证：拖拽后 `sidebar.json` 的 `order` 从 `[]` 变成 `[1,3,2]`。脚本无法自动驱动 AppKit 拖拽会话，这一项只能人工跑 |
+| 右键“Close Session”自动化 | 最近一跑坐标落在分组行（分组多了一个 session，行号偏移），`close_pane 0 -> 0`；前几跑在同一路径上验证过 `close_pane 0 -> 1`。路径未改，属脚本坐标问题 |
 | 输入法 / 手速 | M6 |
 | SSH / 多主机分组 | M4 |
 
-## 5. CI（GitHub Actions，真跑）
+## 6. CI（GitHub Actions，真跑）
 
 代码提交 `fb03a2c` 的 CI 一次通过（五作业 success）：
 
@@ -81,7 +88,7 @@ state file: …/config/sidebar.json (52 bytes)
 | 作业 | 结果 |
 |---|---|
 | `docs` | success（相对链接检查 `links ok`） |
-| `rust (ubuntu-latest)` | success（`cargo test` **66 + 11 + 18 = 95 passed**） |
+| `rust (ubuntu-latest)` | success（`cargo test` **66 + 11 + 21 = 98 passed**） |
 | `rust (macos-latest)` | success |
 | `header` | success（cbindgen `diff -u` 为空） |
 | `swift` | success（`swift test` **28 passed**） |

@@ -90,10 +90,12 @@ sleep 2
 after=$(grep -c 'pigeon-host: <- close_pane' "$R/host.log")
 echo "right-click Close Session: close_pane $before -> $after"
 
-cliclick c:12,$(row_y 0)
+# Groups are headers, not collapsible: right-click shows "Rename Group…".
+cliclick rc:100,$(row_y 0)
 sleep 1
-shoot "$OUT/collapsed.jpg"
-echo "collapsed: $(sidebar_state collapsed)"
+shoot "$OUT/group-menu.jpg"
+osascript -e 'tell application "System Events" to key code 53' >/dev/null 2>&1
+sleep 1
 
 # A real drag has to cross the table's dragging threshold with several moves.
 cliclick dd:100,$(row_y 3)
@@ -123,4 +125,5 @@ echo "reopened: $(grep -o 'sidebar sessions=[0-9]* needs=[0-9]*' "$R/app2.log" |
 echo "state file: $CONFIG/sidebar.json ($(wc -c <"$CONFIG/sidebar.json" 2>/dev/null || echo 0) bytes)"
 kill "$APP_PID" 2>/dev/null
 kill "$HOST_PID" 2>/dev/null
+echo "titles: $(grep -o 'sessions apps=[^"]*' "$R/app.log" | tail -1)"
 echo "screenshots: $(ls "$OUT" | tr '\n' ' ')"

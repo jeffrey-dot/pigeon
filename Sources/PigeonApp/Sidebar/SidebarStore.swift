@@ -9,6 +9,8 @@ struct SidebarState: Codable, Equatable {
     var renamed: [String: String] = [:]
     /// Session id → unread count, so a reopen keeps the dots.
     var unread: [String: Int] = [:]
+    /// Project group key → user-visible name.
+    var renamedGroups: [String: String] = [:]
 
     var collapsedSet: Set<String> { Set(collapsed) }
 }

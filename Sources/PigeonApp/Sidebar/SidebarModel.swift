@@ -105,7 +105,7 @@ public enum SidebarModel {
 
     /// The line under a row's title: app, state and age.
     public static func rowSubtitle(for session: SidebarSession, now: Date = Date()) -> String {
-        "\(session.app) · \(subtitle(for: session, now: now, since: session.lastSeen))"
+        subtitle(for: session, now: now, since: session.lastSeen)
     }
 
     /// Sessions that want the user: blocked, errored, or finished-and-unread.

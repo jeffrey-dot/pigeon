@@ -104,7 +104,7 @@ final class SidebarOrderingTests: XCTestCase {
         var session = row(1, .working, app: "vim")
         session.lastSeen = Date(timeIntervalSince1970: 1_000)
         let now = Date(timeIntervalSince1970: 1_090)
-        XCTAssertEqual(SidebarModel.rowSubtitle(for: session, now: now), "vim · Working · 1m")
+        XCTAssertEqual(SidebarModel.rowSubtitle(for: session, now: now), "Working · 1m")
     }
 
     func testStatusParsingCoversTheProtocolStrings() {
@@ -134,6 +134,7 @@ final class SidebarStoreTests: XCTestCase {
         state.collapsed = ["pigeon"]
         state.order = [3, 1, 2]
         state.renamed["3"] = "deploy"
+        state.renamedGroups["pigeon"] = "pigeon-core"
         store.save(state)
         XCTAssertEqual(store.load(), state)
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
