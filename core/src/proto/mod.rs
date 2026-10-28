@@ -288,6 +288,16 @@ pub enum Message {
         cols: u16,
         rows: u16,
     },
+    /// Zoom one pane to the whole window (protocol §3.2).
+    ZoomPane {
+        id: u32,
+        pane_id: u32,
+    },
+    /// Give every pane its place in the tree back.
+    Unzoom {
+        id: u32,
+        pane_id: u32,
+    },
     /// Broadcast after every size change: who won the size policy and how many
     /// clients are watching (protocol §6).
     SizeState {
@@ -352,6 +362,8 @@ impl Message {
             Self::Appearance { .. } => "appearance",
             Self::Keys { .. } => "keys",
             Self::ResizePane { .. } => "resize_pane",
+            Self::ZoomPane { .. } => "zoom_pane",
+            Self::Unzoom { .. } => "unzoom",
             Self::SizeState { .. } => "size_state",
             Self::PaneExited { .. } => "pane_exited",
             Self::Status { .. } => "status",
@@ -445,6 +457,8 @@ fn is_known(tag: &str) -> bool {
             | "appearance"
             | "keys"
             | "resize_pane"
+            | "zoom_pane"
+            | "unzoom"
             | "size_state"
             | "pane_exited"
             | "status"
@@ -639,6 +653,8 @@ mod tests {
                 source: "latest".into(),
                 clients: 2,
             },
+            Message::ZoomPane { id: 7, pane_id: 1 },
+            Message::Unzoom { id: 8, pane_id: 1 },
             Message::PaneExited {
                 pane_id: 1,
                 code: -1,
@@ -915,15 +931,13 @@ mod tests {
     }
 
     #[test]
-    fn zoom_messages_are_unsupported_not_fatal() {
-        for tag in ["zoom_pane", "unzoom"] {
-            let payload = ciborium::value::Value::Map(vec![
-                ("t".into(), tag.into()),
-                ("pane_id".into(), 1u32.into()),
-            ]);
-            let mut bytes = Vec::new();
-            ciborium::into_writer(&payload, &mut bytes).expect("encode");
-            assert_eq!(decode(&bytes), Err(PgError::Unsupported), "{tag}");
+    fn zoom_messages_round_trip() {
+        for message in [
+            Message::ZoomPane { id: 7, pane_id: 1 },
+            Message::Unzoom { id: 8, pane_id: 1 },
+        ] {
+            let bytes = encode(&message).expect("encode");
+            assert_eq!(decode(&bytes).expect("decode"), message);
         }
     }
 }

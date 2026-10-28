@@ -14,6 +14,8 @@ final class SplitContainerView: NSView {
     var onResizeSplit: ((UInt32, Double) -> Void)?
     var onPaneInput: ((UInt32, [UInt8]) -> Void)?
     var onPaneResize: ((UInt32, UInt16, UInt16) -> Void)?
+    /// ⌘⇧↩: zoom the focused pane, or unzoom it when it already fills the window.
+    var onToggleZoom: (() -> Void)?
     /// The pane needs a fresh scrollback: the owner re-attaches that pane (protocol §3.3).
     var onPaneHistory: ((UInt32) -> Void)?
 
@@ -38,6 +40,9 @@ final class SplitContainerView: NSView {
         for pane in model.panes {
             let view = panes[pane.id] ?? makePane(pane.id)
             view.frame = frame(for: pane.rect)
+            // A zoomed pane covers the window; the siblings stay alive behind it so
+            // unzoom is instant and their contents keep up to date.
+            view.isHidden = model.zoom != 0 && pane.id != model.zoom
             panes[pane.id] = view
         }
         if let focused = panes[model.focus], window?.firstResponder !== focused {
@@ -141,6 +146,7 @@ final class SplitContainerView: NSView {
     @objc func splitVertical(_ sender: Any?) { onSplit?(PG_AXIS_VERTICAL) }
     @objc func splitHorizontal(_ sender: Any?) { onSplit?(PG_AXIS_HORIZONTAL) }
     @objc func closeFocused(_ sender: Any?) { onClose?() }
+    @objc func toggleZoom(_ sender: Any?) { onToggleZoom?() }
     @objc func focusPrevious(_ sender: Any?) {
         if let next = model.nextFocus(forward: false) {
             focusPane(next)

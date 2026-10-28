@@ -20,6 +20,8 @@ struct LayoutModel: Equatable {
     var panes: [Pane]
     var dividers: [Divider]
     var focus: UInt32
+    /// The pane filling the window, or 0 when every pane shows (`layout.zoom`).
+    var zoom: UInt32
 
     static let empty = LayoutModel(panes: [], dividers: [], focus: 0)
 
@@ -59,14 +61,16 @@ struct LayoutModel: Equatable {
                     box: CGRect(x: Double($0.x), y: Double($0.y), width: Double($0.w), height: Double($0.h))
                 )
             },
-            focus: pg_msg_layout_focus(message)
+            focus: pg_msg_layout_focus(message),
+            zoom: pg_msg_layout_zoom(message)
         )
     }
 
-    init(panes: [Pane], dividers: [Divider], focus: UInt32) {
+    init(panes: [Pane], dividers: [Divider], focus: UInt32, zoom: UInt32 = 0) {
         self.panes = panes
         self.dividers = dividers
         self.focus = focus
+        self.zoom = zoom
     }
 
     private static let blankRect = PgRect(

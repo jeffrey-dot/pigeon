@@ -49,6 +49,8 @@ pub struct Layout {
     next_split: SplitId,
     min_cols: u16,
     min_rows: u16,
+    /// The pane covering the whole window, if any (protocol `layout.zoom`).
+    zoom: Option<PaneId>,
 }
 
 impl Layout {
@@ -59,6 +61,7 @@ impl Layout {
             next_split: 1,
             min_cols: MIN_COLS,
             min_rows: MIN_ROWS,
+            zoom: None,
         }
     }
 
@@ -177,6 +180,9 @@ impl Layout {
 
     /// Removes a pane; its sibling takes over the parent's rect.
     pub fn close(&mut self, pane: PaneId) -> PgResult<()> {
+        if self.zoom == Some(pane) {
+            self.zoom = None;
+        }
         let root = self.root.take().ok_or(PgError::NoSuchPane)?;
         let (root, found) = remove(root, pane);
         self.root = root;
@@ -222,7 +228,8 @@ impl Layout {
         .ok_or(PgError::NoSuchSplit)
     }
 
-    /// Normalized rects for every pane, in tree order.
+    /// Normalized rects for every pane, in tree order. A zoomed pane gets the whole window;
+    /// the others keep their place so unzoom can restore the geometry exactly.
     pub fn rects(&self) -> Vec<(PaneId, Rect)> {
         let mut out = Vec::new();
         if let Some(root) = &self.root {
@@ -236,6 +243,18 @@ impl Layout {
                 },
                 &mut out,
             );
+        }
+        if let Some(zoomed) = self.zoom {
+            for (pane, rect) in out.iter_mut() {
+                if *pane == zoomed {
+                    *rect = Rect {
+                        x: 0.0,
+                        y: 0.0,
+                        w: 1.0,
+                        h: 1.0,
+                    };
+                }
+            }
         }
         out
     }
@@ -282,6 +301,34 @@ impl Layout {
         };
         self.focused = panes[next];
         Some(self.focused)
+    }
+
+    /// The pane covering the window, if one is zoomed.
+    pub fn zoomed(&self) -> Option<PaneId> {
+        self.zoom
+    }
+
+    /// Zooms `pane` to the whole window. Zooming also focuses it: the point of zoom is to
+    /// work in one pane, so keystrokes and size reports must follow.
+    pub fn zoom(&mut self, pane: PaneId) -> bool {
+        if !self.pane_ids().contains(&pane) {
+            return false;
+        }
+        self.zoom = Some(pane);
+        self.focused = pane;
+        true
+    }
+
+    /// Restores the tree as it was. `pane` is ignored beyond "is it a pane we know" when the
+    /// tree is not zoomed — unzoom is idempotent per protocol (`unsupported` is for unknown
+    /// messages, not for a no-op).
+    pub fn unzoom(&mut self, pane: PaneId) -> bool {
+        if !self.pane_ids().contains(&pane) {
+            return false;
+        }
+        self.zoom = None;
+        self.focused = pane;
+        true
     }
 }
 
@@ -785,6 +832,50 @@ mod tests {
             (splits[1].3.x - 0.3).abs() < 1e-5,
             "inner split sits in the right half"
         );
+    }
+
+    #[test]
+    fn zoom_gives_one_pane_the_whole_window_and_unzoom_restores_the_tree() {
+        let mut tree = layout();
+        tree.split(1, 2, Axis::Vertical, 0.5, 100, 30)
+            .expect("split");
+        tree.split(2, 3, Axis::Horizontal, 0.3, 100, 30)
+            .expect("split");
+        let before = tree.rects();
+
+        assert!(tree.zoom(3));
+        assert_eq!(tree.zoomed(), Some(3));
+        assert_eq!(tree.focused(), Some(3), "zoom focuses the pane it zooms");
+        let zoomed = tree.rects();
+        assert_eq!(
+            zoomed
+                .iter()
+                .find(|(pane, _)| *pane == 3)
+                .map(|(_, rect)| *rect),
+            Some(Rect {
+                x: 0.0,
+                y: 0.0,
+                w: 1.0,
+                h: 1.0
+            })
+        );
+
+        assert!(tree.unzoom(3));
+        assert_eq!(tree.zoomed(), None);
+        assert_eq!(tree.rects(), before, "the nested ratios come back exactly");
+        assert!(!tree.zoom(99), "an unknown pane cannot be zoomed");
+        assert!(!tree.unzoom(99));
+    }
+
+    #[test]
+    fn closing_the_zoomed_pane_drops_the_zoom() {
+        let mut tree = layout();
+        tree.split(1, 2, Axis::Vertical, 0.5, 100, 30)
+            .expect("split");
+        assert!(tree.zoom(2));
+        tree.close(2).expect("close");
+        assert_eq!(tree.zoomed(), None, "the zoom cannot outlive its pane");
+        assert_eq!(tree.focused(), Some(1));
     }
 
     #[test]

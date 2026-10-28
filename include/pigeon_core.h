@@ -179,6 +179,8 @@ typedef enum PgMsgType {
     PG_MSG_ACK_STATUS = 23,
     PG_MSG_APPEARANCE = 24,
     PG_MSG_SIZE_STATE = 25,
+    PG_MSG_ZOOM_PANE = 26,
+    PG_MSG_UNZOOM = 27,
 } PgMsgType;
 
 typedef enum PgStatusKind {
@@ -561,6 +563,11 @@ size_t pg_msg_layout_rects(const PgMsg *msg, struct PgRect *out, size_t cap);
  * Dividers of a `layout` message, for divider hit-testing and drawing.
  */
 size_t pg_msg_layout_splits(const PgMsg *msg, struct PgSplit *out, size_t cap);
+
+/**
+ * Zoom carried by a `layout` message (0 when absent).
+ */
+uint32_t pg_msg_layout_zoom(const PgMsg *msg);
 
 /**
  * Focus carried by a `layout` message (0 when absent).

@@ -114,6 +114,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // A fresh history comes with a fresh `attach`; nothing else carries scrollback.
         container.onPaneHistory = { [weak self] pane in self?.sendAttach(pane, force: true) }
+        container.onToggleZoom = { [weak self] in self?.toggleZoom() }
 
         splitView = NSSplitView()
         splitView.isVertical = true
@@ -226,6 +227,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         toggleSidebarItem.target = self
         viewMenu.addItem(toggleSidebarItem)
         viewMenu.addItem(withTitle: "Close Pane", action: #selector(SplitContainerView.closeFocused(_:)), keyEquivalent: "w")
+        let zoomItem = NSMenuItem(
+            title: "Zoom Pane", action: #selector(SplitContainerView.toggleZoom(_:)), keyEquivalent: "\r")
+        zoomItem.keyEquivalentModifierMask = [.command, .shift]
+        viewMenu.addItem(zoomItem)
         viewMenu.addItem(withTitle: "Previous Pane", action: #selector(SplitContainerView.focusPrevious(_:)), keyEquivalent: "[")
         viewMenu.addItem(withTitle: "Next Pane", action: #selector(SplitContainerView.focusNext(_:)), keyEquivalent: "]")
         viewItem.submenu = viewMenu
@@ -532,6 +537,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func newSession(_ sender: Any?) {
         sendNewSession(cwd: rows[selectedSession ?? -1]?.cwd)
+    }
+
+    /// ⌘⇧↩ zooms the focused pane; pressing it again gives the siblings their space back.
+    private func toggleZoom() {
+        guard let pane = focusedPane else { return }
+        let zooms = container.model.zoom != pane
+        send({ message in
+            Wire.set(message, u32: "id", requestID())
+            Wire.set(message, u32: "pane_id", pane)
+        }, type: zooms ? PG_MSG_ZOOM_PANE : PG_MSG_UNZOOM)
     }
 
     @objc private func closeSelectedSession(_ sender: Any?) {

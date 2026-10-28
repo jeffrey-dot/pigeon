@@ -429,7 +429,7 @@ fn layout_message(session_id: u32, session: &Session) -> Message {
             .describe()
             .map(to_proto_tree)
             .unwrap_or(Node::Leaf { leaf: 0 }),
-        zoom: None,
+        zoom: session.layout.zoomed(),
         focus: session.layout.focused(),
     }
 }
@@ -917,6 +917,46 @@ async fn dispatch(
             }
             None
         }
+        Message::ZoomPane { id, pane_id } => {
+            let mut map = sessions.lock().await;
+            let Some(session_id) = session_of(&map, pane_id) else {
+                return Some(Message::Error {
+                    code: "no_such_pane".into(),
+                    detail: format!("pane {pane_id}"),
+                    id: Some(id),
+                });
+            };
+            let session = map.get_mut(&session_id)?;
+            if !session.layout.zoom(pane_id) {
+                return Some(Message::Error {
+                    code: "no_such_pane".into(),
+                    detail: format!("pane {pane_id}"),
+                    id: Some(id),
+                });
+            }
+            apply_layout(session_id, session, events);
+            None
+        }
+        Message::Unzoom { id, pane_id } => {
+            let mut map = sessions.lock().await;
+            let Some(session_id) = session_of(&map, pane_id) else {
+                return Some(Message::Error {
+                    code: "no_such_pane".into(),
+                    detail: format!("pane {pane_id}"),
+                    id: Some(id),
+                });
+            };
+            let session = map.get_mut(&session_id)?;
+            if !session.layout.unzoom(pane_id) {
+                return Some(Message::Error {
+                    code: "no_such_pane".into(),
+                    detail: format!("pane {pane_id}"),
+                    id: Some(id),
+                });
+            }
+            apply_layout(session_id, session, events);
+            None
+        }
         Message::ClosePane { pane_id, .. } => {
             let mut map = sessions.lock().await;
             let session_id = session_of(&map, pane_id)?;
@@ -949,7 +989,7 @@ async fn dispatch(
             None
         }
         Message::Ping { ts } => Some(Message::Pong { ts }),
-        // `zoom_pane` / `unzoom` are not implemented in M1 (protocol rule 2).
+        // Protocol rule 2: a message we do not know is not an error.
         other => Some(Message::Unsupported {
             t_of: other.name().to_owned(),
         }),

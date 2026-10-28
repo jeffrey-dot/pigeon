@@ -1169,42 +1169,55 @@ fn vim_alternate_screen_survives_a_reconnect() {
 }
 
 #[test]
-fn zoom_messages_are_unsupported_at_the_host() {
+fn zooming_a_pane_gives_it_the_whole_window_and_unzoom_restores_the_split() {
     let _serial = one_at_a_time();
     let host = start_host();
     let mut client = Client::connect(&host.socket);
     hello(&mut client);
+    let first = attach_first(&mut client);
+    let (second, _) = split(&mut client, first, proto::SplitAxis::Vertical, 0.5, 2);
 
-    for tag in ["zoom_pane", "unzoom"] {
-        let payload = ciborium::value::Value::Map(vec![
-            (
-                ciborium::value::Value::Text("t".into()),
-                ciborium::value::Value::Text(tag.into()),
-            ),
-            (
-                ciborium::value::Value::Text("pane_id".into()),
-                ciborium::value::Value::Integer(1u32.into()),
-            ),
-        ]);
-        let mut body = Vec::new();
-        ciborium::into_writer(&payload, &mut body).expect("encode");
-        let mut frame = (body.len() as u32).to_le_bytes().to_vec();
-        frame.extend_from_slice(&body);
-        client.stream.write_all(&frame).expect("write");
-        let Message::Unsupported { t_of } =
-            client.wait_for(|m| matches!(m, Message::Unsupported { .. }))
-        else {
-            unreachable!()
-        };
-        assert_eq!(t_of, tag);
-    }
-
-    // The connection is still healthy afterwards.
-    client.send(&Message::Ping { ts: 11 });
-    let Message::Pong { ts } = client.wait_for(|m| matches!(m, Message::Pong { .. })) else {
+    client.send(&Message::ZoomPane {
+        id: 9,
+        pane_id: second,
+    });
+    let zoomed = wait_for_layout(&mut client, |m| {
+        matches!(m, Message::Layout { zoom: Some(_), .. })
+    });
+    let Message::Layout { zoom, focus, .. } = zoomed else {
         unreachable!()
     };
-    assert_eq!(ts, 11);
+    assert_eq!(zoom, Some(second));
+    assert_eq!(focus, Some(second), "zoom focuses what it zooms");
+    // The zoomed pane is told the whole box; the client also hides the sibling.
+    expect_size_state(&mut client, second, (80, 24, "latest", 1));
+
+    client.send(&Message::Unzoom {
+        id: 10,
+        pane_id: second,
+    });
+    let restored = wait_for_layout(&mut client, |m| {
+        matches!(m, Message::Layout { zoom: None, .. })
+    });
+    let Message::Layout { tree, .. } = restored else {
+        unreachable!()
+    };
+    assert_eq!(
+        leaves_of(&tree),
+        vec![first, second],
+        "the tree survived zoom"
+    );
+
+    // Zooming an unknown pane is an error, not a silent no-op.
+    client.send(&Message::ZoomPane {
+        id: 11,
+        pane_id: 9999,
+    });
+    let Message::Error { code, .. } = client.wait_for(|m| matches!(m, Message::Error { .. }))
+    else {
+        unreachable!()
+    };
+    assert_eq!(code, "no_such_pane");
 }
 
 #[test]

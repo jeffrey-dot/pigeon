@@ -51,6 +51,8 @@ pub enum PgMsgType {
     PG_MSG_ACK_STATUS = 23,
     PG_MSG_APPEARANCE = 24,
     PG_MSG_SIZE_STATE = 25,
+    PG_MSG_ZOOM_PANE = 26,
+    PG_MSG_UNZOOM = 27,
 }
 
 /// Wire name ↔ enum. Kept in one place so the two can never drift.
@@ -80,6 +82,8 @@ const NAMES: &[(PgMsgType, &str)] = &[
     (PgMsgType::PG_MSG_ACK_STATUS, "ack_status"),
     (PgMsgType::PG_MSG_APPEARANCE, "appearance"),
     (PgMsgType::PG_MSG_SIZE_STATE, "size_state"),
+    (PgMsgType::PG_MSG_ZOOM_PANE, "zoom_pane"),
+    (PgMsgType::PG_MSG_UNZOOM, "unzoom"),
 ];
 
 fn name_of(msg_type: PgMsgType) -> Option<&'static str> {
@@ -529,6 +533,21 @@ pub extern "C" fn pg_msg_layout_splits(msg: *const PgMsg, out: *mut PgSplit, cap
             }
         }
         Ok(splits.len())
+    })
+}
+
+/// Zoom carried by a `layout` message (0 when absent).
+#[no_mangle]
+pub extern "C" fn pg_msg_layout_zoom(msg: *const PgMsg) -> u32 {
+    ffi_call(0, || {
+        let msg = unsafe_ref(msg)?;
+        if type_of(&msg.t) != PgMsgType::PG_MSG_LAYOUT {
+            return Err(PgError::InvalidArg);
+        }
+        Ok(match msg.to_message()? {
+            Message::Layout { zoom, .. } => zoom.unwrap_or(0),
+            _ => 0,
+        })
     })
 }
 
