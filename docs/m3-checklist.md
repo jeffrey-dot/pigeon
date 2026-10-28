@@ -180,9 +180,11 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 
 ## 6. CI（GitHub Actions，真跑）
 
-HEAD `41c25d8`（OSC 4/10/11 回答 + 宿主默认深色板 + 外观切换重发）的 CI 五作业 success：
+HEAD `15bf66f`（OSC 4/10/11 回答 + 宿主默认深色板 + 文档/注释统一）的 CI 五作业 success：
 
-<https://github.com/jeffrey-dot/pigeon/actions/runs/40697484387>
+<https://github.com/jeffrey-dot/pigeon/actions/runs/40699591464>
+
+代码提交 `41c25d8` 的 run [40697484387](https://github.com/jeffrey-dot/pigeon/actions/runs/40697484387) 同样五作业 success。
 
 | 作业 | 结果 |
 |---|---|
@@ -210,6 +212,9 @@ hot switch: appearance sent 1 -> 4 over 3 toggles
 appearance -> system appearance -> dark appearance -> light
 menu Close Session: close_pane 0 -> 1
 ```
+
+本机全量 `cargo test` 偶尔会红一条**既有**用例（`three_panes_survive_a_disconnect_and_restore_layout_and_screens`，
+单跑 3/3 通过、CI 上 3 次全绿），是并行负载下真实 PTY 的时序抖动，与本次改动无关。
 
 更早两次红：`61239d3` 的 `rust (macos-latest)` 因既有用例
 `acked_status_is_not_replayed_after_reconnect` 的 `sleep(200ms)` 抢跑（已改成消息顺序屏障），
