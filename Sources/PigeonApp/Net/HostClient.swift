@@ -18,6 +18,8 @@ final class HostClient {
     }
 
     private let fd: Int32
+    /// Where frames go. Equal to `fd` for a socket; a separate pipe for `ssh ... --proxy`.
+    private let writeFD: Int32
     private let source: DispatchSourceRead
     private var inbox = Data()
 
@@ -52,14 +54,19 @@ final class HostClient {
             throw Failure.connect(detail)
         }
 
-        return HostClient(fd: fd)
+        return HostClient(read: fd, write: fd)
     }
 
-    private init(fd: Int32) {
-        self.fd = fd
-        source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: .global(qos: .userInitiated))
+    /// Wraps two pipes: what a child process (`ssh ... --proxy`) gives us is not one fd.
+    init(read: Int32, write: Int32) {
+        self.fd = read
+        writeFD = write
+        source = DispatchSource.makeReadSource(fileDescriptor: read, queue: .global(qos: .userInitiated))
         source.setEventHandler { [weak self] in self?.readAvailable() }
-        source.setCancelHandler { Darwin.close(fd) }
+        source.setCancelHandler {
+            Darwin.close(read)
+            if write != read { Darwin.close(write) }
+        }
         source.resume()
     }
 
@@ -71,7 +78,7 @@ final class HostClient {
         frame.withUnsafeBytes { raw in
             var offset = 0
             while offset < raw.count {
-                let written = Darwin.write(fd, raw.baseAddress!.advanced(by: offset), raw.count - offset)
+                let written = Darwin.write(writeFD, raw.baseAddress!.advanced(by: offset), raw.count - offset)
                 if written <= 0 { break }
                 offset += written
             }

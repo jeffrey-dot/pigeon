@@ -32,6 +32,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var container: SplitContainerView!
     private var hostStatus: HostStatusView!
     private var client: HostClient?
+    /// Set when `PIGEON_REMOTE=<host>` picked a remote machine instead of the local socket.
+    private var remote: RemoteSession?
+    /// Mode C keeps the VT state here (no host on the far side).
+    private var localSession: LocalSession?
     /// Attempts made since the socket last worked; drives `HostRecovery`.
     private var recoveryAttempt = 0
     /// Why the host rejected this client (bad version, busy); retrying cannot help.
@@ -67,7 +71,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         state = store.load()
         buildMenu()
         buildWindow()
-        if !connectHost() {
+        if let host = ProcessInfo.processInfo.environment["PIGEON_REMOTE"], !host.isEmpty {
+            startRemote(host)
+        } else if !connectHost() {
             hostLost("No session host is running.")
         }
     }
@@ -258,30 +264,94 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - host
 
+    /// `PIGEON_REMOTE=<ssh host>`: open a remote session instead of the local socket
+    /// (`docs/remote.md` §1). Probing runs off the main thread — ssh takes a second and the
+    /// window must appear first.
+    private func startRemote(_ host: String) {
+        let session = RemoteSession(host: host)
+        remote = session
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let outcome = try session.connect()
+                DispatchQueue.main.async { [weak self] in self?.apply(outcome) }
+            } catch {
+                DispatchQueue.main.async { [weak self] in
+                    self?.showStopped("cannot reach \(host): \(error)")
+                }
+            }
+        }
+    }
+
+    private func apply(_ outcome: RemoteSession.Outcome) {
+        debugLog("remote transport=\(outcome.transport.rawValue) host=\(remote?.host ?? "-")")
+        if let client = outcome.client {
+            wire(client)
+            return
+        }
+        guard let process = outcome.process, let host = remote?.host else { return }
+        startDegraded(process: process, host: host, note: outcome.note)
+    }
+
+    /// Mode C: plain ssh, local VT. The window says plainly that nothing outlives it.
+    private func startDegraded(process: Process, host: String, note: String) {
+        let session = LocalSession()
+        localSession = session
+        container.onPaneInput = { [weak session] _, bytes in session?.write(bytes) }
+        container.onPaneResize = { [weak session] _, cols, rows in
+            session?.resize(cols: cols, rows: rows)
+        }
+        session.onUpdate = { [weak self] in
+            DispatchQueue.main.async { self?.applyLocalSnapshot() }
+        }
+        let model = LayoutModel(
+            panes: [LayoutModel.Pane(
+                id: session.pane, rect: CGRect(x: 0, y: 0, width: 1, height: 1))],
+            dividers: [],
+            focus: session.pane
+        )
+        container.apply(model)
+        session.attach(process: process)
+        window.title = "pigeon — \(host) (not persistent)"
+        header.update(title: host, cwd: note, badge: "Not persistent")
+        hostStatus.hide()
+    }
+
+    private func applyLocalSnapshot() {
+        guard let session = localSession, let snapshot = session.snapshot() else { return }
+        defer { pg_snapshot_free(snapshot) }
+        _ = container.applySnapshot(snapshot)
+    }
+
     /// Tries to connect; `false` when the socket is not there (yet).
     @discardableResult
     private func connectHost() -> Bool {
         let path = Self.defaultSocketPath()
         do {
             let client = try HostClient.connect(path: path)
-            client.onMessage = { [weak self] message in
-                DispatchQueue.main.async {
-                    defer { Wire.free(message) }
-                    self?.handle(message)
-                }
-            }
-            client.onClose = { [weak self] in
-                DispatchQueue.main.async { self?.hostLost("The session host closed the connection.") }
-            }
-            self.client = client
-            recoveryAttempt = 0
-            hostStatus.hide()
-            sendHello()
+            wire(client)
             return true
         } catch {
             debugLog("host unreachable at \(path): \(error)")
             return false
         }
+    }
+
+    /// Points the window at a live client: the local socket and a remote bridge look the same
+    /// from here on (that is the point of mode A/B).
+    private func wire(_ client: HostClient) {
+        client.onMessage = { [weak self] message in
+            DispatchQueue.main.async {
+                defer { Wire.free(message) }
+                self?.handle(message)
+            }
+        }
+        client.onClose = { [weak self] in
+            DispatchQueue.main.async { self?.hostLost("The session host closed the connection.") }
+        }
+        self.client = client
+        recoveryAttempt = 0
+        hostStatus.hide()
+        sendHello()
     }
 
     /// The socket is gone: say so, then try to bring it back (including starting the host) a

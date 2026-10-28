@@ -194,9 +194,16 @@ async fn run() -> Result<(), String> {
             "--socket" => socket = PathBuf::from(args.next().ok_or("--socket needs a path")?),
             "--shell" => shell = args.next().ok_or("--shell needs a path")?,
             "--stdio" => transport = Transport::Stdio,
+            // Prints where the socket would be and exits: the client needs the exact path to
+            // set up `ssh -L` without duplicating the rule (protocol §1).
+            "--socket-path" => {
+                println!("{}", default_socket_path().display());
+                return Ok(());
+            }
             "--proxy" => transport = Transport::Proxy,
             "-h" | "--help" => {
                 println!("usage: pigeon-host [--socket PATH] [--shell PATH] [--stdio|--proxy]");
+                println!("  --socket-path  print the default socket path and exit");
                 println!("  --stdio  also serve one client on stdin/stdout (start a remote host)");
                 println!("  --proxy  bridge stdin/stdout to a running host's socket");
                 return Ok(());
