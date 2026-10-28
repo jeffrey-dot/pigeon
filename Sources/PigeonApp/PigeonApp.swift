@@ -30,7 +30,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var sidebar: SidebarViewController!
     private var header: SessionHeaderView!
     private var container: SplitContainerView!
+    private var hostStatus: HostStatusView!
     private var client: HostClient?
+    /// Attempts made since the socket last worked; drives `HostRecovery`.
+    private var recoveryAttempt = 0
+    /// Why the host rejected this client (bad version, busy); retrying cannot help.
+    private var refusedReason: String?
 
     private var rows: [Int: Row] = [:]
     private var selectedSession: Int?
@@ -62,7 +67,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         state = store.load()
         buildMenu()
         buildWindow()
-        connect()
+        if !connectHost() {
+            hostLost("No session host is running.")
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
@@ -134,6 +141,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ])
         // Explicit constraints instead of a stack view: the content box has no intrinsic
         // height, so a vertical stack gave it zero and the terminal never got a size.
+        hostStatus = HostStatusView()
+        hostStatus.onAction = { [weak self] in self?.retryHost() }
+        contentBox.addSubview(hostStatus)
+        hostStatus.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            hostStatus.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            hostStatus.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            hostStatus.topAnchor.constraint(equalTo: container.topAnchor),
+            hostStatus.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
         card.addSubview(header)
         card.addSubview(contentBox)
         contentBox.translatesAutoresizingMaskIntoConstraints = false
@@ -236,7 +253,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - host
 
-    private func connect() {
+    /// Tries to connect; `false` when the socket is not there (yet).
+    @discardableResult
+    private func connectHost() -> Bool {
         let path = Self.defaultSocketPath()
         do {
             let client = try HostClient.connect(path: path)
@@ -246,11 +265,69 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self?.handle(message)
                 }
             }
-            client.onClose = { [weak self] in DispatchQueue.main.async { self?.client = nil } }
+            client.onClose = { [weak self] in
+                DispatchQueue.main.async { self?.hostLost("The session host closed the connection.") }
+            }
             self.client = client
+            recoveryAttempt = 0
+            hostStatus.hide()
             sendHello()
+            return true
         } catch {
-            NSLog("pigeon: cannot reach \(path): \(error)")
+            debugLog("host unreachable at \(path): \(error)")
+            return false
+        }
+    }
+
+    /// The socket is gone: say so, then try to bring it back (including starting the host) a
+    /// few times before asking the user to.
+    private func hostLost(_ reason: String) {
+        client = nil
+        if let refused = refusedReason {
+            refusedReason = nil
+            showStopped(refused)
+            return
+        }
+        recoveryAttempt = 0
+        recover(reason)
+    }
+
+    private func recover(_ reason: String) {
+        guard HostRecovery.canRetry(after: recoveryAttempt) else {
+            showStopped(reason)
+            return
+        }
+        recoveryAttempt += 1
+        show(hostStatus: .reconnecting(attempt: recoveryAttempt))
+        DispatchQueue.main.asyncAfter(deadline: .now() + HostRecovery.retryDelay) { [weak self] in
+            guard let self, !self.connectHost() else { return }
+            // No socket at all: start a local host and give it a moment to bind.
+            if let path = HostLauncher.find(candidates: HostLauncher.candidates()) {
+                HostLauncher.launch(path: path)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + HostRecovery.retryDelay) { [weak self] in
+                guard let self, !self.connectHost() else { return }
+                self.recover(reason)
+            }
+        }
+    }
+
+    private func showStopped(_ reason: String) {
+        show(hostStatus: .stopped(detail: "\(reason)\nStart it with: \(HostRecovery.startCommand)"))
+    }
+
+    private func show(hostStatus state: HostRecovery.State) {
+        guard let text = HostRecovery.banner(for: state) else {
+            hostStatus.hide()
+            return
+        }
+        hostStatus.show(message: text, action: HostRecovery.action(for: state))
+    }
+
+    private func retryHost() {
+        recoveryAttempt = 0
+        if !connectHost() {
+            recover("No session host is running.")
         }
     }
 
@@ -596,7 +673,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             debugLog("pane exited pane=\(pane) -> closing session \(id)")
             closeSession(id)
         case PG_MSG_HELLO_ERROR:
-            NSLog("pigeon: handshake rejected: \(Wire.string(message, "detail"))")
+            // Retrying a refused handshake only repeats it, so stop and explain.
+            refusedReason =
+                "The host refused this client (\(Wire.string(message, "reason")): \(Wire.string(message, "detail")))."
+            client?.close()
         case PG_MSG_ERROR:
             NSLog("pigeon: \(Wire.string(message, "code")): \(Wire.string(message, "detail"))")
         default:

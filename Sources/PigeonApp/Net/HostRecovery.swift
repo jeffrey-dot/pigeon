@@ -1,0 +1,48 @@
+import Foundation
+
+/// What the window does when the host socket goes away. Pure data so the rules can be tested
+/// without AppKit or a real host.
+public enum HostRecovery {
+    /// Reconnect attempts before the window hands the job to the user.
+    public static let attempts = 3
+    /// Gap between attempts: long enough for a restarting host, short enough to feel automatic.
+    public static let retryDelay: TimeInterval = 1.0
+
+    public enum State: Equatable {
+        case connected
+        /// The socket is gone; a reconnect is scheduled.
+        case reconnecting(attempt: Int)
+        /// Out of attempts, or the host said no: only the user can fix this.
+        case stopped(detail: String)
+    }
+
+    /// The banner text, or `nil` while connected (nothing to say).
+    public static func banner(for state: State) -> String? {
+        switch state {
+        case .connected:
+            return nil
+        case let .reconnecting(attempt):
+            return "Session host is not reachable — reconnecting (\(attempt)/\(attempts))…"
+        case let .stopped(detail):
+            return detail
+        }
+    }
+
+    /// Whether another attempt is worth making after `attempt` failures.
+    public static func canRetry(after attempt: Int) -> Bool {
+        attempt < attempts
+    }
+
+    /// What the user can do about it; `nil` while a retry is pending.
+    public static func action(for state: State) -> String? {
+        switch state {
+        case .connected, .reconnecting:
+            return nil
+        case .stopped:
+            return "Retry"
+        }
+    }
+
+    /// The command line shown when no host binary can be found to start automatically.
+    public static let startCommand = "cargo run --manifest-path core/Cargo.toml --bin pigeon-host"
+}
