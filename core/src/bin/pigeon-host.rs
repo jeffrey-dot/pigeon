@@ -58,7 +58,8 @@ struct Session {
 type Meta = Arc<Mutex<HashMap<u32, PaneMeta>>>;
 
 type Sessions = Arc<Mutex<HashMap<u32, Session>>>;
-/// The colours the connected client is showing; `None` until a client sends `appearance`.
+/// The colours the panes answer `OSC 4/10/11` with: harp's built-in dark theme until a client
+/// sends `appearance`, then whatever that client last reported.
 type PaletteSlot = Arc<std::sync::Mutex<Option<Palette>>>;
 
 #[derive(Clone)]

@@ -48,7 +48,9 @@ struct ReplySink {
     out: Arc<Mutex<Vec<u8>>>,
     size: Arc<Mutex<GridSize>>,
     title: Arc<Mutex<Option<String>>>,
-    /// The client's colours; without them `OSC 4/10/11` stay unanswered.
+    /// The palette the host gave this pane (it sets one at birth: the client's theme or the
+    /// default dark one). `None` means the caller explicitly cleared it — then `OSC 4/10/11`
+    /// stay unanswered.
     palette: Arc<Mutex<Option<Palette>>>,
 }
 
