@@ -50,6 +50,7 @@ state file: …/config/sidebar.json (43 bytes)
 | 右键菜单（关闭 / 标记已读 / 重命名） | ![menu](images/m3/menu.jpg) |
 | 折叠分组（写入 `sidebar.json` 的 `collapsed`） | ![collapsed](images/m3/collapsed.jpg) |
 | 关窗重开：分组、未读、折叠原样回来 | ![reopen](images/m3/reopen.jpg) |
+| **人手拖拽排序**（脚本无法驱动 AppKit 拖拽会话） | 用户手动拖动一行后，`/tmp/pigeon-m3-manual/config/sidebar.json` 变成 `{"order":[1,3,2],"collapsed":[],"renamed":{}}`：排序写入了磁盘，且下次启动按这个顺序渲染 |
 
 ## 3. 这轮抓到的真 bug（都已修）
 
@@ -65,7 +66,7 @@ state file: …/config/sidebar.json (43 bytes)
 
 | 项 | 说明 |
 |---|---|
-| **拖拽排序的 GUI 证据** | AppKit 的拖拽会话不会由合成鼠标事件（cliclick/CGEvent）启动，脚本里 `pasteboardWriterForRow` 从未被调用。排序与持久化本身有单测（`SidebarModel.sections(order:)`、`SidebarStore` 往返），`acceptDrop → onReorder → store.save` 也已接线；但仍需人手拖一次才算真验 |
+| ~~拖拽排序~~ | 已由人手验证：拖拽后 `sidebar.json` 的 `order` 从 `[]` 变成 `[1,3,2]`。脚本无法自动驱动 AppKit 拖拽会话（`pasteboardWriterForRow` 不被合成事件触发），这一项只能人工跑 |
 | 输入法 / 手速 | M6 |
 | SSH / 多主机分组 | M4 |
 
