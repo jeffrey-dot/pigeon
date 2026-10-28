@@ -177,40 +177,30 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 
 ## 6. CI（GitHub Actions，真跑）
 
-HEAD `80169ae`（三个回归的修复 + 验收记录）的 CI 五作业 success：
+HEAD `0eabf0b`（OSC 4/10/11 颜色查询 + 把偶发红的重连用例改成顺序屏障）的 CI 五作业 success：
 
-<https://github.com/jeffrey-dot/pigeon/actions/runs/40688090799>
-
-代码提交 `7fd5460` 的 run [40668695404](https://github.com/jeffrey-dot/pigeon/actions/runs/40668695404) 同样五作业 success。
+<https://github.com/jeffrey-dot/pigeon/actions/runs/40692774965>
 
 | 作业 | 结果 |
 |---|---|
 | `docs` | success（相对链接检查） |
-| `rust (ubuntu-latest)` | success（`cargo test` 66 + 11 + 21 = 98 passed） |
+| `rust (ubuntu-latest)` | success（`cargo test` **71 + 11 + 23 = 105 passed**） |
 | `rust (macos-latest)` | success |
-| `header` | success（cbindgen `diff -u` 为空） |
-| `swift` | success（`swift test` **44 passed**，含新增 `PaneGridTests`） |
-
-中间 `293643c` 的 run 40683408546 首跑时 `rust (macos-latest)` 红过一次：
-`acked_status_is_not_replayed_after_reconnect`（`core/tests/host.rs:1173`，靠 `sleep(300ms)` 等重连补发）在负载高的 runner 上会抢跑，
-`gh run rerun --failed` 后全绿。这是既有时间敏感用例，和本次三个回归无关；要根治得改那个用例的同步方式。
+| `header` | success（cbindgen `diff -u` 为空；本次新增 `PG_MSG_APPEARANCE` / `pg_msg_set_u32_array`） |
+| `swift` | success（`swift test` **54 passed**） |
 
 本机同一提交的全量输出：
 
 ```sh
 cargo fmt --check                                  # 通过
 cargo clippy --all-targets -- -D warnings          # 通过
-cargo test                                         # 66 + 11 + 21 = 98 passed
-swift build && swift test                          # Build complete / 44 passed
-cargo build --release --bin pigeon-host            # 1,234,288 B（1.18 MiB ≤ 8 MiB）
-cbindgen … --output /tmp/pg5.h && diff -q …        # header: no diff
+cargo test                                         # 71 + 11 + 23 = 105 passed
+swift build && swift test                          # Build complete / 54 passed
+cargo build --release --bin pigeon-host            # 1,250,800 B（1.19 MiB ≤ 8 MiB）
+cbindgen … --output /tmp/pg7.h && diff -q …        # header: no diff
 ```
 
-手测证据（`PIGEON_DEBUG=1`，见 §4 第 10–12 条）：
-
-```text
-pigeon: select id=3 activePane=3 panes=[3]
-pigeon: layout session=3 selected=3 panes=[3]      ← 点行确实换了内容
-pigeon: grid pane=3 97x36 cursor=26,0 filled=23 lastRow=0
-grep -c " 2x1 " app7.log → 0                        ← 不再上报退化尺寸
-```
+之前 `61239d3` 的 `rust (macos-latest)` 红过一次，是既有用例
+`acked_status_is_not_replayed_after_reconnect`（`core/tests/host.rs`，靠 `sleep(200ms)` 等 ack 生效）在负载高的 runner 上抢跑；
+现在改成**消息顺序屏障**（发完 `AckStatus` 再请求 `Sessions` 并等回复，宿主按序处理），再用第二次 `Attach` 的
+`latest_status` 窗口做确定性断言，不再依赖 sleep，本机连跑三次都过。
