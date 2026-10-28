@@ -58,9 +58,6 @@ enum SidebarMetrics {
     static let cardShadowBlur: CGFloat = 16
     static let cardContentLeftPadding: CGFloat = 32
 
-    /// Width of the macOS traffic-light zone inside the sidebar header.
-    static let trafficLightWidth: CGFloat = 64
-
     static let rowTitleSize: CGFloat = 13
     static let rowTimeSize: CGFloat = 10
     static let sectionTitleSize: CGFloat = 11.5
