@@ -48,6 +48,32 @@ stdin/stdout 上说话（首次安装后的第一次启动用它）；之后它�
 4. 校验 sha256（客户端内嵌期望值，远端 `shasum -a 256` 比对；不一致就删文件并报错）；
 5. 启动：`ssh host ~/.pigeon/host/3.2.0/pigeon-host --proxy`（宿主已在远端常驻，桥接它的 unix socket；首次安装后用 `--stdio` 拉起常驻实例，两者都能被同一客户端复用）。
 
+### 本机交叉构建（macOS → Linux）
+
+远端要的是**另一个架构的静态产物**，本机得先能编出来：
+
+```sh
+rustup target add x86_64-unknown-linux-musl        # aarch64 同理
+host=$(rustc -vV | sed -n 's/^host: //p')
+lld=$(ls ~/.rustup/toolchains/*/lib/rustlib/$host/bin/rust-lld | head -1)
+cargo build --release --manifest-path core/Cargo.toml --bin pigeon-host \
+  --target x86_64-unknown-linux-musl \
+  --config "target.x86_64-unknown-linux-musl.linker=\"$lld\""
+# → core/target/x86_64-unknown-linux-musl/release/pigeon-host（static-pie，1.7 MB）
+```
+
+macOS 的 `cc` 会被当成链接器并拒继 musl 的 `-static`，所以必须指到 rustup 自带的 `rust-lld`。
+产物放哪都行，安装器按**平台匹配**挑：`PIGEON_HOST_ARTIFACTS` 目录下的
+`pigeon-host-<triple>`，或 `core/target/<triple>/release/pigeon-host`。
+
+### 自动安装怎么做
+
+`Sources/PigeonApp/Net/HostInstaller.swift`：`ssh uname -sm` 探测平台 → 本地算 sha256，
+版本目录名就是哈希前 16 位 → 远端有同名同哈希就**不传**，否则把二进制流进
+`~/.pigeon/host/<version>/pigeon-host.tmp`，**在远端**校验哈希后才 `mv` 成正式文件，
+并只保留最新两个版本。远端的登录 shell 可能是 fish/csh，所以命令行走 base64 + `sh`，
+不假设是 POSIX sh。实跑记录见 `docs/m4-checklist.md`。
+
 ### 规则
 
 - **安装在远端用户的家目录**：`$HOME/.pigeon/`（用 `$HOME` 展开，不假设家目录路径），
