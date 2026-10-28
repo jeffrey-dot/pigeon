@@ -145,9 +145,9 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 
 ## 6. CI（GitHub Actions，真跑）
 
-代码提交 `327bbe3`（浅/深同色系：终端默认色与卡片底色随主题）的 CI 五作业 success：
+代码提交 `fb0576c`（HEAD；浅/深同色系 + 文档收尾）的 CI 五作业 success：
 
-<https://github.com/jeffrey-dot/pigeon/actions/runs/40664088619>
+<https://github.com/jeffrey-dot/pigeon/actions/runs/40664325916>
 
 | 作业 | 结果 |
 |---|---|
@@ -156,6 +156,9 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 | `rust (macos-latest)` | success |
 | `header` | success（cbindgen `diff -u` 为空） |
 | `swift` | success（`swift test` 42 passed） |
+
+同一提交首跑时 `rust (macos-latest)` 红过一次：`acked_status_is_not_replayed_after_reconnect` 用 `sleep(300ms)` 等重连后的补发，
+在负载高的 runner 上会抢跑（`core/tests/host.rs:1173`），属既有时间敏感用例；`gh run rerun --failed` 后五作业全绿。
 
 本机同一提交的全量输出：
 
