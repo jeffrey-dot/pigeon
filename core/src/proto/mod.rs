@@ -49,6 +49,12 @@ pub struct SessionInfo {
     pub title: String,
     pub cwd: String,
     pub panes: Vec<u32>,
+    /// Pane the session's layout has focused (M3, optional).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_pane: Option<u32>,
+    /// Title of that pane (OSC 0/2), so the sidebar can name the app.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_title: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -272,6 +278,19 @@ pub enum Message {
         pane_id: u32,
         code: i32,
     },
+    Status {
+        pane_id: u32,
+        state: String,
+        seq: u32,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        kind: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        msg: Option<String>,
+    },
+    AckStatus {
+        pane_id: u32,
+        seq: u32,
+    },
     Ping {
         ts: u64,
     },
@@ -310,6 +329,8 @@ impl Message {
             Self::Keys { .. } => "keys",
             Self::ResizePane { .. } => "resize_pane",
             Self::PaneExited { .. } => "pane_exited",
+            Self::Status { .. } => "status",
+            Self::AckStatus { .. } => "ack_status",
             Self::Ping { .. } => "ping",
             Self::Pong { .. } => "pong",
             Self::Error { .. } => "error",
@@ -399,6 +420,8 @@ fn is_known(tag: &str) -> bool {
             | "keys"
             | "resize_pane"
             | "pane_exited"
+            | "status"
+            | "ack_status"
             | "ping"
             | "pong"
             | "error"
@@ -439,12 +462,24 @@ mod tests {
                 detail: "need 1.x".into(),
             },
             Message::Sessions {
-                items: vec![SessionInfo {
-                    session_id: 1,
-                    title: "pigeon".into(),
-                    cwd: "/tmp".into(),
-                    panes: vec![1, 2],
-                }],
+                items: vec![
+                    SessionInfo {
+                        session_id: 1,
+                        title: "pigeon".into(),
+                        cwd: "/tmp".into(),
+                        panes: vec![1, 2],
+                        active_pane: None,
+                        active_title: None,
+                    },
+                    SessionInfo {
+                        session_id: 2,
+                        title: "web".into(),
+                        cwd: "/tmp/web".into(),
+                        panes: vec![3],
+                        active_pane: Some(3),
+                        active_title: Some("vim".into()),
+                    },
+                ],
             },
             Message::NewSession {
                 id: 1,

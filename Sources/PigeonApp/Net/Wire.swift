@@ -104,6 +104,11 @@ enum Wire {
         }
     }
 
+    static func string(_ text: PgStr) -> String {
+        guard let pointer = text.ptr, text.len > 0 else { return "" }
+        return String(decoding: UnsafeBufferPointer(start: pointer, count: text.len), as: UTF8.self)
+    }
+
     static func frame(_ message: OpaquePointer) -> Data? {
         let length = pg_msg_encoded_len(message)
         guard length > 0 else { return nil }

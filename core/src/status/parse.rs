@@ -1,5 +1,6 @@
-//! Byte-level half of OSC 7501: find `ESC ] 7501 ; … ST|BEL` in a pane stream,
-//! split it into fields, and decide what to do with it.
+//! Byte-level half of the OSC handling: find `ESC ] <code> ; <body> ST|BEL`
+//! sequences in a pane stream. Codes we act on: 7501 (status), 7 (cwd), 0/2
+//! (title). Everything else is ignored.
 //!
 //! Spec rules implemented here (see `docs/plan.md` §4 and `AGENTS.md` §7):
 //!   * an over-long, undecodable, or control-character-carrying report is dropped
@@ -8,8 +9,8 @@
 //!   * the scanner keeps a bounded tail so a sequence split across reads still
 //!     resolves exactly once.
 
-/// `ESC ] 7501 ;`
-pub(crate) const PREFIX: &[u8] = b"\x1b]7501;";
+/// `ESC ]`
+pub(crate) const PREFIX: &[u8] = b"\x1b]";
 
 /// Anything longer is not a report we are willing to buffer.
 pub(crate) const MAX_SEQUENCE: usize = 4096;
@@ -34,9 +35,9 @@ pub(crate) enum Parsed {
     Ignore,
 }
 
-/// Pulls every complete sequence body out of `buf`, leaving the unconsumed
-/// (possibly partial) tail in place.
-pub(crate) fn take_bodies(buf: &mut Vec<u8>, out: &mut Vec<Vec<u8>>) {
+/// Pulls every complete OSC sequence out of `buf` as `(code, body)`, leaving
+/// the unconsumed (possibly partial) tail in place.
+pub(crate) fn take_osc(buf: &mut Vec<u8>, out: &mut Vec<(Vec<u8>, Vec<u8>)>) {
     loop {
         let Some(start) = find(buf, PREFIX) else {
             keep_prefix_tail(buf);
@@ -55,8 +56,53 @@ pub(crate) fn take_bodies(buf: &mut Vec<u8>, out: &mut Vec<Vec<u8>>) {
 
         let body = buf[PREFIX.len()..PREFIX.len() + body_end].to_vec();
         buf.drain(..PREFIX.len() + consumed);
-        out.push(body);
+        let split = body.iter().position(|byte| *byte == b';');
+        let (code, payload) = match split {
+            Some(index) => (body[..index].to_vec(), body[index + 1..].to_vec()),
+            None => (body, Vec::new()),
+        };
+        out.push((code, payload));
     }
+}
+
+/// `file://host/path` → decoded local path. Non-`file` schemes, bad escapes and
+/// control characters drop the whole sequence.
+pub(crate) fn decode_file_url(body: &[u8]) -> Option<String> {
+    let text = std::str::from_utf8(body).ok()?;
+    let rest = text.strip_prefix("file://")?;
+    let path_start = rest.find('/')?;
+    let decoded = percent_decode(&rest[path_start..])?;
+    if decoded.is_empty() || has_control_chars(&decoded) {
+        return None;
+    }
+    Some(decoded)
+}
+
+/// Plain-text payload (title): UTF-8 without control characters.
+pub(crate) fn plain_text(body: &[u8]) -> Option<String> {
+    let text = std::str::from_utf8(body).ok()?;
+    if text.is_empty() || has_control_chars(text) {
+        return None;
+    }
+    Some(text.to_owned())
+}
+
+fn percent_decode(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let hex = bytes.get(index + 1..index + 3)?;
+            let value = u8::from_str_radix(std::str::from_utf8(hex).ok()?, 16).ok()?;
+            out.push(value);
+            index += 3;
+        } else {
+            out.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(out).ok()
 }
 
 pub(crate) fn parse(body: &[u8]) -> Parsed {
@@ -167,16 +213,20 @@ fn keep_prefix_tail(buf: &mut Vec<u8>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse, take_bodies, Parsed};
+    use super::{parse, take_osc, Parsed};
 
     fn bodies(chunks: &[&[u8]]) -> Vec<Vec<u8>> {
         let mut buf = Vec::new();
-        let mut out = Vec::new();
+        let mut sequences = Vec::new();
         for chunk in chunks {
             buf.extend_from_slice(chunk);
-            take_bodies(&mut buf, &mut out);
+            take_osc(&mut buf, &mut sequences);
         }
-        out
+        sequences
+            .into_iter()
+            .filter(|(code, _)| code.as_slice() == b"7501")
+            .map(|(_, body)| body)
+            .collect()
     }
 
     fn base64(text: &str) -> String {
@@ -206,14 +256,14 @@ mod tests {
         let mut out = Vec::new();
         buf.extend_from_slice(b"\x1b]7501;state=working");
         buf.extend(std::iter::repeat_n(b'x', 5000));
-        take_bodies(&mut buf, &mut out);
+        take_osc(&mut buf, &mut out);
         assert!(out.is_empty());
         assert!(buf.is_empty(), "the runaway sequence is not kept");
 
         // The scanner recovers: a later, well-formed report still lands.
         buf.extend_from_slice(b"\x1b]7501;state=done\x07");
-        take_bodies(&mut buf, &mut out);
-        assert_eq!(out, vec![b"state=done".to_vec()]);
+        take_osc(&mut buf, &mut out);
+        assert_eq!(out, vec![(b"7501".to_vec(), b"state=done".to_vec())]);
     }
 
     #[test]

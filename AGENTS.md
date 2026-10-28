@@ -1,8 +1,8 @@
 # AGENTS.md
 
 给编码 agent 的工作说明。人看的部分在 `README.md`，产品/架构在设计文档里（见 §11）。
-**当前状态：M1 已落地**——`core/`（VT / OSC 7501 / 协议 / 布局 / C ABI）、`pigeon-host`（多 pane）、
-AppKit 客户端（分屏、拖动分隔线、焦点）；侧栏/远端/IME 仍在后续里程碑。
+**当前状态：M3 已落地**——`core/`（VT / OSC 7501 / 协议 / 布局 / C ABI）、`pigeon-host`（多 pane、状态流）、
+AppKit 客户端（分屏、侧栏、未读/needs-you）；远端/IME 仍在后续里程碑。
 
 ## 1. 项目是什么
 

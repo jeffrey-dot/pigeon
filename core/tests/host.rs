@@ -1046,3 +1046,73 @@ fn closing_the_watched_pane_still_delivers_the_new_layout() {
     };
     assert_eq!(*focus, Some(first), "focus falls back to the survivor");
 }
+
+#[test]
+fn sessions_carry_the_active_pane_and_its_title() {
+    let _serial = one_at_a_time();
+    let host = start_host();
+    let mut client = Client::connect(&host.socket);
+    hello(&mut client);
+    let first = attach_first(&mut client);
+    let (second, _) = split(&mut client, first, proto::SplitAxis::Vertical, 0.5, 2);
+
+    client.send(&Message::Sessions { items: Vec::new() });
+    let Message::Sessions { items } = client.wait_for(|m| matches!(m, Message::Sessions { .. }))
+    else {
+        unreachable!()
+    };
+    let session = items.first().expect("one session");
+    assert_eq!(session.panes, vec![first, second]);
+    assert_eq!(
+        session.active_pane,
+        Some(second),
+        "active pane follows focus"
+    );
+    // No OSC title yet, so the host falls back to whatever program it spawned.
+    assert!(
+        session
+            .active_title
+            .as_deref()
+            .is_some_and(|t| !t.is_empty()),
+        "a fallback label is always present"
+    );
+}
+
+#[test]
+fn status_is_broadcast_once_per_change_and_ack_stops_repeats() {
+    let _serial = one_at_a_time();
+    let host = start_host();
+    let mut client = Client::connect(&host.socket);
+    hello(&mut client);
+    let pane = attach_first(&mut client);
+
+    client.send(&Message::Keys {
+        pane_id: pane,
+        bytes: b"printf '\\033]7501;state=working\\007'\r".to_vec(),
+    });
+    client.wait_for(|m| matches!(m, Message::Status { state, .. } if state == "working"));
+
+    client.send(&Message::Keys {
+        pane_id: pane,
+        bytes: b"printf '\\033]7501;state=done:msg=T0s=\\007'\r".to_vec(),
+    });
+    let done = client.wait_for(|m| matches!(m, Message::Status { state, .. } if state == "done"));
+    let Message::Status { seq, msg, .. } = done else {
+        unreachable!()
+    };
+    assert_eq!(msg.as_deref(), Some("OK"), "base64 message decoded");
+
+    client.send(&Message::AckStatus { pane_id: pane, seq });
+    // Another feed with no new status must not repeat the acked record.
+    client.send(&Message::Keys {
+        pane_id: pane,
+        bytes: vec![b'\r'],
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(
+        client
+            .drain(&|m| matches!(m, Message::Status { seq: other, .. } if *other == seq))
+            .is_none(),
+        "acked status must not be re-broadcast"
+    );
+}

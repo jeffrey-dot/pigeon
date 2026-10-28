@@ -47,6 +47,8 @@ pub enum PgMsgType {
     PG_MSG_RESIZE_SPLIT = 19,
     PG_MSG_FOCUS = 20,
     PG_MSG_LAYOUT = 21,
+    PG_MSG_STATUS = 22,
+    PG_MSG_ACK_STATUS = 23,
 }
 
 /// Wire name ↔ enum. Kept in one place so the two can never drift.
@@ -72,6 +74,8 @@ const NAMES: &[(PgMsgType, &str)] = &[
     (PgMsgType::PG_MSG_RESIZE_SPLIT, "resize_split"),
     (PgMsgType::PG_MSG_FOCUS, "focus"),
     (PgMsgType::PG_MSG_LAYOUT, "layout"),
+    (PgMsgType::PG_MSG_STATUS, "status"),
+    (PgMsgType::PG_MSG_ACK_STATUS, "ack_status"),
 ];
 
 fn name_of(msg_type: PgMsgType) -> Option<&'static str> {
@@ -660,6 +664,9 @@ pub struct PgSessionInfo {
     pub title: PgStr,
     pub cwd: PgStr,
     pub pane_count: u32,
+    /// 0 when the session has no focused pane.
+    pub active_pane: u32,
+    pub active_title: PgStr,
 }
 
 /// Sets a field to an array of strings (e.g. `hello.features`).
@@ -720,6 +727,8 @@ pub extern "C" fn pg_msg_session_at(
             title: empty_str(),
             cwd: empty_str(),
             pane_count: 0,
+            active_pane: 0,
+            active_title: empty_str(),
         };
         for (key, value) in entries {
             let Value::Text(name) = key else { continue };
@@ -732,6 +741,10 @@ pub extern "C" fn pg_msg_session_at(
                 ("panes", Value::Array(panes)) => {
                     info.pane_count = panes.len() as u32;
                 }
+                ("active_pane", Value::Integer(number)) => {
+                    info.active_pane = u32::try_from(i128::from(*number)).unwrap_or(0);
+                }
+                ("active_title", Value::Text(text)) => info.active_title = str_view(text),
                 _ => {}
             }
         }

@@ -257,7 +257,7 @@ M0–M1 可以直接复用现有代码：内核的对账语料（来自 tmux 阶
 
 ## 11. 已知缺口
 
-M1 落地后仍在的洞。
+M3 落地后仍在的洞。
 
 **已关闭**：
 
@@ -267,6 +267,7 @@ M1 落地后仍在的洞。
 | 布局只有单 pane | `core/src/layout/` 的布局树 + `pg_layout_*` 全实现；宿主每 pane 独立 PTY/actor；客户端按 `PgRect` 分屏 |
 | `zoom_pane` / `unzoom` 未实现 | 协议按规范回 `unsupported` 且不断开（解码与宿主各有用例）；UI 见下表 |
 | 多客户端尺寸策略未实现 | 单客户端下由 pane rect 反推会话 box；多客户端的 `size_state` 仍留给 M2 |
+| 侧栏（M3） | 已落地：`SidebarModel`/`Grouping` + `NSOutlineView` 侧栏、OSC 7501 `status` 广播 + `ack_status`、OSC 7/标题、未读/needs-you、⌘J/⌘T/⌘⇧W、右键菜单、折叠与排序持久化（见 `docs/m3-checklist.md`） |
 
 **仍在**：
 

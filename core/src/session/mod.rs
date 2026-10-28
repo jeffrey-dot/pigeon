@@ -75,6 +75,16 @@ impl PaneState {
         &self.status
     }
 
+    /// cwd reported by the program, if it announced one.
+    pub fn cwd(&self) -> Option<&str> {
+        self.status.cwd()
+    }
+
+    /// Title reported by the program, if it announced one.
+    pub fn title(&self) -> Option<&str> {
+        self.status.title()
+    }
+
     pub fn status_mut(&mut self) -> &mut StatusStore {
         &mut self.status
     }

@@ -15,12 +15,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut socket = String::new();
     let mut pane_id = 0u32;
     let mut payload = String::new();
+    let mut new_session: Option<String> = None;
+    let mut new_shell: Option<String> = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--socket" => socket = args.next().ok_or("--socket needs a value")?,
             "--pane" => pane_id = args.next().ok_or("--pane needs a value")?.parse()?,
             "--send" => payload = args.next().ok_or("--send needs a value")?,
+            "--new-session" => new_session = Some(args.next().ok_or("--new-session needs a cwd")?),
+            "--shell" => new_shell = Some(args.next().ok_or("--shell needs a path")?),
             other => return Err(format!("unknown argument: {other}").into()),
         }
     }
@@ -40,6 +44,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut buf = [0u8; 4096];
     let _ = stream.read(&mut buf);
 
+    if let Some(cwd) = new_session {
+        send(
+            &mut stream,
+            &Message::NewSession {
+                id: 1,
+                cwd: Some(cwd),
+                shell: new_shell,
+                env: None,
+            },
+        )?;
+        std::thread::sleep(Duration::from_millis(200));
+        return Ok(());
+    }
     send(
         &mut stream,
         &Message::Attach {

@@ -7,6 +7,7 @@
 - [AGENTS.md](AGENTS.md) —— 给编码 agent 的工作说明：**模块划分**、风格、测试、不变量
 - [docs/m0-checklist.md](docs/m0-checklist.md) —— **M0 验收记录**：自动化结果、截图证据、未验项
 - [docs/m1-checklist.md](docs/m1-checklist.md) —— **M1 验收记录**：分屏、拖动分隔线、关窗重开
+- [docs/m3-checklist.md](docs/m3-checklist.md) —— **M3 验收记录**：侧栏、状态流、未读、持久化
 - [docs/plan.md](docs/plan.md) —— 开发计划：架构、技术选型、参考项目、里程碑、验收与风险
 - [docs/gui.md](docs/gui.md) —— **前端路线**：主流终端怎么选 UI、四个候选对比、决定与验收
 - [docs/remote.md](docs/remote.md) —— **SSH 方案**：远端后台进程、三种对接、安装与安全

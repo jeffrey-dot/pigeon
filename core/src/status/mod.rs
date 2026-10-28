@@ -103,6 +103,10 @@ pub struct StatusStore {
     /// Tail of the stream used to spot OSC 133 `A` (a shell prompt) even when the
     /// marker is split across reads.
     prompt_buf: Vec<u8>,
+    /// Last cwd reported by OSC 7 (falls back to the spawn cwd in the host).
+    cwd: Option<String>,
+    /// Last title reported by OSC 0/2.
+    title: Option<String>,
     next_seq: u32,
 }
 
@@ -119,11 +123,51 @@ impl StatusStore {
     pub fn feed(&mut self, bytes: &[u8]) {
         self.scan_prompts(bytes);
         self.buf.extend_from_slice(bytes);
-        let mut bodies = Vec::new();
-        parse::take_bodies(&mut self.buf, &mut bodies);
-        for body in bodies {
-            self.apply(&body);
+        let mut sequences = Vec::new();
+        parse::take_osc(&mut self.buf, &mut sequences);
+        for (code, body) in sequences {
+            match code.as_slice() {
+                b"7501" => self.apply(&body),
+                b"7" => {
+                    if let Some(path) = parse::decode_file_url(&body) {
+                        self.cwd = Some(path);
+                    }
+                }
+                b"0" | b"2" => {
+                    if let Some(text) = parse::plain_text(&body) {
+                        self.title = Some(text);
+                    }
+                }
+                _ => {}
+            }
         }
+    }
+
+    /// The most recently updated record (highest `seq`), if any.
+    pub fn latest(&self) -> Option<&Record> {
+        self.records.values().max_by_key(|record| record.seq)
+    }
+
+    /// Marks whichever record carries `seq` as seen.
+    pub fn ack_seq(&mut self, seq: u32) -> bool {
+        let mut acked = false;
+        for record in self.records.values_mut() {
+            if record.seq == seq {
+                record.acked = true;
+                acked = true;
+            }
+        }
+        acked
+    }
+
+    /// cwd last announced by the program (OSC 7), if any.
+    pub fn cwd(&self) -> Option<&str> {
+        self.cwd.as_deref()
+    }
+
+    /// Title announced by the program (OSC 0/2), if any.
+    pub fn title(&self) -> Option<&str> {
+        self.title.as_deref()
     }
 
     pub fn records(&self) -> impl Iterator<Item = &Record> {
@@ -304,6 +348,35 @@ mod tests {
         store.on_prompt();
         assert!(store.get("a").is_none());
         assert!(store.get("b").is_some(), "done waits for the user");
+    }
+
+    #[test]
+    fn osc7_sets_the_cwd_and_bad_urls_are_ignored() {
+        let mut store = StatusStore::new();
+        store.feed(b"\x1b]7;file:///Users/me/pigeon\x07");
+        assert_eq!(store.cwd(), Some("/Users/me/pigeon"));
+        store.feed(b"\x1b]7;file://localhost/Users/me/pigeon%20core\x1b\\");
+        assert_eq!(store.cwd(), Some("/Users/me/pigeon core"));
+        // Non-file scheme, bad escape and a control character all keep the old value.
+        store.feed(b"\x1b]7;http://example.com/x\x07");
+        store.feed(b"\x1b]7;file:///bad%zzpath\x07");
+        store.feed(b"\x1b]7;file:///bad\x01path\x07");
+        assert_eq!(store.cwd(), Some("/Users/me/pigeon core"));
+    }
+
+    #[test]
+    fn osc0_and_osc2_set_the_title() {
+        let mut store = StatusStore::new();
+        store.feed(b"\x1b]0;zsh\x07");
+        assert_eq!(store.title(), Some("zsh"));
+        store.feed(b"\x1b]2;vim /tmp/demo.txt\x07");
+        assert_eq!(store.title(), Some("vim /tmp/demo.txt"));
+        store.feed(b"\x1b]2;bad\x1btitle\x07");
+        assert_eq!(
+            store.title(),
+            Some("vim /tmp/demo.txt"),
+            "control chars dropped"
+        );
     }
 
     #[test]

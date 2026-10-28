@@ -34,14 +34,27 @@ const DEFAULT_ROWS: u16 = 24;
 /// Pane ids are unique for the whole process, not per session.
 static NEXT_PANE: AtomicU32 = AtomicU32::new(1);
 
+/// Metadata a pane reports about itself (program-driven, not guessed).
+#[derive(Clone, Default)]
+struct PaneMeta {
+    cwd: Option<String>,
+    title: Option<String>,
+}
+
 /// One session: one layout tree plus the panes its leaves point at.
 struct Session {
     layout: Layout,
     panes: HashMap<u32, mpsc::Sender<Cmd>>,
+    /// Shell used for spawns; also the fallback label when a pane has no title.
+    shell: String,
+    /// cwd the session was created with (OSC 7 overrides it per pane).
+    cwd: String,
     /// The session box in cells, derived from whichever pane last reported.
     cols: u16,
     rows: u16,
 }
+
+type Meta = Arc<Mutex<HashMap<u32, PaneMeta>>>;
 
 type Sessions = Arc<Mutex<HashMap<u32, Session>>>;
 
@@ -50,16 +63,22 @@ enum Event {
     Delta { pane_id: u32, message: Message },
     Exited { pane_id: u32, code: i32 },
     Layout { session_id: u32, message: Message },
+    Status { pane_id: u32, message: Message },
 }
 
 enum Cmd {
     Input(Vec<u8>),
     Resize(u16, u16),
+    /// The user has seen this status record.
+    Ack(u32),
     /// Terminate the child (protocol `close_pane`).
     Kill,
     Snapshot {
         history: bool,
         reply: oneshot::Sender<Message>,
+    },
+    LatestStatus {
+        reply: oneshot::Sender<Option<Message>>,
     },
 }
 
@@ -101,6 +120,7 @@ async fn run() -> Result<(), String> {
 
     let (events, _) = broadcast::channel::<Event>(256);
     let sessions: Sessions = Arc::new(Mutex::new(HashMap::new()));
+    let meta: Meta = Arc::new(Mutex::new(HashMap::new()));
 
     if std::fs::metadata(&socket).is_ok_and(|meta| meta.file_type().is_socket()) {
         let _ = std::fs::remove_file(&socket);
@@ -121,9 +141,10 @@ async fn run() -> Result<(), String> {
         };
         let sessions = Arc::clone(&sessions);
         let events = events.clone();
+        let meta = Arc::clone(&meta);
         let shell = shell.clone();
         tokio::spawn(async move {
-            if let Err(error) = handle_client(stream, sessions, events, shell).await {
+            if let Err(error) = handle_client(stream, sessions, events, meta, shell).await {
                 eprintln!("pigeon-host: client gone: {error}");
             }
         });
@@ -145,6 +166,7 @@ async fn handle_client(
     stream: UnixStream,
     sessions: Sessions,
     events: broadcast::Sender<Event>,
+    meta: Meta,
     shell: String,
 ) -> Result<(), String> {
     let (mut reader, mut writer) = stream.into_split();
@@ -166,15 +188,25 @@ async fn handle_client(
                             if std::env::var_os("PIGEON_DEBUG").is_some() {
                                 eprintln!("pigeon-host: <- {}", message.name());
                             }
-                            if let Some(reply) = dispatch(message, &sessions, &events, &shell, &mut state).await {
+                            if let Some(reply) = dispatch(message, &sessions, &events, &meta, &shell, &mut state).await {
                                 let handshake = matches!(reply, Message::HelloAck { .. });
+                                let attached_pane = match &reply {
+                                    Message::Snapshot { pane_id, .. } => Some(*pane_id),
+                                    _ => None,
+                                };
                                 send(&mut writer, &reply).await?;
+                                if let Some(pane_id) = attached_pane {
+                                    if let Some(status) = latest_status(&sessions, pane_id).await {
+                                        send(&mut writer, &status).await?;
+                                    }
+                                }
                                 // Protocol §3.2: the session list follows the ack.
                                 if handshake {
                                     if let Some(list) = dispatch(
                                         Message::Sessions { items: Vec::new() },
                                         &sessions,
                                         &events,
+                                        &meta,
                                         &shell,
                                         &mut state,
                                     )
@@ -214,6 +246,11 @@ async fn handle_client(
                             send(&mut writer, &Message::PaneExited { pane_id, code }).await?;
                         }
                     }
+                    Event::Status { pane_id, message } => {
+                        if state.watched.contains_key(&pane_id) {
+                            send(&mut writer, &message).await?;
+                        }
+                    }
                     Event::Delta { pane_id, message } => {
                         let Some(delta_ok) = state.watched.get(&pane_id).copied() else {
                             continue;
@@ -238,6 +275,14 @@ async fn snapshot_of(sessions: &Sessions, pane_id: u32, history: bool) -> Option
         .await
         .ok()?;
     rx.await.ok()
+}
+
+/// The pane's current status, so a client that attaches later still sees it.
+async fn latest_status(sessions: &Sessions, pane_id: u32) -> Option<Message> {
+    let sender = sender_of(sessions, pane_id).await?;
+    let (tx, rx) = oneshot::channel();
+    sender.send(Cmd::LatestStatus { reply: tx }).await.ok()?;
+    rx.await.ok().flatten()
 }
 
 async fn sender_of(sessions: &Sessions, pane_id: u32) -> Option<mpsc::Sender<Cmd>> {
@@ -309,6 +354,7 @@ async fn dispatch(
     message: Message,
     sessions: &Sessions,
     events: &broadcast::Sender<Event>,
+    meta: &Meta,
     shell: &str,
     state: &mut ClientState,
 ) -> Option<Message> {
@@ -348,14 +394,26 @@ async fn dispatch(
         }
         Message::Sessions { .. } => {
             let map = sessions.lock().await;
+            let meta = meta.lock().await;
             Some(Message::Sessions {
                 items: map
                     .iter()
-                    .map(|(session_id, session)| proto::SessionInfo {
-                        session_id: *session_id,
-                        title: format!("session {session_id}"),
-                        cwd: String::new(),
-                        panes: session.layout.pane_ids(),
+                    .map(|(session_id, session)| {
+                        let active = session.layout.focused();
+                        let info = active.and_then(|pane| meta.get(&pane));
+                        proto::SessionInfo {
+                            session_id: *session_id,
+                            title: format!("session {session_id}"),
+                            cwd: info
+                                .and_then(|info| info.cwd.clone())
+                                .unwrap_or_else(|| session.cwd.clone()),
+                            panes: session.layout.pane_ids(),
+                            active_pane: active,
+                            active_title: Some(
+                                info.and_then(|info| info.title.clone())
+                                    .unwrap_or_else(|| session.shell.clone()),
+                            ),
+                        }
                     })
                     .collect(),
             })
@@ -367,8 +425,9 @@ async fn dispatch(
             ..
         } => {
             let shell = requested.unwrap_or_else(|| shell.to_owned());
+            let launch_cwd = cwd.clone().unwrap_or_default();
             let Some((pane_id, sender)) =
-                spawn_pane(events, &shell, cwd, DEFAULT_COLS, DEFAULT_ROWS)
+                spawn_pane(events, meta, &shell, cwd, DEFAULT_COLS, DEFAULT_ROWS)
             else {
                 return Some(Message::Error {
                     code: "internal".into(),
@@ -381,6 +440,8 @@ async fn dispatch(
             let session = Session {
                 layout: Layout::new(pane_id),
                 panes,
+                shell: shell.clone(),
+                cwd: launch_cwd,
                 cols: DEFAULT_COLS,
                 rows: DEFAULT_ROWS,
             };
@@ -448,7 +509,7 @@ async fn dispatch(
                 Axis::Vertical => ((session.cols / 2).max(2), session.rows),
                 Axis::Horizontal => (session.cols, (session.rows / 2).max(1)),
             };
-            let Some((new_pane, sender)) = spawn_pane(events, shell, None, cols, rows) else {
+            let Some((new_pane, sender)) = spawn_pane(events, meta, shell, None, cols, rows) else {
                 return Some(Message::Error {
                     code: "internal".into(),
                     detail: "cannot spawn the shell".into(),
@@ -576,6 +637,12 @@ async fn dispatch(
             }
             None
         }
+        Message::AckStatus { pane_id, seq } => {
+            if let Some(sender) = sender_of(sessions, pane_id).await {
+                let _ = sender.send(Cmd::Ack(seq)).await;
+            }
+            None
+        }
         Message::Ping { ts } => Some(Message::Pong { ts }),
         // `zoom_pane` / `unzoom` are not implemented in M1 (protocol rule 2).
         other => Some(Message::Unsupported {
@@ -587,6 +654,7 @@ async fn dispatch(
 /// Spawns a shell in a fresh PTY and starts its actor.
 fn spawn_pane(
     events: &broadcast::Sender<Event>,
+    meta: &Meta,
     shell: &str,
     cwd: Option<String>,
     cols: u16,
@@ -651,12 +719,14 @@ fn spawn_pane(
     let pane_id = NEXT_PANE.fetch_add(1, Ordering::Relaxed);
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<Cmd>(64);
     let events = events.clone();
+    let meta = Arc::clone(meta);
     tokio::spawn(async move {
         let mut pane = PaneState::new(pane_id, cols, rows, SCROLLBACK);
         let mut child = child;
         let mut ticker = interval(Duration::from_millis(150));
         ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
         let mut commands_open = true;
+        let mut last_status_seq = 0u32;
         loop {
             tokio::select! {
                 command = cmd_rx.recv(), if commands_open => {
@@ -686,6 +756,18 @@ fn spawn_pane(
                         Cmd::Kill => {
                             let _ = child.kill();
                         }
+                        Cmd::Ack(seq) => {
+                            pane.status_mut().ack_seq(seq);
+                        }
+                        Cmd::LatestStatus { reply } => {
+                            let _ = reply.send(pane.status().latest().map(|record| Message::Status {
+                                pane_id,
+                                state: record.state.as_str().to_owned(),
+                                seq: record.seq,
+                                kind: (record.kind.as_str() != "").then(|| record.kind.as_str().to_owned()),
+                                msg: (!record.msg.is_empty()).then(|| record.msg.clone()),
+                            }));
+                        }
                     }
                 }
                 _ = ticker.tick() => {
@@ -709,6 +791,28 @@ fn spawn_pane(
                         break;
                     };
                     pane.feed(&chunk);
+                    let cwd = pane.cwd().map(str::to_owned);
+                    let title = pane.title().map(str::to_owned);
+                    if cwd.is_some() || title.is_some() {
+                        meta.lock().await.insert(pane_id, PaneMeta { cwd, title });
+                    }
+                    if let Some(record) = pane.status().latest() {
+                        // Only on change: the sidebar must not be spammed.
+                        if record.seq != last_status_seq {
+                            last_status_seq = record.seq;
+                        } else {
+                            flush(&mut pane, &events);
+                            continue;
+                        }
+                        let message = Message::Status {
+                            pane_id,
+                            state: record.state.as_str().to_owned(),
+                            seq: record.seq,
+                            kind: (record.kind.as_str() != "").then(|| record.kind.as_str().to_owned()),
+                            msg: (!record.msg.is_empty()).then(|| record.msg.clone()),
+                        };
+                        let _ = events.send(Event::Status { pane_id, message });
+                    }
                     let replies = pane.take_replies();
                     if !replies.is_empty() {
                         let _ = write_tx.send(replies);

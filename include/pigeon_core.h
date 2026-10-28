@@ -175,6 +175,8 @@ typedef enum PgMsgType {
     PG_MSG_RESIZE_SPLIT = 19,
     PG_MSG_FOCUS = 20,
     PG_MSG_LAYOUT = 21,
+    PG_MSG_STATUS = 22,
+    PG_MSG_ACK_STATUS = 23,
 } PgMsgType;
 
 typedef enum PgStatusKind {
@@ -352,6 +354,11 @@ typedef struct PgSessionInfo {
     struct PgStr title;
     struct PgStr cwd;
     uint32_t pane_count;
+    /**
+     * 0 when the session has no focused pane.
+     */
+    uint32_t active_pane;
+    struct PgStr active_title;
 } PgSessionInfo;
 
 
