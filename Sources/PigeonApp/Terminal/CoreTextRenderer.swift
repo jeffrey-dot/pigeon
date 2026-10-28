@@ -5,6 +5,12 @@ import PigeonCore
 /// Draws a cell grid with CoreText. The only file allowed to import CoreText.
 enum CoreTextRenderer {
     static let fontSize: CGFloat = 13
+    /// harp's terminal line-height ratio (`DEFAULT_UI_LINE_HEIGHT_RATIO` in
+    /// `crates/warpui_core/src/elements/gui/text.rs:33`, used as the terminal default).
+    static let lineHeightRatio: CGFloat = 1.2
+    /// harp ships "Hack" (`app/src/settings/font.rs:11`); when it is not installed we keep the
+    /// system monospace rather than bundling a font file.
+    static let fontName = "Hack"
 
     /// A run of cells sharing one colour, pinned to the column it starts at.
     ///
@@ -21,15 +27,18 @@ enum CoreTextRenderer {
     }
 
     static func font(bold: Bool) -> NSFont {
-        let base = NSFont.monospacedSystemFont(ofSize: fontSize, weight: bold ? .bold : .regular)
-        return base
+        if let named = NSFont(name: bold ? "\(fontName)-Bold" : fontName, size: fontSize) {
+            return named
+        }
+        return NSFont.monospacedSystemFont(ofSize: fontSize, weight: bold ? .bold : .regular)
     }
 
     static func cellSize() -> CGSize {
         let font = font(bold: false)
         let advance = ("M" as NSString).size(withAttributes: [.font: font])
-        let line = font.ascender - font.descender + font.leading
-        return CGSize(width: max(advance.width, 1), height: max(line, 1))
+        // Cell height is the font size times harp's line-height ratio, not the font's own
+        // ascender/descender span: that is what gives harp's rows their airiness.
+        return CGSize(width: max(advance.width, 1), height: max(fontSize * lineHeightRatio, 1))
     }
 
     static func draw(
@@ -83,7 +92,7 @@ enum CoreTextRenderer {
                     attributes: [
                         NSAttributedString.Key(kCTFontAttributeName as String): font,
                         NSAttributedString.Key(kCTForegroundColorAttributeName as String):
-                            color(run.colorValue).cgColor,
+                            textColor(run.colorValue).cgColor,
                     ]
                 )
                 let line = CTLineCreateWithAttributedString(attributed)
@@ -178,22 +187,16 @@ enum CoreTextRenderer {
         )
     }
 
-    /// xterm's 256-colour table.
+    /// Cell text goes through the contrast floor: a TUI's greys are chosen for a dark canvas
+    /// and vanish on the light card (see `TerminalPalette.readable`).
+    private static func textColor(_ value: UInt32) -> NSColor {
+        TerminalPalette.readable(color(value), on: SidebarTheme.terminalBackground)
+    }
+
+    /// ANSI 0–15 come from harp's palette (per appearance); 16+ keep xterm's 256-colour cube.
     private static func palette(_ index: Int) -> NSColor {
-        let ansi: [(UInt32, UInt32, UInt32)] = [
-            (0, 0, 0), (205, 0, 0), (0, 205, 0), (205, 205, 0),
-            (0, 0, 238), (205, 0, 205), (0, 205, 205), (229, 229, 229),
-            (127, 127, 127), (255, 0, 0), (0, 255, 0), (255, 255, 0),
-            (92, 92, 255), (255, 0, 255), (0, 255, 255), (255, 255, 255),
-        ]
-        if index < 16 {
-            let (r, g, b) = ansi[index]
-            return NSColor(
-                calibratedRed: CGFloat(r) / 255,
-                green: CGFloat(g) / 255,
-                blue: CGFloat(b) / 255,
-                alpha: 1
-            )
+        if let ansi = TerminalPalette.color(index, appearance: NSAppearance.currentDrawing()) {
+            return ansi
         }
         if index < 232 {
             let value = index - 16

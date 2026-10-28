@@ -264,6 +264,17 @@ pub enum Message {
         #[serde(skip_serializing_if = "Option::is_none")]
         links: Option<Vec<Link>>,
     },
+    /// The client's current theme, so the host can answer `OSC 4/10/11` colour queries for
+    /// the programs inside the panes. All fields are optional: a client that never sends this
+    /// (or sends it without colours) leaves the host's behaviour exactly as it was.
+    Appearance {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        fg: Option<u32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        bg: Option<u32>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        ansi: Vec<u32>,
+    },
     Keys {
         pane_id: u32,
         #[serde(with = "serde_bytes")]
@@ -326,6 +337,7 @@ impl Message {
             Self::Attach { .. } => "attach",
             Self::Snapshot { .. } => "snapshot",
             Self::Delta { .. } => "delta",
+            Self::Appearance { .. } => "appearance",
             Self::Keys { .. } => "keys",
             Self::ResizePane { .. } => "resize_pane",
             Self::PaneExited { .. } => "pane_exited",
@@ -417,6 +429,7 @@ fn is_known(tag: &str) -> bool {
             | "attach"
             | "snapshot"
             | "delta"
+            | "appearance"
             | "keys"
             | "resize_pane"
             | "pane_exited"
@@ -588,6 +601,14 @@ mod tests {
                 scroll: None,
                 links: None,
             },
+            Message::Appearance {
+                fg: Some(0x0011_1111),
+                bg: Some(0x00ff_ffff),
+                ansi: vec![
+                    0x212121, 0xC30771, 0x10A778, 0xA89C14, 0x008EC4, 0x523C79, 0x20A5BA, 0xE0E0E0,
+                    0x212121, 0xFB007A, 0x5FD7AF, 0xF3E430, 0x20BBFC, 0x6855DE, 0x4FB8CC, 0xF1F1F1,
+                ],
+            },
             Message::Keys {
                 pane_id: 1,
                 bytes: vec![0x1b, b'[', b'A'],
@@ -620,6 +641,54 @@ mod tests {
             let payload = encode(&message).expect("encode");
             let decoded = decode(&payload).expect("decode");
             assert_eq!(decoded, message, "round-trip failed for {}", message.name());
+        }
+    }
+
+    #[test]
+    fn appearance_without_colours_is_how_a_legacy_client_speaks() {
+        // A client that never learned about `appearance` simply does not send it; one that
+        // sends an empty message must decode to "no colours", not to a panic or a default.
+        let decoded = decode(
+            &encode(&Message::Appearance {
+                fg: None,
+                bg: None,
+                ansi: Vec::new(),
+            })
+            .expect("encode"),
+        )
+        .expect("decode");
+        assert_eq!(
+            decoded,
+            Message::Appearance {
+                fg: None,
+                bg: None,
+                ansi: Vec::new()
+            }
+        );
+        match decoded {
+            Message::Appearance { fg, bg, ansi } => {
+                assert!(fg.is_none() && bg.is_none() && ansi.is_empty());
+            }
+            other => panic!("expected appearance, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn appearance_carries_a_wrong_length_palette_through_untouched() {
+        // Validation belongs to the host: the codec must not silently pad or truncate.
+        let ansi = vec![0x00_00_00; 12];
+        let decoded = decode(
+            &encode(&Message::Appearance {
+                fg: Some(0x00ff_ffff),
+                bg: Some(0x0005_0505),
+                ansi: ansi.clone(),
+            })
+            .expect("encode"),
+        )
+        .expect("decode");
+        match decoded {
+            Message::Appearance { ansi: got, .. } => assert_eq!(got, ansi),
+            other => panic!("expected appearance, got {other:?}"),
         }
     }
 

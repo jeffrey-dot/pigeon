@@ -84,6 +84,7 @@
 
 | 方向 | 消息 | 必选字段 | 可选字段 | 说明 |
 |---|---|---|---|---|
+| c→s | `appearance` | — | `fg: u32`, `bg: u32`, `ansi: [u32]`（16 个 `0xRRGGBB`） | 客户端当前主题，供宿主回答程序发出的 `OSC 4/10/11` 颜色查询；字段全可选，不发送时宿主保持“不回答”的旧行为 |
 | c→s | `keys` | `pane_id: u32`, `bytes: bstr` | — | 已编码好的终端字节（kitty protocol 或 legacy 由客户端决定） |
 | c→s | `mouse` | `pane_id: u32`, `kind: "down"\|"up"\|"move"\|"wheel"`, `x: u16`, `y: u16`, `button: u8`, `mods: u8` | — | `mods` 位：`1` shift、`2` alt、`4` ctrl |
 | c→s | `paste` | `pane_id: u32`, `text: str` | — | 宿主负责括号粘贴包装 |

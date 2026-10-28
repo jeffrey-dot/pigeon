@@ -177,6 +177,7 @@ typedef enum PgMsgType {
     PG_MSG_LAYOUT = 21,
     PG_MSG_STATUS = 22,
     PG_MSG_ACK_STATUS = 23,
+    PG_MSG_APPEARANCE = 24,
 } PgMsgType;
 
 typedef enum PgStatusKind {
@@ -564,6 +565,11 @@ size_t pg_msg_layout_splits(const PgMsg *msg, struct PgSplit *out, size_t cap);
  * Focus carried by a `layout` message (0 when absent).
  */
 uint32_t pg_msg_layout_focus(const PgMsg *msg);
+
+/**
+ * Sets a field to an array of numbers (e.g. `appearance.ansi`).
+ */
+bool pg_msg_set_u32_array(PgMsg *msg, const char *field, const uint32_t *values, size_t count);
 
 /**
  * Sets a field to an array of strings (e.g. `hello.features`).

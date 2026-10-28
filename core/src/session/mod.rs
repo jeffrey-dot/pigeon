@@ -51,6 +51,11 @@ impl PaneState {
         }
     }
 
+    /// The client's colours, so `OSC 4/10/11` can be answered (`None` keeps them silent).
+    pub fn set_palette(&mut self, palette: Option<crate::term::Palette>) {
+        self.term.set_palette(palette);
+    }
+
     pub fn resize(&mut self, cols: u16, rows: u16) {
         self.cols = cols;
         self.rows = rows;

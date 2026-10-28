@@ -49,6 +49,7 @@ pub enum PgMsgType {
     PG_MSG_LAYOUT = 21,
     PG_MSG_STATUS = 22,
     PG_MSG_ACK_STATUS = 23,
+    PG_MSG_APPEARANCE = 24,
 }
 
 /// Wire name ↔ enum. Kept in one place so the two can never drift.
@@ -76,6 +77,7 @@ const NAMES: &[(PgMsgType, &str)] = &[
     (PgMsgType::PG_MSG_LAYOUT, "layout"),
     (PgMsgType::PG_MSG_STATUS, "status"),
     (PgMsgType::PG_MSG_ACK_STATUS, "ack_status"),
+    (PgMsgType::PG_MSG_APPEARANCE, "appearance"),
 ];
 
 fn name_of(msg_type: PgMsgType) -> Option<&'static str> {
@@ -667,6 +669,31 @@ pub struct PgSessionInfo {
     /// 0 when the session has no focused pane.
     pub active_pane: u32,
     pub active_title: PgStr,
+}
+
+/// Sets a field to an array of numbers (e.g. `appearance.ansi`).
+#[no_mangle]
+pub extern "C" fn pg_msg_set_u32_array(
+    msg: *mut PgMsg,
+    field: *const c_char,
+    values: *const u32,
+    count: usize,
+) -> bool {
+    ffi_call(false, || {
+        let msg = unsafe_mut(msg)?;
+        let field = field_name(field)?;
+        if values.is_null() && count > 0 {
+            return Err(PgError::InvalidArg);
+        }
+        let mut items = Vec::with_capacity(count);
+        for index in 0..count {
+            // SAFETY: caller promises `count` readable entries.
+            let value = unsafe { *values.add(index) };
+            items.push(Value::Integer(u64::from(value).into()));
+        }
+        msg.fields.insert(field, Value::Array(items));
+        Ok(true)
+    })
 }
 
 /// Sets a field to an array of strings (e.g. `hello.features`).

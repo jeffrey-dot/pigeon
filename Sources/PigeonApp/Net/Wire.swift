@@ -46,6 +46,14 @@ enum Wire {
         }
     }
 
+    static func set(_ message: OpaquePointer, u32Array field: String, _ values: [UInt32]) {
+        field.withCString { name in
+            values.withUnsafeBufferPointer { buffer in
+                _ = pg_msg_set_u32_array(message, name, buffer.baseAddress, buffer.count)
+            }
+        }
+    }
+
     static func set(_ message: OpaquePointer, bytes field: String, _ value: [UInt8]) {
         field.withCString { name in
             value.withUnsafeBufferPointer { buffer in

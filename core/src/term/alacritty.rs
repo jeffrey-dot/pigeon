@@ -5,6 +5,8 @@
 
 use std::sync::{Arc, Mutex};
 
+use crate::term::Palette;
+
 use alacritty_terminal::event::{Event, EventListener, WindowSize};
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column, Line, Point};
@@ -46,6 +48,8 @@ struct ReplySink {
     out: Arc<Mutex<Vec<u8>>>,
     size: Arc<Mutex<GridSize>>,
     title: Arc<Mutex<Option<String>>>,
+    /// The client's colours; without them `OSC 4/10/11` stay unanswered.
+    palette: Arc<Mutex<Option<Palette>>>,
 }
 
 impl EventListener for ReplySink {
@@ -79,8 +83,23 @@ impl EventListener for ReplySink {
                     *slot = Some(text);
                 }
             }
-            // OSC 52 clipboard access and colour queries stay unanswered in M0
-            // (see docs/plan.md §11): silence is the safe default.
+            // The application asks what colour it is drawing on (`OSC 4/10/11`), typically at
+            // startup, and picks its light or dark theme from the answer.
+            Event::ColorRequest(index, format) => {
+                let palette = self.palette.lock().ok().and_then(|slot| *slot);
+                let Some(colour) = palette.and_then(|palette| palette.resolve(index)) else {
+                    return;
+                };
+                let reply = format(Rgb {
+                    r: colour.r,
+                    g: colour.g,
+                    b: colour.b,
+                });
+                if let Ok(mut out) = self.out.lock() {
+                    out.extend_from_slice(reply.as_bytes());
+                }
+            }
+            // OSC 52 clipboard access stays unanswered (see docs/plan.md §11).
             _ => {}
         }
     }
@@ -93,6 +112,7 @@ pub struct AlacrittyTerm {
     replies: Arc<Mutex<Vec<u8>>>,
     size: Arc<Mutex<GridSize>>,
     title: Arc<Mutex<Option<String>>>,
+    palette: Arc<Mutex<Option<Palette>>>,
 }
 
 impl AlacrittyTerm {
@@ -105,10 +125,12 @@ impl AlacrittyTerm {
         let replies = Arc::new(Mutex::new(Vec::new()));
         let size_cell = Arc::new(Mutex::new(size));
         let title = Arc::new(Mutex::new(None));
+        let palette = Arc::new(Mutex::new(None));
         let sink = ReplySink {
             out: Arc::clone(&replies),
             size: Arc::clone(&size_cell),
             title: Arc::clone(&title),
+            palette: Arc::clone(&palette),
         };
         let config = Config {
             scrolling_history: history,
@@ -120,6 +142,7 @@ impl AlacrittyTerm {
             replies,
             size: size_cell,
             title,
+            palette,
         }
     }
 
@@ -214,6 +237,12 @@ impl Term for AlacrittyTerm {
         };
         self.term.reset_damage();
         rows
+    }
+
+    fn set_palette(&mut self, palette: Option<Palette>) {
+        if let Ok(mut slot) = self.palette.lock() {
+            *slot = palette;
+        }
     }
 
     fn title(&self) -> Option<String> {

@@ -37,17 +37,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pendingSnapshots: [UInt32: Data] = [:]
     private var nextRequest: UInt32 = 1
 
+    private var appearanceObservation: NSKeyValueObservation?
     private let store = SidebarStore()
     private var state = SidebarState()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // `PIGEON_APPEARANCE=light|dark` pins the app's appearance for the screenshot runs
-        // (`tools/m3-gui-check.sh`), so both palettes can be captured without touching the
-        // system's own setting.
-        switch ProcessInfo.processInfo.environment["PIGEON_APPEARANCE"]?.lowercased() {
-        case "light": NSApp.appearance = NSAppearance(named: .aqua)
-        case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
-        default: break
+        // `PIGEON_APPEARANCE=light|dark|system` pins the app's appearance for the screenshot
+        // runs (`tools/m3-gui-check.sh`). Pinning sets `NSApp.appearance`, which overrides the
+        // system until it is cleared again — hence the third value and the three-way toggle.
+        NSApp.appearance = AppearanceMode
+            .fromEnvironment(ProcessInfo.processInfo.environment["PIGEON_APPEARANCE"]).appearance
+        // The system flipping light/dark is another way the palette changes. AppKit does not
+        // post a notification for it, but `effectiveAppearance` is KVO-observable.
+        appearanceObservation = NSApp.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
+            self?.sendAppearance()
         }
         state = store.load()
         buildMenu()
@@ -253,6 +256,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         defer { Wire.free(message) }
         build(message)
         client.send(message)
+    }
+
+    /// Reports the palette the panes should answer colour queries with. Sent after the
+    /// handshake and again whenever the appearance changes.
+    private func sendAppearance() {
+        let appearance = NSApp.effectiveAppearance
+        let ansi = TerminalPalette.hexValues(appearance: appearance)
+        guard ansi.count == 16 else { return }
+        let fg = TerminalPalette.hex(SidebarTheme.terminalForeground, appearance: appearance)
+        let bg = TerminalPalette.hex(SidebarTheme.terminalBackground, appearance: appearance)
+        send({ message in
+            Wire.set(message, u32: "fg", fg)
+            Wire.set(message, u32: "bg", bg)
+            Wire.set(message, u32Array: "ansi", ansi)
+        }, type: PG_MSG_APPEARANCE)
+        debugLog("appearance sent fg=\(String(format: "%06x", fg)) bg=\(String(format: "%06x", bg))")
     }
 
     private func sendHello() {
@@ -480,9 +499,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
+    /// light → dark → follow the system. Clearing `NSApp.appearance` hands control back to
+    /// the system, which is the only way to undo a pin without relaunching.
     @objc private func toggleAppearance(_ sender: Any?) {
-        let dark = NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        NSApp.appearance = NSAppearance(named: dark ? .aqua : .darkAqua)
+        let mode = AppearanceMode.current().next
+        NSApp.appearance = mode.appearance
+        debugLog("appearance -> \(mode.rawValue)")
+        sendAppearance()
     }
 
     @objc private func toggleSidebar(_ sender: Any?) {
@@ -497,7 +520,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func handle(_ message: OpaquePointer) {
         switch Wire.type(message) {
         case PG_MSG_HELLO_ACK:
-            break
+            // Tell the host what we are drawing with, so programs inside the panes can pick
+            // their light or dark theme (`OSC 4/10/11`).
+            sendAppearance()
         case PG_MSG_SESSIONS:
             applySessions(message)
         case PG_MSG_CREATED:

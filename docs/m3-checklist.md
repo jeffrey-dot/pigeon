@@ -97,6 +97,19 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 取色方式：`screencapture -R`（窗口级）→ `sips` 转 JPEG → `CGImageSource` 读像素。这组数值就是“一半白一半黑”修好之后的证据：
 浅色下侧栏与卡片同属浅色（`#e8e8eb` / `#ffffff`），深色下同属深色（`#232326` / `#050505`）。
 
+### 2.3 颜色查询（OSC 4/10/11）与外观色板
+
+程序（`pi`、`vim`、`fzf`…）启动时会问终端“我的底色/前景是什么”（`OSC 11;?` / `OSC 10;?` / `OSC 4;n;?`）。
+客户端现在把当前外观色板发给宿主，宿主据此作答，TUI 就能自己选亮/深主题：
+
+| 面 | 证据 |
+|---|---|
+| 协议 | `appearance { fg, bg, ansi[16] }`（c→s，全字段可选）；`docs/protocol.md` §3；往返/缺字段/错长度三条用例在 `core/src/proto/mod.rs` 的测试里 |
+| VT 层 | `colour_queries_are_answered_from_the_client_palette`（`]11;?` → `rgb:ffff/ffff/ffff`、`]10;?` → `rgb:1111/1111/1111`、`]4;1;?` → `rgb:c3c3/0707/7171`）、`colour_queries_stay_silent_without_a_palette`、`cursor_colour_and_unknown_queries_are_not_answered` |
+| 宿主 | `a_new_pane_answers_colour_queries_with_the_client_palette`（先发色板再建 pane，脚本的启动查询就拿到亮色）、`appearance_reaches_an_existing_pane_without_recreating_it`（先无答复 `R[]`，发色板后同一 pane 再问得到答案，pane id 不变） |
+| 客户端 | `appearance sent fg=111111 bg=ffffff`（`PIGEON_DEBUG` 日志）；外观切换（⌥⌘A / 系统外观变化）都会重发 |
+| 手测 | `/tmp/pigeon-manual…` 的宿主日志里有 2 条 `rgb:ffff/ffff/ffff` 回复；亮色外观下 `pi` 用亮色主题渲染，见 [osc11-light](images/m3/osc11-light.jpg) |
+
 ## 3. 产品调整（用户要求，2026-10-28）
 
 - **行标题改成活跃 pane 的应用名**（`sh` / `zsh` / `pi` / `vim`），不再显示 `session N`；副标题只留状态与相对时间。

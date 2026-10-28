@@ -267,6 +267,7 @@ M3 落地后仍在的洞。
 | 布局只有单 pane | `core/src/layout/` 的布局树 + `pg_layout_*` 全实现；宿主每 pane 独立 PTY/actor；客户端按 `PgRect` 分屏 |
 | `zoom_pane` / `unzoom` 未实现 | 协议按规范回 `unsupported` 且不断开（解码与宿主各有用例）；UI 见下表 |
 | 多客户端尺寸策略未实现 | 单客户端下由 pane rect 反推会话 box；多客户端的 `size_state` 仍留给 M2 |
+| 程序的颜色查询（OSC 4/10/11） | 客户端通过 `appearance` 把当前色板交给宿主，宿主用 `Event::ColorRequest` 的 formatter 回 `rgb:rrrr/gggg/bbbb`；TUI（pi 等）因此能自己选亮/深主题 | 见 `docs/protocol.md` §3 与 `core/tests/host.rs` 的 `a_new_pane_answers_colour_queries_with_the_client_palette` |
 | 侧栏（M3） | 已落地：`SidebarModel`/`Grouping`（git 根）+ 侧栏、OSC 7501 `status` 广播 + `ack_status`、OSC 7/标题、未读/needs-you、⌘J/⌘T/⌘⇧W、右键菜单、**行标题=应用名 / 分组可改名 / 不折叠**、排序持久化；视觉按 harp 源码对齐：`docs/ui.md` §7 是从 harp（`/tmp/harp`，AGPL/MIT，只取数值不取代码）提取的色值/尺寸/字号规格表；行高 30、行圆角 8、组头 11.5/橙色 `N need you`、`SIDEBAR #e8e8eb/#232326`、透明标题栏 + 内嵌红绿灯、右栏是一张大卡片（10pt 圆角、0.5pt 描边、投影、三面 8pt 外缩）、40pt 右栏头部，全部是动态色（浅/深各一套）；截图见 `docs/m3-checklist.md` §2.1 的 light/dark 两套 |
 
 **仍在**：
@@ -279,7 +280,6 @@ M3 落地后仍在的洞。
 | `tools/vt-parity/run.sh` 与 golden 语料未建 | 靠 `core/tests/` 的确定性用例兜底 | M2 接真实程序对账时 |
 | OSC 8 超链接被丢弃 | `PgCell.hyperlink_id` 恒为 0，`cell[4]` 不上线 | 需要按链接跳转时 |
 | DECSTBM 滚动区恒等于整屏 | `alacritty_terminal` 不暴露 `scroll_region` | 需要客户端画滚动条时 |
-| `ColorRequest`（OSC 4/10/11）不回应 | 代码里显式忽略 | 有人反馈配色查询不准时 |
 | Swift 客户端不协商 `delta` | 只收 `snapshot`（协议 §5 允许） | 做性能时开启增量 |
 | IME 候选窗未实现 | 走 AppKit 默认 `keyDown` | M6 |
 | `zstd` 能力只定义了帧内 tag | 阈值、何时启用未定 | M4 远端实测后 |

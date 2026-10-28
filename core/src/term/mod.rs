@@ -78,6 +78,84 @@ impl Snapshot {
 }
 
 /// What the rest of the core needs from a terminal engine.
+/// A colour as the client draws it (`0xRRGGBB`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Colour {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+}
+
+impl Colour {
+    pub fn from_rgb(value: u32) -> Self {
+        Self {
+            r: ((value >> 16) & 0xff) as u8,
+            g: ((value >> 8) & 0xff) as u8,
+            b: (value & 0xff) as u8,
+        }
+    }
+}
+
+/// The colours the connected client is showing, used to answer the application's
+/// `OSC 4` (palette) / `OSC 10` (foreground) / `OSC 11` (background) queries.
+///
+/// Without one (a client that never sent `appearance`) the queries stay unanswered, which is
+/// exactly how the terminal behaved before.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Palette {
+    pub fg: Colour,
+    pub bg: Colour,
+    pub ansi: [Colour; 16],
+}
+
+impl Palette {
+    /// Builds a palette from the wire values; a wrong-length ANSI list is rejected rather
+    /// than padded, so a broken client cannot invent colours.
+    pub fn from_rgb(fg: u32, bg: u32, ansi: &[u32]) -> Option<Self> {
+        let ansi: [Colour; 16] = ansi
+            .iter()
+            .copied()
+            .map(Colour::from_rgb)
+            .collect::<Vec<_>>()
+            .try_into()
+            .ok()?;
+        Some(Self {
+            fg: Colour::from_rgb(fg),
+            bg: Colour::from_rgb(bg),
+            ansi,
+        })
+    }
+
+    /// Indices follow `alacritty_terminal`'s colour table: 0–15 ANSI, 16–231 the colour cube,
+    /// 232–255 the grey ramp, 256 foreground, 257 background. Cursor colours (258+) are not
+    /// answered yet (`docs/plan.md` §11).
+    pub fn resolve(&self, index: usize) -> Option<Colour> {
+        match index {
+            0..=15 => Some(self.ansi[index]),
+            16..=231 => {
+                let steps = [0, 95, 135, 175, 215, 255];
+                let value = index - 16;
+                Some(Colour {
+                    r: steps[(value / 36) % 6],
+                    g: steps[(value / 6) % 6],
+                    b: steps[value % 6],
+                })
+            }
+            232..=255 => {
+                let level = 8 + (index as u32 - 232) * 10;
+                Some(Colour {
+                    r: level as u8,
+                    g: level as u8,
+                    b: level as u8,
+                })
+            }
+            256 => Some(self.fg),
+            257 => Some(self.bg),
+            _ => None,
+        }
+    }
+}
+
 pub trait Term {
     /// Parses bytes; replies (DA/DSR/…) are queued for [`Term::take_replies`].
     fn feed(&mut self, bytes: &[u8]);
@@ -90,14 +168,61 @@ pub trait Term {
 
     /// Title the program announced (OSC 0/2), if any.
     fn title(&self) -> Option<String>;
+
+    /// The palette used to answer colour queries; `None` keeps them unanswered.
+    fn set_palette(&mut self, palette: Option<Palette>);
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{alacritty::AlacrittyTerm, Term};
+    use super::{alacritty::AlacrittyTerm, Palette, Term};
 
     fn term() -> AlacrittyTerm {
         AlacrittyTerm::new(20, 5, 100)
+    }
+
+    /// The light palette the client sends (`#111111` on `#ffffff`, harp's ANSI table).
+    fn light_palette() -> Palette {
+        Palette::from_rgb(
+            0x0011_1111,
+            0x00ff_ffff,
+            &[
+                0x212121, 0xC30771, 0x10A778, 0xA89C14, 0x008EC4, 0x523C79, 0x20A5BA, 0xE0E0E0,
+                0x212121, 0xFB007A, 0x5FD7AF, 0xF3E430, 0x20BBFC, 0x6855DE, 0x4FB8CC, 0xF1F1F1,
+            ],
+        )
+        .expect("palette")
+    }
+
+    #[test]
+    fn colour_queries_are_answered_from_the_client_palette() {
+        let mut term = term();
+        term.set_palette(Some(light_palette()));
+        term.feed(b"\x1b]11;?\x1b\\"); // background
+        term.feed(b"\x1b]10;?\x1b\\"); // foreground
+        term.feed(b"\x1b]4;1;?\x1b\\"); // palette entry 1
+        let replies = String::from_utf8(term.take_replies()).expect("utf8");
+        assert!(replies.contains("]11;rgb:ffff/ffff/ffff"), "{replies:?}");
+        assert!(replies.contains("]10;rgb:1111/1111/1111"), "{replies:?}");
+        assert!(replies.contains("]4;1;rgb:c3c3/0707/7171"), "{replies:?}");
+    }
+
+    #[test]
+    fn colour_queries_stay_silent_without_a_palette() {
+        let mut term = term();
+        term.feed(b"\x1b]11;?\x1b\\");
+        assert!(term.take_replies().is_empty());
+    }
+
+    #[test]
+    fn cursor_colour_and_unknown_queries_are_not_answered() {
+        let mut term = term();
+        term.set_palette(Some(light_palette()));
+        term.feed(b"\x1b]12;?\x1b\\"); // cursor colour: out of scope
+        term.feed(b"\x1b]4;999;?\x1b\\"); // out of the table
+        let replies = String::from_utf8(term.take_replies()).expect("utf8");
+        assert!(!replies.contains("]12;"), "{replies:?}");
+        assert!(!replies.contains("]4;999;"), "{replies:?}");
     }
 
     #[test]

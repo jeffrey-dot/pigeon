@@ -18,6 +18,10 @@ impl FrozenTerm {
 }
 
 impl Term for FrozenTerm {
+    fn set_palette(&mut self, _palette: Option<crate::term::Palette>) {
+        // A frozen term does not parse, so it never answers colour queries.
+    }
+
     fn feed(&mut self, _bytes: &[u8]) {
         // A frozen term is a picture, not a parser. Live deltas are ignored on
         // purpose: the host sends a fresh snapshot when the client cannot follow.

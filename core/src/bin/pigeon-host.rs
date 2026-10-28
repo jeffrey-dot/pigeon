@@ -24,6 +24,7 @@ use pigeon_core::error::PgError;
 use pigeon_core::layout::{Axis, Layout, LayoutNode};
 use pigeon_core::proto::{self, Message, Node, SplitAxis, SplitNode, PROTO_VERSION};
 use pigeon_core::session::PaneState;
+use pigeon_core::term::Palette;
 
 /// Capabilities this build offers (protocol §5).
 const SERVER_FEATURES: &[&str] = &["delta", "scrollback", "osc7501"];
@@ -57,6 +58,8 @@ struct Session {
 type Meta = Arc<Mutex<HashMap<u32, PaneMeta>>>;
 
 type Sessions = Arc<Mutex<HashMap<u32, Session>>>;
+/// The colours the connected client is showing; `None` until a client sends `appearance`.
+type PaletteSlot = Arc<std::sync::Mutex<Option<Palette>>>;
 
 #[derive(Clone)]
 enum Event {
@@ -94,6 +97,8 @@ enum Cmd {
     LatestStatus {
         reply: oneshot::Sender<Option<Message>>,
     },
+    /// The client's colours changed: answer the panes' `OSC 4/10/11` queries with these.
+    SetPalette(Option<Palette>),
 }
 
 fn main() -> ExitCode {
@@ -135,6 +140,7 @@ async fn run() -> Result<(), String> {
     let (events, _) = broadcast::channel::<Event>(256);
     let sessions: Sessions = Arc::new(Mutex::new(HashMap::new()));
     let meta: Meta = Arc::new(Mutex::new(HashMap::new()));
+    let palette: PaletteSlot = Arc::new(std::sync::Mutex::new(None::<Palette>));
 
     if std::fs::metadata(&socket).is_ok_and(|meta| meta.file_type().is_socket()) {
         let _ = std::fs::remove_file(&socket);
@@ -156,9 +162,11 @@ async fn run() -> Result<(), String> {
         let sessions = Arc::clone(&sessions);
         let events = events.clone();
         let meta = Arc::clone(&meta);
+        let palette = Arc::clone(&palette);
         let shell = shell.clone();
         tokio::spawn(async move {
-            if let Err(error) = handle_client(stream, sessions, events, meta, shell).await {
+            if let Err(error) = handle_client(stream, sessions, events, meta, palette, shell).await
+            {
                 eprintln!("pigeon-host: client gone: {error}");
             }
         });
@@ -181,6 +189,7 @@ async fn handle_client(
     sessions: Sessions,
     events: broadcast::Sender<Event>,
     meta: Meta,
+    palette: PaletteSlot,
     shell: String,
 ) -> Result<(), String> {
     let (mut reader, mut writer) = stream.into_split();
@@ -202,7 +211,10 @@ async fn handle_client(
                             if std::env::var_os("PIGEON_DEBUG").is_some() {
                                 eprintln!("pigeon-host: <- {}", message.name());
                             }
-                            if let Some(reply) = dispatch(message, &sessions, &events, &meta, &shell, &mut state).await {
+                            if let Some(reply) =
+                                dispatch(message, &sessions, &events, &meta, &palette, &shell, &mut state)
+                                    .await
+                            {
                                 let handshake = matches!(reply, Message::HelloAck { .. });
                                 let attached_pane = match &reply {
                                     Message::Snapshot { pane_id, .. } => Some(*pane_id),
@@ -221,6 +233,7 @@ async fn handle_client(
                                         &sessions,
                                         &events,
                                         &meta,
+                                        &palette,
                                         &shell,
                                         &mut state,
                                     )
@@ -271,6 +284,7 @@ async fn handle_client(
                             &sessions,
                             &events,
                             &meta,
+                            &palette,
                             &shell,
                             &mut state,
                         )
@@ -383,6 +397,7 @@ async fn dispatch(
     sessions: &Sessions,
     events: &broadcast::Sender<Event>,
     meta: &Meta,
+    palette: &PaletteSlot,
     shell: &str,
     state: &mut ClientState,
 ) -> Option<Message> {
@@ -446,6 +461,28 @@ async fn dispatch(
                     .collect(),
             })
         }
+        // The client tells us what it is drawing, so the programs inside the panes can pick
+        // their light or dark theme (harp answers the same queries from its theme).
+        Message::Appearance { fg, bg, ansi } => {
+            let Some(colours) = fg
+                .zip(bg)
+                .and_then(|(fg, bg)| Palette::from_rgb(fg, bg, &ansi))
+            else {
+                // Not enough information (or a wrong-length palette): keep the old answer set
+                // rather than inventing colours.
+                return None;
+            };
+            if let Ok(mut slot) = palette.lock() {
+                *slot = Some(colours);
+            }
+            let map = sessions.lock().await;
+            for session in map.values() {
+                for sender in session.panes.values() {
+                    let _ = sender.try_send(Cmd::SetPalette(Some(colours)));
+                }
+            }
+            None
+        }
         Message::NewSession {
             id,
             cwd,
@@ -454,9 +491,15 @@ async fn dispatch(
         } => {
             let shell = requested.unwrap_or_else(|| shell.to_owned());
             let launch_cwd = cwd.clone().unwrap_or_default();
-            let Some((pane_id, sender)) =
-                spawn_pane(events, meta, &shell, cwd, DEFAULT_COLS, DEFAULT_ROWS)
-            else {
+            let Some((pane_id, sender)) = spawn_pane(
+                events,
+                meta,
+                &shell,
+                cwd,
+                DEFAULT_COLS,
+                DEFAULT_ROWS,
+                current_palette(palette),
+            ) else {
                 return Some(Message::Error {
                     code: "internal".into(),
                     detail: "cannot spawn the shell".into(),
@@ -537,7 +580,15 @@ async fn dispatch(
                 Axis::Vertical => ((session.cols / 2).max(2), session.rows),
                 Axis::Horizontal => (session.cols, (session.rows / 2).max(1)),
             };
-            let Some((new_pane, sender)) = spawn_pane(events, meta, shell, None, cols, rows) else {
+            let Some((new_pane, sender)) = spawn_pane(
+                events,
+                meta,
+                shell,
+                None,
+                cols,
+                rows,
+                current_palette(palette),
+            ) else {
                 return Some(Message::Error {
                     code: "internal".into(),
                     detail: "cannot spawn the shell".into(),
@@ -680,6 +731,11 @@ async fn dispatch(
 }
 
 /// Spawns a shell in a fresh PTY and starts its actor.
+/// The palette a new pane should start with (`None` until a client sends `appearance`).
+fn current_palette(slot: &PaletteSlot) -> Option<Palette> {
+    slot.lock().ok().and_then(|slot| *slot)
+}
+
 fn spawn_pane(
     events: &broadcast::Sender<Event>,
     meta: &Meta,
@@ -687,6 +743,7 @@ fn spawn_pane(
     cwd: Option<String>,
     cols: u16,
     rows: u16,
+    palette: Option<Palette>,
 ) -> Option<(u32, mpsc::Sender<Cmd>)> {
     let size = PtySize {
         rows,
@@ -750,6 +807,9 @@ fn spawn_pane(
     let meta = Arc::clone(meta);
     tokio::spawn(async move {
         let mut pane = PaneState::new(pane_id, cols, rows, SCROLLBACK);
+        // Colour queries asked before the client's theme was known are simply not answered;
+        // the next pane gets the palette at birth.
+        pane.set_palette(palette);
         let mut child = child;
         let mut ticker = interval(Duration::from_millis(150));
         ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -787,6 +847,10 @@ fn spawn_pane(
                         }
                         Cmd::Ack(seq) => {
                             pane.status_mut().ack_seq(seq);
+                        }
+                        Cmd::SetPalette(palette) => {
+                            pane.set_palette(palette);
+                            // No flush: the palette only affects query answers, not the screen.
                         }
                         Cmd::LatestStatus { reply } => {
                             let _ = reply.send(pane.status().latest_unacked().map(|record| Message::Status {
