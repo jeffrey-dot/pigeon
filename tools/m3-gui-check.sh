@@ -20,6 +20,7 @@ shoot() {
 }
 sidebar_state() { python3 -c "import json,sys;d=json.load(open('$CONFIG/sidebar.json'));print(d.get('$1'))" 2>/dev/null || echo '?'; }
 
+pkill -f "$APP" 2>/dev/null
 R=$(mktemp -d /tmp/pigeon-m3-XXXXXX)
 CONFIG="$R/config"
 mkdir -p "$CONFIG" /tmp/pigeon/a /tmp/pigeon/b /tmp/pigeon/c
@@ -58,6 +59,7 @@ TOP=$((OY + 28))
 row_y() { echo $((TOP + ROW * $1 + ROW / 2)); }
 shoot "$OUT/sidebar.jpg"
 echo "sidebar: $(grep -o 'sidebar sessions=[0-9]* needs=[0-9]*' "$R/app.log" | tail -1)"
+echo "apps: $(grep -o 'sessions apps=[^"]*' "$R/app.log" | tail -1)"
 
 # The third session (its first pane id equals the session id) reports blocked.
 cargo run --quiet --manifest-path core/Cargo.toml --example keys -- \
@@ -88,7 +90,7 @@ sleep 2
 after=$(grep -c 'pigeon-host: <- close_pane' "$R/host.log")
 echo "right-click Close Session: close_pane $before -> $after"
 
-cliclick c:60,$(row_y 0)
+cliclick c:12,$(row_y 0)
 sleep 1
 shoot "$OUT/collapsed.jpg"
 echo "collapsed: $(sidebar_state collapsed)"

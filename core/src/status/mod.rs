@@ -107,6 +107,8 @@ pub struct StatusStore {
     cwd: Option<String>,
     /// Last title reported by OSC 0/2.
     title: Option<String>,
+    /// Bumped on every mutation, so the host can broadcast only on change.
+    revision: u32,
     next_seq: u32,
 }
 
@@ -148,6 +150,23 @@ impl StatusStore {
         self.records.values().max_by_key(|record| record.seq)
     }
 
+    /// Highest `seq` record that the user has not seen yet.
+    pub fn latest_unacked(&self) -> Option<&Record> {
+        self.records
+            .values()
+            .filter(|record| !record.acked)
+            .max_by_key(|record| record.seq)
+    }
+
+    /// Changes whenever the record set or any record changes.
+    pub fn revision(&self) -> u32 {
+        self.revision
+    }
+
+    fn touch(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
+    }
+
     /// Marks whichever record carries `seq` as seen.
     pub fn ack_seq(&mut self, seq: u32) -> bool {
         let mut acked = false;
@@ -156,6 +175,9 @@ impl StatusStore {
                 record.acked = true;
                 acked = true;
             }
+        }
+        if acked {
+            self.touch();
         }
         acked
     }
@@ -209,7 +231,11 @@ impl StatusStore {
     }
 
     fn retain(&mut self, keep: impl Fn(&Record) -> bool) {
+        let before = self.records.len();
         self.records.retain(|_, record| keep(record));
+        if self.records.len() != before {
+            self.touch();
+        }
     }
 
     /// OSC 133 `A` means the prompt is back: nothing is working any more.
@@ -245,6 +271,7 @@ impl StatusStore {
                     acked: false,
                 };
                 self.records.insert(report.id, record);
+                self.touch();
                 self.evict();
             }
         }
@@ -252,7 +279,10 @@ impl StatusStore {
 
     fn clear(&mut self, id: &str) {
         if id.is_empty() {
-            self.records.clear();
+            if !self.records.is_empty() {
+                self.records.clear();
+                self.touch();
+            }
             return;
         }
         // `a` clears `a` and everything under `a.`; no other prefix matches.
@@ -263,6 +293,9 @@ impl StatusStore {
             .filter(|key| key.as_str() == id || key.starts_with(&subtree))
             .cloned()
             .collect();
+        if !doomed.is_empty() {
+            self.touch();
+        }
         for key in doomed {
             self.records.remove(&key);
         }
@@ -281,6 +314,7 @@ impl StatusStore {
             match victim {
                 Some(id) => {
                     self.records.remove(&id);
+                    self.touch();
                 }
                 None => break,
             }

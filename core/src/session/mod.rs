@@ -80,9 +80,11 @@ impl PaneState {
         self.status.cwd()
     }
 
-    /// Title reported by the program, if it announced one.
-    pub fn title(&self) -> Option<&str> {
-        self.status.title()
+    /// Title reported by the program (OSC 0/2 via the VT engine), if any.
+    pub fn title(&self) -> Option<String> {
+        self.term
+            .title()
+            .or_else(|| self.status.title().map(str::to_owned))
     }
 
     pub fn status_mut(&mut self) -> &mut StatusStore {

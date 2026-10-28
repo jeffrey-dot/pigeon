@@ -45,7 +45,7 @@ struct PaneMeta {
 struct Session {
     layout: Layout,
     panes: HashMap<u32, mpsc::Sender<Cmd>>,
-    /// Shell used for spawns; also the fallback label when a pane has no title.
+    /// Shell used for spawns; its basename is the fallback pane label.
     shell: String,
     /// cwd the session was created with (OSC 7 overrides it per pane).
     cwd: String,
@@ -60,10 +60,24 @@ type Sessions = Arc<Mutex<HashMap<u32, Session>>>;
 
 #[derive(Clone)]
 enum Event {
-    Delta { pane_id: u32, message: Message },
-    Exited { pane_id: u32, code: i32 },
-    Layout { session_id: u32, message: Message },
-    Status { pane_id: u32, message: Message },
+    Delta {
+        pane_id: u32,
+        message: Message,
+    },
+    Exited {
+        pane_id: u32,
+        code: i32,
+    },
+    Layout {
+        session_id: u32,
+        message: Message,
+    },
+    Status {
+        pane_id: u32,
+        message: Message,
+    },
+    /// Titles/cwd changed: clients should refresh `sessions`.
+    SessionsChanged,
 }
 
 enum Cmd {
@@ -249,6 +263,20 @@ async fn handle_client(
                     Event::Status { pane_id, message } => {
                         if state.watched.contains_key(&pane_id) {
                             send(&mut writer, &message).await?;
+                        }
+                    }
+                    Event::SessionsChanged => {
+                        if let Some(list) = dispatch(
+                            Message::Sessions { items: Vec::new() },
+                            &sessions,
+                            &events,
+                            &meta,
+                            &shell,
+                            &mut state,
+                        )
+                        .await
+                        {
+                            send(&mut writer, &list).await?;
                         }
                     }
                     Event::Delta { pane_id, message } => {
@@ -440,7 +468,7 @@ async fn dispatch(
             let session = Session {
                 layout: Layout::new(pane_id),
                 panes,
-                shell: shell.clone(),
+                shell: shell_label(&shell),
                 cwd: launch_cwd,
                 cols: DEFAULT_COLS,
                 rows: DEFAULT_ROWS,
@@ -726,7 +754,8 @@ fn spawn_pane(
         let mut ticker = interval(Duration::from_millis(150));
         ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
         let mut commands_open = true;
-        let mut last_status_seq = 0u32;
+        let mut last_revision = 0u32;
+        let mut last_meta: Option<(Option<String>, Option<String>)> = None;
         loop {
             tokio::select! {
                 command = cmd_rx.recv(), if commands_open => {
@@ -760,7 +789,7 @@ fn spawn_pane(
                             pane.status_mut().ack_seq(seq);
                         }
                         Cmd::LatestStatus { reply } => {
-                            let _ = reply.send(pane.status().latest().map(|record| Message::Status {
+                            let _ = reply.send(pane.status().latest_unacked().map(|record| Message::Status {
                                 pane_id,
                                 state: record.state.as_str().to_owned(),
                                 seq: record.seq,
@@ -792,24 +821,35 @@ fn spawn_pane(
                     };
                     pane.feed(&chunk);
                     let cwd = pane.cwd().map(str::to_owned);
-                    let title = pane.title().map(str::to_owned);
+                    let title = pane.title();
                     if cwd.is_some() || title.is_some() {
-                        meta.lock().await.insert(pane_id, PaneMeta { cwd, title });
-                    }
-                    if let Some(record) = pane.status().latest() {
-                        // Only on change: the sidebar must not be spammed.
-                        if record.seq != last_status_seq {
-                            last_status_seq = record.seq;
-                        } else {
-                            flush(&mut pane, &events);
-                            continue;
+                        let snapshot = (cwd.clone(), title.clone());
+                        if last_meta.as_ref() != Some(&snapshot) {
+                            last_meta = Some(snapshot);
+                            meta.lock().await.insert(pane_id, PaneMeta { cwd, title });
+                            let _ = events.send(Event::SessionsChanged);
                         }
-                        let message = Message::Status {
-                            pane_id,
-                            state: record.state.as_str().to_owned(),
-                            seq: record.seq,
-                            kind: (record.kind.as_str() != "").then(|| record.kind.as_str().to_owned()),
-                            msg: (!record.msg.is_empty()).then(|| record.msg.clone()),
+                    }
+                    let revision = pane.status().revision();
+                    if revision != last_revision {
+                        last_revision = revision;
+                        // A cleared record set must reach clients too: "idle" with
+                        // seq 0 means "nothing is pending".
+                        let message = match pane.status().latest_unacked() {
+                            Some(record) => Message::Status {
+                                pane_id,
+                                state: record.state.as_str().to_owned(),
+                                seq: record.seq,
+                                kind: (record.kind.as_str() != "").then(|| record.kind.as_str().to_owned()),
+                                msg: (!record.msg.is_empty()).then(|| record.msg.clone()),
+                            },
+                            None => Message::Status {
+                                pane_id,
+                                state: "idle".to_owned(),
+                                seq: 0,
+                                kind: None,
+                                msg: None,
+                            },
                         };
                         let _ = events.send(Event::Status { pane_id, message });
                     }
@@ -881,6 +921,13 @@ fn default_socket_path() -> PathBuf {
         .filter(|text| !text.is_empty())
         .unwrap_or_else(|| "0".to_owned());
     PathBuf::from(format!("/tmp/pigeon-{uid}.sock"))
+}
+
+fn shell_label(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_owned())
 }
 
 fn hostname() -> String {

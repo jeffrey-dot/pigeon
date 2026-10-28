@@ -87,6 +87,9 @@ pub trait Term {
     fn take_damage(&mut self) -> Vec<u16>;
     /// Bytes the application expects on its PTY (query answers).
     fn take_replies(&mut self) -> Vec<u8>;
+
+    /// Title the program announced (OSC 0/2), if any.
+    fn title(&self) -> Option<String>;
 }
 
 #[cfg(test)]

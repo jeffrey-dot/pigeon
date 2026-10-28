@@ -39,4 +39,8 @@ impl Term for FrozenTerm {
     fn take_replies(&mut self) -> Vec<u8> {
         Vec::new()
     }
+
+    fn title(&self) -> Option<String> {
+        None
+    }
 }

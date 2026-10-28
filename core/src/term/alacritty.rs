@@ -45,6 +45,7 @@ impl Dimensions for GridSize {
 struct ReplySink {
     out: Arc<Mutex<Vec<u8>>>,
     size: Arc<Mutex<GridSize>>,
+    title: Arc<Mutex<Option<String>>>,
 }
 
 impl EventListener for ReplySink {
@@ -72,6 +73,12 @@ impl EventListener for ReplySink {
                     out.extend_from_slice(reply.as_bytes());
                 }
             }
+            // The program's title (OSC 0/2) is how the sidebar names the app.
+            Event::Title(text) => {
+                if let Ok(mut slot) = self.title.lock() {
+                    *slot = Some(text);
+                }
+            }
             // OSC 52 clipboard access and colour queries stay unanswered in M0
             // (see docs/plan.md §11): silence is the safe default.
             _ => {}
@@ -85,6 +92,7 @@ pub struct AlacrittyTerm {
     parser: Processor,
     replies: Arc<Mutex<Vec<u8>>>,
     size: Arc<Mutex<GridSize>>,
+    title: Arc<Mutex<Option<String>>>,
 }
 
 impl AlacrittyTerm {
@@ -96,9 +104,11 @@ impl AlacrittyTerm {
         };
         let replies = Arc::new(Mutex::new(Vec::new()));
         let size_cell = Arc::new(Mutex::new(size));
+        let title = Arc::new(Mutex::new(None));
         let sink = ReplySink {
             out: Arc::clone(&replies),
             size: Arc::clone(&size_cell),
+            title: Arc::clone(&title),
         };
         let config = Config {
             scrolling_history: history,
@@ -109,6 +119,7 @@ impl AlacrittyTerm {
             parser: Processor::new(),
             replies,
             size: size_cell,
+            title,
         }
     }
 
@@ -203,6 +214,10 @@ impl Term for AlacrittyTerm {
         };
         self.term.reset_damage();
         rows
+    }
+
+    fn title(&self) -> Option<String> {
+        self.title.lock().ok().and_then(|slot| slot.clone())
     }
 
     fn take_replies(&mut self) -> Vec<u8> {

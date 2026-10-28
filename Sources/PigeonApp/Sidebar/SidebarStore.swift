@@ -7,6 +7,8 @@ struct SidebarState: Codable, Equatable {
     var order: [Int] = []
     /// Session id (as text, JSON keys are strings) → user title.
     var renamed: [String: String] = [:]
+    /// Session id → unread count, so a reopen keeps the dots.
+    var unread: [String: Int] = [:]
 
     var collapsedSet: Set<String> { Set(collapsed) }
 }

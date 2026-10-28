@@ -1116,3 +1116,86 @@ fn status_is_broadcast_once_per_change_and_ack_stops_repeats() {
         "acked status must not be re-broadcast"
     );
 }
+
+#[test]
+fn sessions_refresh_when_the_active_pane_title_changes() {
+    let _serial = one_at_a_time();
+    let script = script("#!/bin/sh\nsleep 1\nprintf '\\033]2;vim demo\\007'\nexec /bin/sh\n");
+    let host = start_host_with(script.to_str().expect("utf8"));
+    let mut client = Client::connect(&host.socket);
+    hello(&mut client);
+    let _pane = attach_first(&mut client);
+
+    // The host pushes a fresh list when a pane announces its title.
+    client.send(&Message::Sessions { items: Vec::new() });
+    let listed = client.wait_for(|m| match m {
+        Message::Sessions { items } => items
+            .first()
+            .and_then(|item| item.active_title.as_deref())
+            .is_some_and(|title| title == "vim demo"),
+        _ => false,
+    });
+    let Message::Sessions { items } = listed else {
+        unreachable!()
+    };
+    assert!(items[0].active_pane.is_some());
+    let _ = std::fs::remove_file(&script);
+}
+
+#[test]
+fn acked_status_is_not_replayed_after_reconnect() {
+    let _serial = one_at_a_time();
+    let host = start_host();
+    let mut client = Client::connect(&host.socket);
+    hello(&mut client);
+    let pane = attach_first(&mut client);
+    client.send(&Message::Keys {
+        pane_id: pane,
+        bytes: b"printf '\\033]7501;state=done:msg=T0s=\\007'\r".to_vec(),
+    });
+    let done = client.wait_for(|m| matches!(m, Message::Status { state, .. } if state == "done"));
+    let Message::Status { seq, .. } = done else {
+        unreachable!()
+    };
+    client.send(&Message::AckStatus { pane_id: pane, seq });
+    std::thread::sleep(Duration::from_millis(200));
+    drop(client);
+
+    let mut again = Client::connect(&host.socket);
+    hello(&mut again);
+    again.send(&Message::Attach {
+        id: 140,
+        pane_id: pane,
+        size_policy: None,
+    });
+    let _ = snapshot(&mut again);
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(
+        again
+            .drain(&|m| matches!(m, Message::Status { state, .. } if state == "done"))
+            .is_none(),
+        "an acked record must not come back after a reconnect"
+    );
+}
+
+#[test]
+fn clearing_a_status_broadcasts_idle() {
+    let _serial = one_at_a_time();
+    let host = start_host();
+    let mut client = Client::connect(&host.socket);
+    hello(&mut client);
+    let pane = attach_first(&mut client);
+    client.send(&Message::Keys {
+        pane_id: pane,
+        bytes: b"printf '\\033]7501;state=blocked\\007'\r".to_vec(),
+    });
+    client.wait_for(|m| matches!(m, Message::Status { state, .. } if state == "blocked"));
+    client.send(&Message::Keys {
+        pane_id: pane,
+        bytes: b"printf '\\033]7501;state=clear\\007'\r".to_vec(),
+    });
+    let idle = client.wait_for(
+        |m| matches!(m, Message::Status { state, seq, .. } if state == "idle" && *seq == 0),
+    );
+    assert!(matches!(idle, Message::Status { state, .. } if state == "idle"));
+}

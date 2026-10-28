@@ -17,7 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var lastSeen: Date
 
         var group: String {
-            cwd.isEmpty ? "~" : Grouping.groupName(forCwd: cwd)
+            guard !cwd.isEmpty else { return "~" }
+            return Grouping.groupName(forCwd: cwd, gitRoot: GitRoot.find(cwd: cwd))
         }
     }
 
@@ -258,6 +259,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if var current = rows[id] {
             current.unread = 0
             rows[id] = current
+            state.unread[String(id)] = 0
+            store.save(state)
             sendAck(current.activePane, current.seq)
         }
         refreshSidebar()
@@ -267,6 +270,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let row = rows[id] else { return }
         for pane in row.panes { sendClosePane(pane) }
         rows.removeValue(forKey: id)
+        state.unread.removeValue(forKey: String(id))
+        store.save(state)
         if selectedSession == id { selectedSession = nil }
         refreshSidebar()
         requestSessions()
@@ -276,6 +281,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard var row = rows[id] else { return }
         row.unread = 0
         rows[id] = row
+        state.unread[String(id)] = 0
+        store.save(state)
         sendAck(row.activePane, row.seq)
         refreshSidebar()
     }
@@ -418,11 +425,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 title: "session \(id)",
                 status: previous?.status ?? .idle,
                 seq: previous?.seq ?? 0,
-                unread: previous?.unread ?? 0,
+                unread: previous?.unread ?? state.unread[String(id)] ?? 0,
                 lastSeen: previous?.lastSeen ?? Date()
             )
         }
         rows = updated
+        if ProcessInfo.processInfo.environment["PIGEON_DEBUG"] != nil {
+            let apps = rows.values.map { "\($0.id):\($0.app)" }.sorted().joined(separator: " ")
+            FileHandle.standardError.write(Data("pigeon: sessions apps=\(apps)\n".utf8))
+        }
         if selectedSession == nil || rows[selectedSession!] == nil {
             selectedSession = rows.keys.sorted().first
         }
@@ -447,6 +458,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         row.lastSeen = Date()
         if selectedSession != id && row.status != .idle {
             row.unread += 1
+            state.unread[String(id)] = row.unread
+            store.save(state)
         }
         rows[id] = row
         if selectedSession == id {

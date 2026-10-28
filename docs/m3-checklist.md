@@ -20,7 +20,7 @@ swift build && swift test                          # 通过 / 28 passed
 | 面 | 用例 |
 |---|---|
 | OSC 7 / 标题 | `osc7_sets_the_cwd_and_bad_urls_are_ignored`（file:// + `%20` 正例；http、`%zz`、控制字符三条反例保留旧值）、`osc0_and_osc2_set_the_title`（含控制字符的标题被丢弃） |
-| 状态流 | `status_is_broadcast_once_per_change_and_ack_stops_repeats`（working → done，`msg` base64 解出 “OK”；ack 后不再重复）、`sessions_carry_the_active_pane_and_its_title` |
+| 状态流 | `status_is_broadcast_once_per_change_and_ack_stops_repeats`（working → done，`msg` base64 解出 “OK”；ack 后不再重复）、`sessions_carry_the_active_pane_and_its_title`、`sessions_refresh_when_the_active_pane_title_changes`（OSC 0/2 → 宿主重发 sessions）、`acked_status_is_not_replayed_after_reconnect`、`clearing_a_status_broadcasts_idle` |
 | 侧栏逻辑 | `blocked` 优先且按持久化顺序、`nextNeedsYou` 回绕、`rowSubtitle` = `vim · Working · 1m`、协议状态字符串映射 |
 | 持久化 | `SidebarStore` 往返 + 原子写、默认路径在 `~/.config/pigeon`、损坏文件回退为空状态 |
 
@@ -30,17 +30,17 @@ swift build && swift test                          # 通过 / 28 passed
 
 ```text
 sessions created: 3
-window: origin=(0,33) size=(1100,600)
 sidebar: sidebar sessions=3 needs=1
-after blocked: sidebar sessions=3 needs=1
+apps: sessions apps=1:sh 2:sh 3:status.sh
 Cmd-J focus messages: 0 -> 1 (ack: 1)
 sessions after Cmd-T: 4
 right-click Close Session: close_pane 0 -> 1
-collapsed: ['c']
+collapsed: []
 order: []
-reopened: sidebar sessions=3 needs=1
-state file: …/config/sidebar.json (43 bytes)
+reopened: sidebar sessions=3 needs=0
+state file: …/config/sidebar.json (52 bytes)
 ```
+
 
 | 项 | 证据 |
 |---|---|
@@ -48,7 +48,7 @@ state file: …/config/sidebar.json (43 bytes)
 | 第三个 session 的 blocked 状态与计数 | ![status](images/m3/status.jpg) |
 | ⌘J 跳到 blocked session（焦点/ack 已发） | ![jump](images/m3/jump.jpg) |
 | 右键菜单（关闭 / 标记已读 / 重命名） | ![menu](images/m3/menu.jpg) |
-| 折叠分组（写入 `sidebar.json` 的 `collapsed`） | ![collapsed](images/m3/collapsed.jpg) |
+| 折叠分组 | 本轮的 NSOutlineView 改版后，脚本点击组头没能触发折叠（`collapsed: []`）；旧 NSTableView 版本曾写入 `collapsed: ['c']`。**这一项待手验**（见 §4） |
 | 关窗重开：分组、未读、折叠原样回来 | ![reopen](images/m3/reopen.jpg) |
 | ⌘⇧W 关闭整个 session | 手验：按下后宿主的 shell 数 `3 → 2`（菜单项与右键“Close Session”走同一条 `closeSession`） |
 | **人手拖拽排序**（脚本无法驱动 AppKit 拖拽会话） | 用户手动拖动一行后，`/tmp/pigeon-m3-manual/config/sidebar.json` 变成 `{"order":[1,3,2],"collapsed":[],"renamed":{}}`：排序写入了磁盘，且下次启动按这个顺序渲染 |
@@ -67,7 +67,8 @@ state file: …/config/sidebar.json (43 bytes)
 
 | 项 | 说明 |
 |---|---|
-| ~~拖拽排序~~ | 已由人手验证：拖拽后 `sidebar.json` 的 `order` 从 `[]` 变成 `[1,3,2]`。脚本无法自动驱动 AppKit 拖拽会话（`pasteboardWriterForRow` 不被合成事件触发），这一项只能人工跑 |
+| **点击折叠** | NSOutlineView 版本下脚本点击组头未生效（`collapsed` 仍为空）；需要人手点一次组头确认写入 `sidebar.json` |
+| ~~拖拽排序~~ | 已由人手验证：拖拽后 `sidebar.json` 的 `order` 从 `[]` 变成 `[1,3,2]`。脚本无法自动驱动 AppKit 拖拽会话，这一项只能人工跑 |
 | 输入法 / 手速 | M6 |
 | SSH / 多主机分组 | M4 |
 

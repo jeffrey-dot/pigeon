@@ -148,3 +148,18 @@ final class SidebarStoreTests: XCTestCase {
         XCTAssertEqual(SidebarStore(url: url).load(), SidebarState())
     }
 }
+
+final class GitRootTests: XCTestCase {
+    func testFindsTheNearestGitDirectory() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pigeon-git-\(UUID().uuidString)")
+        let nested = root.appendingPathComponent("core/src")
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent(".git"), withIntermediateDirectories: true)
+        XCTAssertEqual(GitRoot.find(cwd: nested.path), root.path)
+        XCTAssertNil(GitRoot.find(cwd: FileManager.default.temporaryDirectory.path))
+        XCTAssertNil(GitRoot.find(cwd: ""))
+        try? FileManager.default.removeItem(at: root)
+    }
+}
