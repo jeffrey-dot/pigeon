@@ -184,6 +184,21 @@ final class RemoteSessionTests: XCTestCase {
         wait(for: [answered], timeout: 15)
     }
 
+    /// Typing must survive the bridge: a keystroke has to reach the pane on the far side and
+    /// come back as output. "The terminal ignores me" is the failure this catches.
+    func testRealSshBridgeCarriesTyping() throws {
+        let host = try sshHost()
+        let session = RemoteSession(host: host)
+        defer { session.close() }
+        let outcome = try session.connect()
+        XCTAssertEqual(outcome.transport, .proxy, outcome.note)
+        let peer = Peer(try XCTUnwrap(outcome.client))
+        let pane = try peer.newSession(shell: "/bin/sh")
+        peer.sendKeys(pane: pane, text: "printf 'TYPED-OK\\n'\n")
+        let text = try peer.attach(pane: pane, until: "TYPED-OK")
+        XCTAssertTrue(text.contains("TYPED-OK"), text)
+    }
+
     func testRealSshFallsBackToTheForwardedSocket() throws {
         let host = try sshHost()
         let session = RemoteSession(host: host, spawn: { arguments in

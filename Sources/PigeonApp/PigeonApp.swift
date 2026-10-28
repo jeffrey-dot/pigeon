@@ -651,6 +651,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         debugLog("select id=\(id) activePane=\(row.activePane) panes=\(row.panes)")
         selectedSession = id
         focusedPane = row.activePane
+        // Clicking a session must hand the keyboard back to its terminal: the click left
+        // focus on the sidebar table, and nothing else would move it back when the layout
+        // does not change.
+        container.focusPane(row.activePane)
         for pane in row.panes { sendAttach(pane, force: true) }
         send({ message in Wire.set(message, u32: "pane_id", row.activePane) }, type: PG_MSG_FOCUS)
         if var current = rows[id] {
@@ -747,6 +751,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         selectedSession = nil
         pendingSnapshots = [:]
         container.apply(.empty)
+        // A degraded session had pointed these at its local VT; without this, typing into the
+        // next connection would go to a dead process and look like "the terminal ignores me".
+        container.onPaneInput = { [weak self] pane, bytes in self?.sendKeys(pane, bytes) }
+        container.onPaneResize = { [weak self] pane, cols, rows in
+            self?.sendResize(pane, cols: cols, rows: rows)
+        }
         if let host {
             if !hosts.hosts.contains(host) {
                 hosts.hosts.append(host)
@@ -1140,10 +1150,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             view.keyDown(with: event)
             waitFor(PG_MSG_SCROLL, "scroll")
         case 4:
+            guard let pane = focusedPane, let view = container.paneView(pane) else {
+                report(false, "typing (no pane)")
+                return
+            }
+            guard window.firstResponder === view else {
+                report(false, "typing (the focused pane is not first responder)")
+                return
+            }
+            guard let event = keyEvent("a", code: 0, flags: []) else {
+                report(false, "typing (cannot build a key event)")
+                return
+            }
+            view.keyDown(with: event)
+            waitFor(PG_MSG_KEYS, "typing")
+        case 5:
+            // Click a session row the way a user does, then type again: this is the
+            // "I clicked a session and the terminal stopped listening" case.
+            guard let session = rows.keys.min(), sidebar.selectRow(id: session) else {
+                report(false, "session-click (no session row to select)")
+                return
+            }
+            guard let pane = focusedPane, let view = container.paneView(pane),
+                  window.firstResponder === view
+            else {
+                report(false, "session-click (the terminal did not get the keyboard back)")
+                return
+            }
+            let before = sentCounts[PG_MSG_KEYS] ?? 0
+            if let event = keyEvent("b", code: 0, flags: []) {
+                view.keyDown(with: event)
+            }
+            if (sentCounts[PG_MSG_KEYS] ?? 0) > before {
+                report(true, "session-click then typing")
+            } else {
+                report(false, "session-click then typing (no keys sent)")
+            }
+        case 6:
             let ok = sidebar.selectRow(id: -1)
             // The selection runs synchronously through the table delegate into `select`.
             if ok, lastSelectedId == -1 {
-                FileHandle.standardError.write(Data("SELFTEST ok step=4 machines-row\n".utf8))
+                FileHandle.standardError.write(Data("SELFTEST ok step=6 machines-row\n".utf8))
                 FileHandle.standardError.write(Data("SELFTEST PASS\n".utf8))
                 exit(0)
             }

@@ -52,7 +52,9 @@ PASS  self-test: menu split/zoom/unzoom, PageUp scroll, Machines row selection
       SELFTEST ok step=1 zoom
       SELFTEST ok step=2 unzoom
       SELFTEST ok step=3 scroll
-      SELFTEST ok step=4 machines-row
+      SELFTEST ok step=4 typing
+      SELFTEST ok step=5 session-click then typing
+      SELFTEST ok step=6 machines-row
       SELFTEST PASS
 PASS  the host really received <- split_pane from the window
 PASS  the host really received <- zoom_pane from the window
@@ -66,7 +68,8 @@ m2-gui-check: no failures
 - 菜单：按 key equivalent 找菜单项（`⌘D`、`⌘⇧↩`），key window 拿得到等价键就直接派发；这个会话激活不了窗口时，
   改派该菜单项自己声明的 action（目标仍是 `SplitContainerView`）——两条都真的走到 `send()`，宿主日志里能看到
   `<- split_pane` / `<- zoom_pane` / `<- unzoom`。
-- 第一响应者：把 PageUp 事件交给当前 pane 的 `keyDown`，宿主收到 `<- scroll`。
+- 第一响应者：把 PageUp 事件交给当前 pane 的 `keyDown`，宿主收到 `<- scroll`；再打一个普通字符，宿主收到 `<- keys`。
+- 点会话行之后还能打字：用表格选中一个 session 行（等同用户点击），断言第一响应者回到该 pane 且按键仍产生 `<- keys`。
 - 侧栏：用 `NSTableView.selectRowIndexes` 选 `Machines` 行，走的是 `tableViewSelectionDidChange → onSelect`，
   应用侧记录 `select(-1)`（步 4）。
 
@@ -82,6 +85,7 @@ m2-gui-check: no failures
 | tab 占位符漏到快照 | alacritty 在制表符跳过的空白串首格存了一个 `'\t'`，`convert_row` 原样透传，客户端会去画一个 tab 字形（多数终端渲染器把 `\t` 当空白，我们没做） | `core/src/term/alacritty.rs`：控制字符统一归一成空格；`term::tests::a_tab_advances_to_the_next_stop_without_writing_a_glyph` 卡住 |
 | 回看时历史与屏幕接缝断开 | 最初的做法是客户端缓存 `attach` 带来的历史；它只到 attach 那一刻，之后的输出让缓存与当前屏幕之间出现空洞 | 改成**宿主侧回看**：`scroll{pane_id, offset}` 由宿主在 10,000 行历史里切片，回给客户端的就是一屏（`Snapshot::scrolled`），客户端不再持有历史；回看期间该 pane 的实时帧暂停，`offset:0` 回到 live |
 | 宽 pane 的快照会超帧 | 1000 行 × 500 列 ≈ 10MB > 8MB 单帧上限，`attach` 会直接失败 | `session::history_window` 按预算裁旧留新 |
+| 点侧栏会话后终端收不到键盘 | `select(id)` 只发了 attach/focus，焦点还留在侧栏表格；宿主没有新 layout 回来时（远端慢/断线）键盘就一直是死的 | `select` 里直接 `container.focusPane(...)`，并让 `SplitContainerView.keyDown` 把落在容器上的按键转给当前 pane；自检步 5 卡住这条 |
 | `pg_msg_layout_focus` 从 C 头里消失 | 加 `pg_msg_layout_zoom` 时漏了它自己的 `#[no_mangle]`，cbindgen 不再导出，Swift 直接编译失败 | `core/src/ffi/msg.rs`；头文件重新生成后 diff 干净 |
 
 ## 4. 未验 / 已知缺口

@@ -118,6 +118,16 @@ final class SplitContainerView: NSView {
         return CGPoint(x: point.x / bounds.width, y: point.y / bounds.height)
     }
 
+    /// Keys that land on the container (for example after the sidebar had focus) belong to
+    /// the focused terminal, not to the void.
+    override func keyDown(with event: NSEvent) {
+        if let pane = panes[model.focus] {
+            pane.keyDown(with: event)
+            return
+        }
+        super.keyDown(with: event)
+    }
+
     override func mouseDown(with event: NSEvent) {
         let point = normalized(event)
         let tolerance = Double(grabTolerance / max(bounds.width, 1))
