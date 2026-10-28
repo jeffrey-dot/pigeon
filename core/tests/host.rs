@@ -908,11 +908,12 @@ fn vim_alternate_screen_survives_a_reconnect() {
         }
         _ => false,
     });
-    let before = comparable(&snapshot_with_alt);
     assert!(matches!(
         snapshot_with_alt,
         Message::Snapshot { alt: true, .. }
     ));
+    // vim may still be finishing its first draw; compare a settled screen.
+    let before = comparable(&stable_snapshot(&mut client, vim_pane));
 
     drop(client);
     std::thread::sleep(Duration::from_millis(300));
