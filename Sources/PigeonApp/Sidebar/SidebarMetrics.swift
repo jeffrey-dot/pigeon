@@ -30,6 +30,18 @@ enum SidebarMetrics {
     static let sectionInsetLeft: CGFloat = 12
     static let sectionInsetRight: CGFloat = 9
 
+    /// harp gives every row a 24pt circular icon with the status on its corner
+    /// (`VERTICAL_TABS_ICON_SIZE`, `ICON_WITH_STATUS_GAP`).
+    static let rowIconSize: CGFloat = 24
+    static let rowIconGap: CGFloat = 8
+    static let statusBadgeSize: CGFloat = 13
+    static let statusBadgeRing: CGFloat = 2
+    /// The hover `×` chip harp shows in place of the time (`VT` `row_close`, 18pt / radius 5).
+    static let rowCloseSize: CGFloat = 18
+    static let rowCloseRadius: CGFloat = 5
+    static let groupActionSize: CGFloat = 18
+    static let groupActionRadius: CGFloat = 5
+
     /// The 16pt slot a 15pt status glyph sits in.
     static let statusGlyphSlot: CGFloat = 16
     static let statusGlyphSize: CGFloat = 15

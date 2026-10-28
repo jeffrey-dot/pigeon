@@ -25,7 +25,7 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
     var onRename: ((Int, String) -> Void)?
     var onRenameGroup: ((String, String) -> Void)?
     var onReorder: (([Int]) -> Void)?
-    var onNewSession: (() -> Void)?
+    var onNewSession: ((String) -> Void)?
     var onToggleSidebar: (() -> Void)?
 
     override func loadView() {
@@ -127,7 +127,7 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
         if ProcessInfo.processInfo.environment["PIGEON_DEBUG"] != nil {
             FileHandle.standardError.write(Data("pigeon: + clicked\n".utf8))
         }
-        onNewSession?()
+        onNewSession?("")
     }
 
     func update(sections: [(group: String, sessions: [SidebarSession])], selected: Int?) {
@@ -191,7 +191,15 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         switch rows[row] {
         case let .group(name, count, needs):
-            return groupCell(name: name, count: count, needs: needs)
+            let cwd = rows.first { row in
+                if case let .session(session) = row, session.group == name { return true }
+                return false
+            }
+            .flatMap { row -> String? in
+                if case let .session(session) = row { return session.cwd }
+                return nil
+            } ?? ""
+            return groupCell(name: name, count: count, needs: needs, cwd: cwd)
         case let .session(session):
             return sessionCell(session)
         }
@@ -204,100 +212,17 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
         return label
     }
 
-    private func groupCell(name: String, count: Int, needs: Int) -> NSView {
-        let view = NSTableCellView()
-        let title = rowLabel(
-            SidebarModel.displayGroupName(name), size: SidebarMetrics.sectionTitleSize, bold: true)
-        title.textColor = SidebarTheme.sectionName
-        let total = rowLabel("\(count)", size: SidebarMetrics.sectionCountSize, bold: false)
-        total.textColor = SidebarTheme.sectionCount
-        for label in [title, total] {
-            view.addSubview(label)
-            label.translatesAutoresizingMaskIntoConstraints = false
-        }
-        // The row is tall enough for the gap above the next section; the label sits at its foot.
-        NSLayoutConstraint.activate([
-            title.leadingAnchor.constraint(
-                equalTo: view.leadingAnchor,
-                constant: SidebarMetrics.listSidePadding + SidebarMetrics.sectionInsetLeft),
-            // SECTION_GAP sits between sections, so the label fills the *lower* 28pt of the
-            // 42pt row and the 14pt breathing space stays above it.
-            title.centerYAnchor.constraint(
-                equalTo: view.topAnchor,
-                constant: SidebarMetrics.sectionGap + SidebarMetrics.sectionHeaderHeight / 2),
-            total.leadingAnchor.constraint(
-                equalTo: title.trailingAnchor, constant: SidebarMetrics.sectionSpacing),
-            total.firstBaselineAnchor.constraint(equalTo: title.firstBaselineAnchor),
-        ])
-        // `1 needs you` / `N need you` — harp's wording, only when a row wants the user.
-        if needs > 0 {
-            let badge = rowLabel(SidebarTheme.needsLabel(needs), size: SidebarMetrics.needsLabelSize, bold: false)
-            badge.textColor = SidebarTheme.needsText
-            view.addSubview(badge)
-            badge.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                badge.trailingAnchor.constraint(
-                    equalTo: view.trailingAnchor,
-                    constant: -(SidebarMetrics.listSidePadding + SidebarMetrics.sectionInsetRight)),
-                badge.firstBaselineAnchor.constraint(equalTo: title.firstBaselineAnchor),
-                badge.leadingAnchor.constraint(
-                    greaterThanOrEqualTo: total.trailingAnchor,
-                    constant: SidebarMetrics.sectionSpacing),
-            ])
-        }
+    private func groupCell(name: String, count: Int, needs: Int, cwd: String) -> NSView {
+        let view = SidebarGroupCellView()
+        view.configure(group: name, count: count, needs: needs)
+        view.onNewSession = { [weak self] in self?.onNewSession?(cwd) }
         return view
     }
 
-    /// One line per the reference: title left; `<age> <glyph>` in a right-hand column.
     private func sessionCell(_ session: SidebarSession) -> NSView {
-        let view = NSTableCellView()
-        let unread = session.unread > 0
-        let leading = SidebarMetrics.listSidePadding + SidebarMetrics.rowInsetLeft
-        let trailing = SidebarMetrics.listSidePadding + SidebarMetrics.rowInsetRight
-
-        let glyph = NSImageView()
-        let config = NSImage.SymbolConfiguration(pointSize: SidebarMetrics.statusGlyphSize, weight: .regular)
-        glyph.image = SidebarModel.statusSymbol(for: session)
-            .flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: nil) }
-            .map { $0.withSymbolConfiguration(config) ?? $0 }
-        glyph.contentTintColor = statusColor(session)
-        glyph.imageScaling = .scaleProportionallyDown
-
-        let age = rowLabel(SidebarModel.ageText(for: session), size: SidebarMetrics.rowTimeSize, bold: false)
-        age.textColor = session.status == .blocked ? SidebarTheme.needsAccent : SidebarTheme.gray
-        age.alignment = .right
-        let title = rowLabel(session.title, size: SidebarMetrics.rowTitleSize, bold: unread)
-        title.textColor = SidebarTheme.ink
-        view.addSubview(glyph)
-        view.addSubview(age)
-        view.addSubview(title)
-        for label in [glyph, age, title] { label.translatesAutoresizingMaskIntoConstraints = false }
-        NSLayoutConstraint.activate([
-            title.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: leading),
-            title.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            title.trailingAnchor.constraint(
-                lessThanOrEqualTo: age.leadingAnchor, constant: -SidebarMetrics.rowSpacing),
-            glyph.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -trailing),
-            glyph.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            glyph.widthAnchor.constraint(equalToConstant: SidebarMetrics.statusGlyphSlot),
-            glyph.heightAnchor.constraint(equalToConstant: SidebarMetrics.statusGlyphSlot),
-            age.trailingAnchor.constraint(
-                equalTo: glyph.leadingAnchor, constant: -SidebarMetrics.rowSpacing),
-            age.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-        ])
-        if unread {
-            // `docs/ui.md` §2.1 keeps its leading dot; it lives in the row's gutter so titles align.
-            let dot = SidebarDotView()
-            view.addSubview(dot)
-            dot.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                dot.trailingAnchor.constraint(
-                    equalTo: title.leadingAnchor, constant: -SidebarMetrics.unreadDotGap),
-                dot.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-                dot.widthAnchor.constraint(equalToConstant: SidebarMetrics.unreadDotSize),
-                dot.heightAnchor.constraint(equalToConstant: SidebarMetrics.unreadDotSize),
-            ])
-        }
+        let view = SidebarRowCellView()
+        view.configure(with: session)
+        view.onClose = { [weak self] in self?.onClose?(session.id) }
         return view
     }
 

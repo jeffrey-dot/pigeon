@@ -167,6 +167,40 @@ public enum SidebarModel {
         session.reported ? relativeTime(session.lastSeen, now: now) : ""
     }
 
+    /// What a pane is running, for the row's leading circle icon (harp draws a per-kind icon;
+    /// pigeon only knows the app name, so the mapping is by name).
+    public enum AppKind: String, CaseIterable {
+        case agent
+        case editor
+        case shell
+        case other
+
+        public var symbol: String {
+            switch self {
+            case .agent: return "sparkles"
+            case .editor: return "chevron.left.forwardslash.chevron.right"
+            case .shell: return "terminal"
+            case .other: return "square.dashed"
+            }
+        }
+    }
+
+    public static func appKind(_ app: String) -> AppKind {
+        let name = (app as NSString).lastPathComponent.lowercased()
+        if ["pi", "claude", "codex", "aider", "cursor-agent"].contains(name) { return .agent }
+        if ["vim", "nvim", "vi", "emacs", "nano", "hx", "helix"].contains(name) { return .editor }
+        if ["zsh", "bash", "sh", "fish", "dash", "ksh", "nu"].contains(name) { return .shell }
+        return .other
+    }
+
+    /// A stable tint per project, so two shells in one project still differ from another
+    /// project's. Same `cwd` → same tint on every launch (`SidebarTheme.appTints.count` buckets).
+    public static func tintIndex(cwd: String, buckets: Int = 6) -> Int {
+        var hash: UInt32 = 5381
+        for byte in cwd.utf8 { hash = hash &* 33 &+ UInt32(byte) }
+        return Int(hash % UInt32(max(buckets, 1)))
+    }
+
     /// The row's trailing icon as an SF Symbol (`docs/ui.md` §2.2/§7.4); `idle` has none.
     public static func statusSymbol(for session: SidebarSession) -> String? {
         switch session.status {

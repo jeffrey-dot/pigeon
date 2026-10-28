@@ -116,6 +116,17 @@ final class SidebarOrderingTests: XCTestCase {
         XCTAssertEqual(SidebarModel.subtitle(status: .idle, since: now, now: now), "Idle · now")
     }
 
+    func testAppKindMapsNamesToHarpLikeIcons() {
+        XCTAssertEqual(SidebarModel.appKind("pi"), .agent)
+        XCTAssertEqual(SidebarModel.appKind("nvim"), .editor)
+        XCTAssertEqual(SidebarModel.appKind("/bin/zsh"), .shell)
+        XCTAssertEqual(SidebarModel.appKind("htop"), .other)
+        // The leading circle must be stable across launches for the same project.
+        XCTAssertEqual(SidebarModel.tintIndex(cwd: "/Users/me/pigeon"), SidebarModel.tintIndex(cwd: "/Users/me/pigeon"))
+        let tints = (0..<8).map { SidebarModel.tintIndex(cwd: "/tmp/project-\($0)") }
+        XCTAssertTrue(tints.allSatisfy { (0..<6).contains($0) })
+    }
+
     func testGroupNamesCapitalizeOnlyTheFirstCharacter() {
         XCTAssertEqual(SidebarModel.displayGroupName("atlas"), "Atlas")
         XCTAssertEqual(SidebarModel.displayGroupName("my app"), "My app")

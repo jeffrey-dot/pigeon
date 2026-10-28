@@ -47,6 +47,18 @@ enum SidebarTheme {
     /// The card header's hairline (`VT:9212`), same token as harp's `DIVIDER`.
     static let divider = dynamic(light: 0xececef, dark: 0x3a3a3c)
 
+    /// Soft tints for the rows' leading circles, keyed by project (`SidebarModel.tintIndex`).
+    /// These are pigeon's own (harp uses per-agent brand colours); the light set is dark enough
+    /// to read on the white card, the dark set stays pastel.
+    static let appTints: [NSColor] = [
+        dynamic(light: 0x3b6ea5, dark: 0x7fb0e0),
+        dynamic(light: 0x2f7d6d, dark: 0x74c7b5),
+        dynamic(light: 0x7a5aa6, dark: 0xb59ce0),
+        dynamic(light: 0xa2603a, dark: 0xe0a17a),
+        dynamic(light: 0x3f6b3f, dark: 0x8fc48f),
+        dynamic(light: 0x8a4a6b, dark: 0xdc9dba),
+    ]
+
     /// harp folds a failed agent into `Done`; pigeon keeps `error` distinct, so this
     /// one token has no harp counterpart and stays a system color.
     static let error = NSColor.systemRed

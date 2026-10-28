@@ -86,7 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sidebar.onRename = { [weak self] id, name in self?.rename(id, name) }
         sidebar.onRenameGroup = { [weak self] group, name in self?.renameGroup(group, name) }
         sidebar.onReorder = { [weak self] order in self?.reorder(order) }
-        sidebar.onNewSession = { [weak self] in self?.newSession(nil) }
+        sidebar.onNewSession = { [weak self] cwd in self?.newSession(cwd.isEmpty ? nil : cwd) }
         sidebar.onToggleSidebar = { [weak self] in self?.toggleSidebar(nil) }
 
         container = SplitContainerView(frame: frame)
