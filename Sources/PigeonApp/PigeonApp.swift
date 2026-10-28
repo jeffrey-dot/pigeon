@@ -18,6 +18,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         /// Who owns the size when more than one window watches this session (protocol §6).
         var sizeSource: String = ""
         var clients: Int = 1
+        /// Where the session lives; `local` for the host on this machine.
+        var host: String = "local"
 
         var group: String {
             guard !cwd.isEmpty else { return "~" }
@@ -638,7 +640,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 lastSeen: row.lastSeen,
                 reported: row.seq > 0,
                 sizeSource: row.sizeSource,
-                clients: row.clients
+                clients: row.clients,
+                host: row.host
             )
         }
     }
@@ -794,7 +797,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 unread: previous?.unread ?? state.unread[String(id)] ?? 0,
                 lastSeen: previous?.lastSeen ?? Date(),
                 sizeSource: previous?.sizeSource ?? "",
-                clients: previous?.clients ?? 1
+                clients: previous?.clients ?? 1,
+                host: previous?.host ?? remote?.host ?? "local"
             )
         }
         rows = updated

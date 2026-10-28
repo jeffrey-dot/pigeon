@@ -31,6 +31,8 @@ public struct SidebarSession: Equatable {
     /// windows are watching it (protocol §6). One client means there is nothing to explain.
     public var sizeSource: String
     public var clients: Int
+    /// The machine this session lives on (`local` for the socket next to us).
+    public var host: String
 
     public init(
         id: Int,
@@ -43,7 +45,8 @@ public struct SidebarSession: Equatable {
         lastSeen: Date = Date(),
         reported: Bool = false,
         sizeSource: String = "",
-        clients: Int = 1
+        clients: Int = 1,
+        host: String = "local"
     ) {
         self.id = id
         self.title = title
@@ -56,6 +59,7 @@ public struct SidebarSession: Equatable {
         self.reported = reported
         self.sizeSource = sizeSource
         self.clients = clients
+        self.host = host
     }
 }
 
@@ -70,10 +74,13 @@ public enum SidebarModel {
         var groups: [String] = []
         var grouped: [String: [SidebarSession]] = [:]
         for session in sessions {
-            if grouped[session.group] == nil {
-                groups.append(session.group)
+            // The same project on two machines is two groups: renaming one must not rename
+            // the other, and a remote row must not hide among local ones.
+            let key = groupLabel(host: session.host, project: session.group)
+            if grouped[key] == nil {
+                groups.append(key)
             }
-            grouped[session.group, default: []].append(session)
+            grouped[key, default: []].append(session)
         }
         func rank(_ id: Int) -> Int { order.firstIndex(of: id) ?? Int.max }
         return groups.map { group in
@@ -85,6 +92,15 @@ public enum SidebarModel {
             }
             return (group: group, sessions: rows)
         }
+    }
+
+    /// The heading one row belongs under: the project alone on this machine, `host / project`
+    /// once the row comes from somewhere else (`docs/remote.md` §4).
+    public static func groupLabel(host: String, project: String) -> String {
+        if host.isEmpty || host == "local" {
+            return project
+        }
+        return "\(host) / \(project)"
     }
 
     /// Maps a protocol `status.state` string onto the sidebar enum.

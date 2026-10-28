@@ -170,6 +170,25 @@ final class SidebarOrderingTests: XCTestCase {
         XCTAssertEqual(SidebarModel.ageText(for: shared, now: now), "2× latest")
     }
 
+    func testRemoteSessionsCarryTheirHostInTheGroupHeading() {
+        XCTAssertEqual(SidebarModel.groupLabel(host: "local", project: "api"), "api")
+        XCTAssertEqual(SidebarModel.groupLabel(host: "", project: "api"), "api")
+        XCTAssertEqual(SidebarModel.groupLabel(host: "arch", project: "api"), "arch / api")
+    }
+
+    func testTheSameProjectOnTwoMachinesStaysInTwoGroups() {
+        var local = row(1, .working)
+        local.group = "api"
+        var remote = row(2, .idle)
+        remote.group = "api"
+        remote.host = "arch"
+
+        let sections = SidebarModel.sections([local, remote])
+        XCTAssertEqual(sections.map(\.group), ["api", "arch / api"])
+        XCTAssertEqual(sections[0].sessions.map(\.id), [1])
+        XCTAssertEqual(sections[1].sessions.map(\.id), [2])
+    }
+
     func testStatusSymbolsCoverEveryStateWithNoSymbolForIdle() {
         let symbols = SidebarSession.Status.allCases.map { status in
             SidebarModel.statusSymbol(for: row(1, status))
