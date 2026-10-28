@@ -179,16 +179,16 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 
 ## 6. CI（GitHub Actions，真跑）
 
-HEAD `0eabf0b`（OSC 4/10/11 颜色查询 + 把偶发红的重连用例改成顺序屏障）的 CI 五作业 success：
+HEAD `41c25d8`（OSC 4/10/11 回答 + 宿主默认深色板 + 外观切换重发）的 CI 五作业 success：
 
-<https://github.com/jeffrey-dot/pigeon/actions/runs/40692774965>
+<https://github.com/jeffrey-dot/pigeon/actions/runs/40697484387>
 
 | 作业 | 结果 |
 |---|---|
 | `docs` | success（相对链接检查） |
-| `rust (ubuntu-latest)` | success（`cargo test` **71 + 11 + 23 = 105 passed**） |
+| `rust (ubuntu-latest)` | success（`cargo test` **72 + 11 + 25 = 108 passed**） |
 | `rust (macos-latest)` | success |
-| `header` | success（cbindgen `diff -u` 为空；本次新增 `PG_MSG_APPEARANCE` / `pg_msg_set_u32_array`） |
+| `header` | success（cbindgen `diff -u` 为空；新增 `PG_MSG_APPEARANCE` / `pg_msg_set_u32_array`） |
 | `swift` | success（`swift test` **54 passed**） |
 
 本机同一提交的全量输出：
@@ -196,13 +196,20 @@ HEAD `0eabf0b`（OSC 4/10/11 颜色查询 + 把偶发红的重连用例改成顺
 ```sh
 cargo fmt --check                                  # 通过
 cargo clippy --all-targets -- -D warnings          # 通过
-cargo test                                         # 71 + 11 + 23 = 105 passed
+cargo test                                         # 72 + 11 + 25 = 108 passed
 swift build && swift test                          # Build complete / 54 passed
 cargo build --release --bin pigeon-host            # 1,250,800 B（1.19 MiB ≤ 8 MiB）
-cbindgen … --output /tmp/pg7.h && diff -q …        # header: no diff
+cbindgen … --output /tmp/pg8.h && diff -q …        # header: no diff
 ```
 
-之前 `61239d3` 的 `rust (macos-latest)` 红过一次，是既有用例
-`acked_status_is_not_replayed_after_reconnect`（`core/tests/host.rs`，靠 `sleep(200ms)` 等 ack 生效）在负载高的 runner 上抢跑；
-现在改成**消息顺序屏障**（发完 `AckStatus` 再请求 `Sessions` 并等回复，宿主按序处理），再用第二次 `Attach` 的
-`latest_status` 窗口做确定性断言，不再依赖 sleep，本机连跑三次都过。
+`tools/m3-gui-check.sh` 本轮转录（节选）：
+
+```text
+hot switch: appearance sent 1 -> 4 over 3 toggles
+appearance -> system appearance -> dark appearance -> light
+menu Close Session: close_pane 0 -> 1
+```
+
+更早两次红：`61239d3` 的 `rust (macos-latest)` 因既有用例
+`acked_status_is_not_replayed_after_reconnect` 的 `sleep(200ms)` 抢跑（已改成消息顺序屏障），
+`0eabf0b`/`e1825b5` 已绿；本次 `41c25d8` 一次通过。
