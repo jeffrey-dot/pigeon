@@ -321,6 +321,28 @@ mod tests {
     }
 
     #[test]
+    fn scrolled_output_lands_in_history_oldest_first() {
+        let mut t = term();
+        for line in 1..=10 {
+            t.feed(format!("line {line}\r\n").as_bytes());
+        }
+        let snap = t.snapshot();
+        assert!(
+            !snap.history.is_empty(),
+            "5 screen rows, 11 fed lines: the rest has to be history"
+        );
+        let first: String = snap.history[0]
+            .iter()
+            .map(|cell| char::from_u32(cell.codepoint).unwrap_or(' '))
+            .collect();
+        assert!(
+            first.trim().starts_with("line 1"),
+            "oldest line first, got {first:?}"
+        );
+        assert_eq!(snap.history[0].len(), 20, "history rows are full width");
+    }
+
+    #[test]
     fn resize_keeps_the_grid_consistent() {
         let mut t = term();
         t.feed(b"hello");

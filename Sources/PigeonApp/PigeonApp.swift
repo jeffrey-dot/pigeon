@@ -105,6 +105,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         container.onPaneResize = { [weak self] pane, cols, rows in
             self?.sendResize(pane, cols: cols, rows: rows)
         }
+        // A fresh history comes with a fresh `attach`; nothing else carries scrollback.
+        container.onPaneHistory = { [weak self] pane in self?.sendAttach(pane, force: true) }
 
         splitView = NSSplitView()
         splitView.isVertical = true

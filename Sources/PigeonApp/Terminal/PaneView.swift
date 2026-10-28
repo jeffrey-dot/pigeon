@@ -9,6 +9,8 @@ final class PaneView: NSView {
         var fg: UInt32
         var bg: UInt32
         var width: UInt8
+
+        static let blank = Cell(codepoint: 32, attrs: 0, fg: 0, bg: 0, width: 1)
     }
 
     struct Cursor {
@@ -22,6 +24,19 @@ final class PaneView: NSView {
     private(set) var cols = 80
     private(set) var rows = 24
     private(set) var cells: [Cell] = []
+    /// Scrollback from the last snapshot, oldest first. Empty on the alternate screen.
+    private(set) var history: [[Cell]] = []
+    /// Lines scrolled up from the live screen; `0` is the live grid.
+    private(set) var displayOffset = 0
+    /// The alternate screen keeps no scrollback: vim/htop/less own the whole screen.
+    private(set) var alt = false
+    /// Lines the user asked for while the host was fetching a fresh history.
+    private var pendingScroll: Int?
+    /// The screen frozen when scrolling started, so streaming output cannot tear the
+    /// history/screen seam the user is reading.
+    private(set) var frozenScreen: [Cell]?
+    /// Asks the owner to re-attach, which is how a fresh history arrives (protocol §3.3).
+    var onNeedHistory: ((UInt32) -> Void)?
     private(set) var cursor = Cursor(x: 0, y: 0, visible: false)
 
     var onInput: (([UInt8]) -> Void)?
@@ -37,7 +52,126 @@ final class PaneView: NSView {
                 Data("pigeon: pane draw cells=\(cells.count) bounds=\(bounds)\n".utf8)
             )
         }
-        CoreTextRenderer.draw(cells: cells, cols: cols, rows: rows, cursor: cursor, in: bounds)
+        CoreTextRenderer.draw(
+            cells: displayOffset > 0 ? scrolledCells() : cells,
+            cols: cols,
+            rows: rows,
+            // Scrolled back: the cursor is not on screen, so drawing it would lie.
+            cursor: displayOffset > 0 ? Cursor(x: 0, y: 0, visible: false) : cursor,
+            in: bounds
+        )
+        drawScrollIndicator()
+    }
+
+    /// The grid as it looks scrolled back: `displayOffset` history lines on top, the rest
+    /// of the screen underneath.
+    func scrolledCells() -> [Cell] {
+        guard cols > 0, displayOffset > 0, !history.isEmpty else { return cells }
+        let offset = Self.clampedOffset(displayOffset, historyLines: history.count)
+        var visible: [Cell] = []
+        visible.reserveCapacity(cols * rows)
+        for row in history.suffix(offset) {
+            visible.append(contentsOf: row.prefix(cols))
+            if row.count < cols {
+                visible.append(contentsOf: Array(repeating: .blank, count: cols - row.count))
+            }
+        }
+        visible.append(contentsOf: (frozenScreen ?? cells).prefix(max(0, rows - offset) * cols))
+        while visible.count < cols * rows {
+            visible.append(.blank)
+        }
+        return visible
+    }
+
+    /// Clamps a scroll position to the history the pane actually holds.
+    static func clampedOffset(_ offset: Int, historyLines: Int) -> Int {
+        min(max(offset, 0), max(historyLines, 0))
+    }
+
+    static func canScroll(alt: Bool, historyLines: Int) -> Bool {
+        !alt && historyLines > 0
+    }
+
+    /// Wheel delta in whole lines; the sub-line remainder is carried to the next event so a
+    /// trackpad swipe does not need a whole cell per event to move.
+    static func wheelLines(
+        deltaY: CGFloat,
+        precise: Bool,
+        cellHeight: CGFloat,
+        remainder: CGFloat
+    ) -> (lines: Int, remainder: CGFloat) {
+        guard precise, cellHeight > 0 else {
+            return (Int(deltaY.rounded()), 0)
+        }
+        let pixels = remainder + deltaY
+        let lines = Int((pixels / cellHeight).rounded(.towardZero))
+        return (lines, pixels - CGFloat(lines) * cellHeight)
+    }
+
+    private var wheelRemainder: CGFloat = 0
+
+    override func scrollWheel(with event: NSEvent) {
+        guard Self.canScroll(alt: alt, historyLines: history.count) else { return }
+        let (lines, remainder) = Self.wheelLines(
+            deltaY: event.scrollingDeltaY,
+            precise: event.hasPreciseScrollingDeltas,
+            cellHeight: CoreTextRenderer.cellSize().height,
+            remainder: wheelRemainder
+        )
+        wheelRemainder = remainder
+        guard lines != 0 else { return }
+        scroll(lines: lines)
+    }
+
+    /// Positive `lines` moves back in time, matching an upward wheel.
+    ///
+    /// Scrolling back the first time asks for a fresh history: the cached one ends where the
+    /// screen was when it arrived, so scrolling over it would show a gap.
+    func scroll(lines: Int) {
+        guard lines != 0 else { return }
+        if lines > 0, frozenScreen == nil, let paneID {
+            pendingScroll = (pendingScroll ?? 0) + lines
+            onNeedHistory?(paneID)
+            return
+        }
+        applyScroll(lines)
+    }
+
+    private func applyScroll(_ lines: Int) {
+        let offset = Self.clampedOffset(displayOffset + lines, historyLines: history.count)
+        if offset == 0 {
+            frozenScreen = nil
+        }
+        guard offset != displayOffset else { return }
+        displayOffset = offset
+        needsDisplay = true
+    }
+
+    func scrollToBottom() {
+        pendingScroll = nil
+        frozenScreen = nil
+        guard displayOffset != 0 else { return }
+        displayOffset = 0
+        needsDisplay = true
+    }
+
+    /// A thumb on the right edge: "you are not at the bottom" has to be visible, or the
+    /// user cannot tell scrolled-back output from output that stopped arriving.
+    private func drawScrollIndicator() {
+        let total = rows + history.count
+        guard history.count > 0, total > 0, bounds.height > 0, bounds.width > 8 else { return }
+        let width: CGFloat = 3
+        let height = max(bounds.height * CGFloat(rows) / CGFloat(total), 18)
+        let travel = bounds.height - height
+        let progress = CGFloat(displayOffset) / CGFloat(history.count)
+        let rect = NSRect(
+            x: bounds.maxX - width - 2,
+            y: travel * progress,
+            width: width,
+            height: height
+        )
+        NSColor.secondaryLabelColor.withAlphaComponent(0.45).setFill()
+        NSBezierPath(roundedRect: rect, xRadius: width / 2, yRadius: width / 2).fill()
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -126,6 +260,24 @@ final class PaneView: NSView {
             y: Int(view.cursor.y),
             visible: view.cursor.visible != 0
         )
+        alt = view.alt_screen != 0
+        history = grid(view.history, count: Int(view.history_count))
+        // Reconnecting, resizing and the alt screen all change what the stored offset means.
+        if alt {
+            displayOffset = 0
+            pendingScroll = nil
+            frozenScreen = nil
+        } else if let pending = pendingScroll {
+            // The history the user asked for just arrived: freeze this screen+history pair.
+            pendingScroll = nil
+            displayOffset = Self.clampedOffset(pending, historyLines: history.count)
+            frozenScreen = displayOffset > 0 ? cells : nil
+        } else {
+            displayOffset = Self.clampedOffset(displayOffset, historyLines: history.count)
+            if displayOffset == 0 {
+                frozenScreen = nil
+            }
+        }
         reported = (UInt16(cols), UInt16(rows))
         if ProcessInfo.processInfo.environment["PIGEON_DEBUG"] != nil {
             let first = cells.prefix(40).map { cell -> Character in
@@ -158,12 +310,47 @@ final class PaneView: NSView {
         nextResponder?.mouseDown(with: event)
     }
 
+    /// Reads a snapshot's row array (`screen`/`history`) into plain cells.
+    private func grid(_ rowsPointer: UnsafePointer<PgRow>?, count: Int) -> [[Cell]] {
+        guard let rowsPointer, count > 0, cols > 0 else { return [] }
+        return (0..<count).map { index in
+            guard let cellsPointer = rowsPointer[index].cells else {
+                return Array(repeating: .blank, count: cols)
+            }
+            return (0..<cols).map { column in
+                let cell = cellsPointer[column]
+                return Cell(
+                    codepoint: cell.codepoint,
+                    attrs: UInt8(truncatingIfNeeded: cell.attrs),
+                    fg: cell.fg,
+                    bg: cell.bg,
+                    width: cell.width
+                )
+            }
+        }
+    }
+
     override func keyDown(with event: NSEvent) {
+        // Page keys page the local history on the live screen; on the alternate screen the
+        // program (`less`, `vim`) wants them, so they keep going to the pane.
+        let page = max(rows - 1, 1)
+        if !alt, !history.isEmpty {
+            if event.keyCode == 116 {
+                scroll(lines: page)
+                return
+            }
+            if event.keyCode == 121 {
+                scroll(lines: -page)
+                return
+            }
+        }
         guard let stroke = KeyStroke(event) else {
             super.keyDown(with: event)
             return
         }
         guard let bytes = KeyEncoder.encode(stroke) else { return }
+        // Typing while scrolled back snaps to the live screen, like every terminal.
+        scrollToBottom()
         onInput?(bytes)
     }
 }

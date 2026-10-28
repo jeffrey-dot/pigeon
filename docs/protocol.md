@@ -78,6 +78,8 @@
   - 颜色：`0x01000000 | idx` 表示调色板索引；否则按 `0xRRGGBB`。
   - `link` 缺省 = 无超链接；非 0 时指向同一帧 `links` 表里的 `id`（`links` 随该帧的 `snapshot`/`delta` 下发）。
 - 同一 `pane_id` 的 `snapshot` 会把该客户端的 `seq` 基准重置。
+- `history` 只在 `snapshot` 里出现（即时序上跟 `attach` 走）；增量帧不带历史。客户端要回看时重新 `attach` 拿最新历史——快照里的 `history` 与同一帧的 `screen` 是连续的，拼起来没有缝。
+- 宿主按单帧上限（8 MB）裁剪历史：超宽 pane 上只发最新的若干行，旧的丢掉而不是让 `attach` 失败。客户端不能假定「`history` 一定包含全部历史」。
 - `layout.tree` 用 `{leaf: 0}` 表示「这个 session 已经没有 pane 了」（pane id 从 1 开始）。
 
 ### 3.4 输入与状态

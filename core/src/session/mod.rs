@@ -7,6 +7,9 @@
 use crate::proto::{Cell as ProtoCell, Cursor as ProtoCursor, Message, Row, Scroll};
 use crate::status::StatusStore;
 use crate::term::{alacritty::AlacrittyTerm, frozen::FrozenTerm, Snapshot, Term};
+
+/// History the wire may carry in one snapshot, leaving room inside `proto::MAX_FRAME`.
+const HISTORY_BUDGET: usize = 2 * 1024 * 1024;
 use unicode_width::UnicodeWidthChar;
 
 /// One pane's state.
@@ -169,14 +172,24 @@ fn message_from_snapshot(
             .map(|row| row.iter().map(to_proto_cell).collect())
             .collect(),
         history: with_history.then(|| {
-            snapshot
-                .history
+            history_window(&snapshot.history, snapshot.cols)
                 .iter()
                 .map(|row| row.iter().map(to_proto_cell).collect())
                 .collect()
         }),
         links: None,
     }
+}
+
+/// One frame is capped at 8 MB (`proto::MAX_FRAME`); a whole history on a wide pane would
+/// blow past it and turn `attach` into a hard failure. Keep the newest rows that fit,
+/// dropping the oldest — an incomplete history beats no snapshot.
+fn history_window(history: &[Vec<crate::term::Cell>], cols: u16) -> &[Vec<crate::term::Cell>] {
+    // ~20 bytes per cell on the wire (uint32 fields plus CBOR headers), plus a row header.
+    let per_row = usize::from(cols).saturating_mul(20).saturating_add(16);
+    let fit = HISTORY_BUDGET / per_row.max(1);
+    let keep = history.len().min(fit);
+    &history[history.len() - keep..]
 }
 
 fn cursor_of(snapshot: &Snapshot) -> ProtoCursor {
@@ -283,6 +296,54 @@ fn rows_from_proto(rows: &[Vec<ProtoCell>], cols: u16) -> Option<Vec<Vec<crate::
 mod tests {
     use super::{to_proto_cell, PaneState};
     use crate::proto::{Cursor as ProtoCursor, Message, Scroll};
+
+    #[test]
+    fn snapshot_carries_history_when_the_pane_has_scrollback() {
+        let mut pane = PaneState::new(1, 20, 5, 1000);
+        for line in 1..=10 {
+            pane.feed(format!("line {line}\r\n").as_bytes());
+        }
+        // A client resize must not throw the history away.
+        pane.resize(20, 5);
+        let Message::Snapshot { history, .. } = pane.snapshot_message(true) else {
+            panic!("expected a snapshot");
+        };
+        let history = history.expect("history was asked for");
+        assert!(!history.is_empty(), "5 rows, 11 lines fed");
+
+        // Same shape as the host's default pane: 80x24, one long listing.
+        let mut wide = PaneState::new(2, 80, 24, 1000);
+        for line in 1..=40 {
+            wide.feed(format!("line {line}\r\n").as_bytes());
+        }
+        let Message::Snapshot { history, .. } = wide.snapshot_message(true) else {
+            panic!("expected a snapshot");
+        };
+        let history = history.expect("history was asked for");
+        assert_eq!(history.len(), 17, "40 lines - 23 rows after the feed");
+    }
+
+    #[test]
+    fn a_wide_pane_sends_the_newest_history_that_fits_one_frame() {
+        // 500 columns: 1000 history rows would be ~10MB and blow the 8MB frame cap.
+        let rows: Vec<Vec<crate::term::Cell>> = (0..1000)
+            .map(|line| {
+                let mut row = vec![crate::term::Cell::BLANK; 500];
+                row[0].codepoint = 'a' as u32 + (line % 26) as u32;
+                row
+            })
+            .collect();
+        let kept = super::history_window(&rows, 500);
+        assert!(kept.len() < rows.len(), "wide histories are trimmed");
+        assert_eq!(
+            kept.last().map(|row| row[0].codepoint),
+            rows.last().map(|row| row[0].codepoint),
+            "the newest row survives; the oldest are the ones dropped"
+        );
+        assert!(kept.len() * (500 * 20 + 16) <= super::HISTORY_BUDGET);
+        // A narrow pane keeps everything.
+        assert_eq!(super::history_window(&rows, 40).len(), rows.len());
+    }
 
     #[test]
     fn attach_snapshot_matches_the_terminal_grid() {

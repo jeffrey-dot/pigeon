@@ -607,6 +607,73 @@ fn size_policy_locked_ignores_the_newcomer() {
     assert_eq!(pty_size(&mut first, pane), "30 100");
 }
 
+/// One grid of the protocol as text, for readable assertions.
+fn rows_text(rows: &[Vec<proto::Cell>]) -> String {
+    rows.iter()
+        .map(|row| {
+            row.iter()
+                .map(|cell| char::from_u32(cell.codepoint).unwrap_or(' '))
+                .collect::<String>()
+                .trim_end()
+                .to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The client can only scroll back what the snapshot actually carries: the host has to send
+/// the history rows, not just the live screen.
+#[test]
+fn scrollback_history_reaches_the_client_in_the_snapshot() {
+    let _serial = one_at_a_time();
+    let host = start_host();
+    let mut client = Client::connect(&host.socket);
+    hello(&mut client);
+    let pane = attach_first(&mut client);
+
+    client.send(&Message::Keys {
+        pane_id: pane,
+        bytes: b"seq 1 40\r".to_vec(),
+    });
+    // Wait for the *output* line `40`, not the echoed command (`wait_for_pane_text` would
+    // match "40" inside "seq 1 40").
+    client.wait_for(|message| match message {
+        Message::Snapshot { screen, .. } => {
+            rows_text(screen).lines().any(|line| line.trim() == "40")
+        }
+        _ => false,
+    });
+    // History only rides on `attach`: that is what a client sends when the user starts to
+    // scroll back (docs/protocol.md §3.3).
+    client.send(&Message::Attach {
+        id: 9,
+        pane_id: pane,
+        size_policy: None,
+    });
+    let message = client.wait_for(|message| match message {
+        Message::Snapshot {
+            pane_id,
+            history: Some(history),
+            ..
+        } => {
+            let text = rows_text(history);
+            // The oldest lines scrolled out of the 24-row screen into the history.
+            *pane_id == pane
+                && text.lines().any(|line| line.trim() == "1")
+                && text.lines().any(|line| line.trim() == "2")
+        }
+        _ => false,
+    });
+    let Message::Snapshot { screen, .. } = message else {
+        unreachable!()
+    };
+    assert!(
+        rows_text(&screen).lines().any(|line| line.trim() == "40"),
+        "the newest line stays on the live screen:\n{}",
+        rows_text(&screen)
+    );
+}
+
 /// Writes an executable shell script so a pane can run a program with arguments.
 fn script(body: &str) -> std::path::PathBuf {
     use std::os::unix::fs::PermissionsExt;

@@ -14,6 +14,8 @@ final class SplitContainerView: NSView {
     var onResizeSplit: ((UInt32, Double) -> Void)?
     var onPaneInput: ((UInt32, [UInt8]) -> Void)?
     var onPaneResize: ((UInt32, UInt16, UInt16) -> Void)?
+    /// The pane needs a fresh scrollback: the owner re-attaches that pane (protocol §3.3).
+    var onPaneHistory: ((UInt32) -> Void)?
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -49,6 +51,7 @@ final class SplitContainerView: NSView {
         view.paneID = id
         view.onInput = { [weak self] bytes in self?.onPaneInput?(id, bytes) }
         view.onResize = { [weak self] cols, rows in self?.onPaneResize?(id, cols, rows) }
+        view.onNeedHistory = { [weak self] pane in self?.onPaneHistory?(pane) }
         addSubview(view)
         return view
     }
