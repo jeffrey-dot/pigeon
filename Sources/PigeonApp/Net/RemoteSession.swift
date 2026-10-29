@@ -231,7 +231,9 @@ final class RemoteSession {
     static func ssh(_ arguments: [String]) throws -> Process {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-        process.arguments = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15"] + arguments
+        // A forward has to stay owned by its own process (see `sshOptions`).
+        let forwards = arguments.contains("-L")
+        process.arguments = HostInstaller.sshOptions(multiplex: !forwards) + arguments
         let stdin = Pipe()
         let stdout = Pipe()
         process.standardInput = stdin

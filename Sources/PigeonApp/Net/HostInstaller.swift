@@ -232,6 +232,43 @@ public struct HostInstaller {
         return directories
     }
 
+    /// Options every pigeon ssh call shares. Connecting takes six or seven separate ssh runs
+    /// (probe, hash, start, bridge…), and each one used to pay the full handshake (~0.6 s to
+    /// a far host). With a shared master connection only the first does; the rest reuse it
+    /// (~0.1 s). Nothing is written to the user's ssh config: these are command-line options.
+    ///
+    /// `multiplex: false` is for `ssh -N -L`: through a master the forward moves into the
+    /// master and the command exits at once, so its process could no longer say whether the
+    /// forward is up, nor take it down when terminated.
+    public static func sshOptions(multiplex: Bool = true, uid: uid_t = getuid()) -> [String] {
+        var options = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15"]
+        guard multiplex, let directory = controlDirectory(uid: uid) else { return options }
+        options += [
+            "-o", "ControlMaster=auto",
+            // `%C` is a hash of host/port/user, so one socket per destination and a short path
+            // (unix socket paths are capped at ~104 bytes).
+            "-o", "ControlPath=\(directory)/%C",
+            "-o", "ControlPersist=120",
+        ]
+        return options
+    }
+
+    /// `/tmp/pigeon-<uid>-ssh`, private to this user; `nil` (no multiplexing) when it cannot
+    /// be made safe — someone else's directory there must never carry our ssh sessions.
+    static func controlDirectory(uid: uid_t) -> String? {
+        let path = "/tmp/pigeon-\(uid)-ssh"
+        let manager = FileManager.default
+        try? manager.createDirectory(
+            atPath: path, withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700])
+        guard let attributes = try? manager.attributesOfItem(atPath: path),
+              attributes[.type] as? FileAttributeType == .typeDirectory,
+              (attributes[.ownerAccountID] as? NSNumber)?.uint32Value == uid,
+              (attributes[.posixPermissions] as? NSNumber)?.intValue == 0o700
+        else { return nil }
+        return path
+    }
+
     /// The real transport: `ssh -o BatchMode=yes HOST SCRIPT`, stdin from `stdin`.
     ///
     /// The remote's login shell is whatever the user runs — bash, zsh, fish, csh — and ssh
@@ -247,7 +284,7 @@ public struct HostInstaller {
             + "> \"$HOME/.pigeon/install.sh\"; sh \"$HOME/.pigeon/install.sh\""
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-        process.arguments = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15", host, pipeline]
+        process.arguments = sshOptions() + [host, pipeline]
         let out = Pipe()
         let err = Pipe()
         process.standardOutput = out

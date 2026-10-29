@@ -6,6 +6,33 @@ import XCTest
 final class HostInstallerTests: XCTestCase {
     // MARK: - pure
 
+    func testSshRunsShareOneMasterConnectionInAPrivateDirectory() throws {
+        let options = HostInstaller.sshOptions()
+        XCTAssertTrue(options.contains("BatchMode=yes"))
+        XCTAssertTrue(options.contains("ControlMaster=auto"), "one handshake for all the probes")
+        let path = try XCTUnwrap(options.first { $0.hasPrefix("ControlPath=") })
+        XCTAssertEqual(path, "ControlPath=/tmp/pigeon-\(getuid())-ssh/%C")
+        let attributes = try FileManager.default.attributesOfItem(atPath: "/tmp/pigeon-\(getuid())-ssh")
+        XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o700)
+    }
+
+    func testAForwardAndAnUnsafeDirectoryDoNotMultiplex() throws {
+        // `-L` through a master exits at once and leaves the forward in the master.
+        XCTAssertFalse(HostInstaller.sshOptions(multiplex: false).contains("ControlMaster=auto"))
+        // A directory this user does not own (or that others can enter) is never used.
+        let shared = "/tmp/pigeon-\(getuid() &+ 7777)-ssh"
+        try? FileManager.default.removeItem(atPath: shared)
+        try FileManager.default.createDirectory(
+            atPath: shared, withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o777])
+        defer { try? FileManager.default.removeItem(atPath: shared) }
+        XCTAssertNil(HostInstaller.controlDirectory(uid: getuid() &+ 7777), "owned by someone else")
+        let loose = try XCTUnwrap(HostInstaller.controlDirectory(uid: getuid()), "made on first use")
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: loose)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: loose) }
+        XCTAssertNil(HostInstaller.controlDirectory(uid: getuid()), "readable by others")
+    }
+
     func testOnlyAMatchingPlatformCanBeServed() throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
