@@ -337,6 +337,46 @@ typedef struct PgRect {
 } PgRect;
 
 /**
+ * One changed row of a `delta`.
+ */
+typedef struct PgDeltaRow {
+    uint32_t size;
+    /**
+     * Screen row this replaces.
+     */
+    uint16_t y;
+    /**
+     * Entries in `cells`: the pane's width when the host sent the frame.
+     */
+    uint16_t cols;
+    const struct PgCell *cells;
+} PgDeltaRow;
+
+/**
+ * The decoded rows of a `delta` message. Owned by the caller; free with
+ * [`pg_delta_free`]. Immutable, thread-safe.
+ */
+typedef struct PgDelta {
+    uint32_t size;
+    uint32_t pane_id;
+    /**
+     * The frame's sequence number; a gap means a missed frame (re-`attach`).
+     */
+    uint32_t seq;
+    uint32_t row_count;
+    const struct PgDeltaRow *rows;
+    /**
+     * 1 when `cursor` is meaningful; deltas may leave the cursor out.
+     */
+    uint8_t has_cursor;
+    struct PgCursor cursor;
+    /**
+     * 0 main screen, 1 alternate screen, 2 not reported (keep what you had).
+     */
+    uint8_t alt_screen;
+} PgDelta;
+
+/**
  * A divider in a layout message: the box it divides plus its ratio.
  */
 typedef struct PgSplit {
@@ -475,6 +515,13 @@ uint32_t pg_layout_split_of(PgCore *core, uint32_t pane_id);
 bool pg_layout_focus(PgCore *core, uint32_t pane_id);
 
 uint32_t pg_layout_focused(PgCore *core);
+
+/**
+ * Builds an owned delta from a `delta` message; NULL for any other message type.
+ */
+struct PgDelta *pg_msg_delta(const PgMsg *msg);
+
+void pg_delta_free(struct PgDelta *delta);
 
 /**
  * Creates an empty message of `kind`, or NULL for `PG_MSG_UNKNOWN`.

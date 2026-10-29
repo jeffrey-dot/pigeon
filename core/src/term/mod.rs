@@ -206,6 +206,13 @@ pub trait Term {
     fn feed(&mut self, bytes: &[u8]);
     fn resize(&mut self, cols: u16, rows: u16);
     fn snapshot(&self) -> Snapshot;
+    /// The same picture without `history`. Deltas and history-less attaches only read the
+    /// screen, and converting 10 000 scrollback lines per frame is most of a frame's cost.
+    fn screen_snapshot(&self) -> Snapshot {
+        let mut snapshot = self.snapshot();
+        snapshot.history.clear();
+        snapshot
+    }
     /// Row indices changed since the last call; empty when clean.
     fn take_damage(&mut self) -> Vec<u16>;
     /// Bytes the application expects on its PTY (query answers).

@@ -251,6 +251,43 @@ final class PaneView: NSView {
         needsDisplay = true
     }
 
+    /// Patches the rows a `delta` frame carries. Returns `false` when the frame does not fit
+    /// the grid this view holds (a resize raced it); the caller then re-attaches for a
+    /// snapshot instead of drawing a torn screen.
+    func apply(delta: UnsafePointer<PgDelta>) -> Bool {
+        let frame = delta.pointee
+        guard cols > 0, cells.count == cols * rows else { return false }
+        if let changed = frame.rows {
+            for index in 0..<Int(frame.row_count) {
+                let row = changed[index]
+                let y = Int(row.y)
+                guard y < rows, Int(row.cols) == cols, let source = row.cells else { return false }
+                for column in 0..<cols {
+                    let cell = source[column]
+                    cells[y * cols + column] = Cell(
+                        codepoint: cell.codepoint,
+                        attrs: UInt8(truncatingIfNeeded: cell.attrs),
+                        fg: cell.fg,
+                        bg: cell.bg,
+                        width: cell.width
+                    )
+                }
+            }
+        }
+        if frame.has_cursor != 0 {
+            cursor = Cursor(
+                x: Int(frame.cursor.x),
+                y: Int(frame.cursor.y),
+                visible: frame.cursor.visible != 0
+            )
+        }
+        if frame.alt_screen < 2 {
+            alt = frame.alt_screen != 0
+        }
+        needsDisplay = true
+        return true
+    }
+
     /// Clicks belong to the container (divider drags, focus); NSView does not
     /// bubble unhandled mouse events, so forward them explicitly.
     override func mouseDown(with event: NSEvent) {

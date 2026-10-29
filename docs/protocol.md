@@ -65,12 +65,13 @@
 
 | 方向 | 消息 | 必选字段 | 可选字段 | 说明 |
 |---|---|---|---|---|
-| c→s | `attach` | `id: u32`, `pane_id: u32` | `size_policy: str` | `size_policy` ∈ `latest`(默认)/`smallest`/`locked` |
+| c→s | `attach` | `id: u32`, `pane_id: u32` | `size_policy: str`, `history: bool` | `size_policy` ∈ `latest`(默认)/`smallest`/`locked`；`history: false` 时答复的 `snapshot` 不带 `history`（靠 `scroll` 回看的客户端用，省掉每次切会话最多 2 MB 的历史），缺省 = 按 `scrollback` 能力 |
 | s→c | `snapshot` | `pane_id: u32`, `seq: u32`, `cols: u16`, `rows: u16`, `alt: bool`, `cursor: {x: u16, y: u16, visible: bool, shape: u8}`, `scroll: {top: u16, bottom: u16}`, `screen: [[cell]]` | `history: [[cell]]`, `links: [{id: u32, uri: str}]` | 全量；`screen` 必须恰好 `rows` 行 × `cols` 列；`history` 仅在 `scrollback` 能力协商成功时出现；`links` 仅在至少一个 `cell.link` 非 0 时出现 |
-| s→c | `delta` | `pane_id: u32`, `seq: u32`, `rows: [{y: u16, cells: [cell]}]` | `cursor: {x: u16, y: u16, visible: bool, shape: u8}`, `scroll: {top: u16, bottom: u16}`, `links: [{id: u32, uri: str}]` | 只含脏行；`cells` 长度必须等于 `cols`；`cursor`/`scroll` 的字段与 `snapshot` 同名同型 |
+| s→c | `delta` | `pane_id: u32`, `seq: u32`, `rows: [{y: u16, cells: [cell]}]` | `cursor: {x: u16, y: u16, visible: bool, shape: u8}`, `scroll: {top: u16, bottom: u16}`, `links: [{id: u32, uri: str}]`, `alt: bool` | 只含脏行；`alt` 报备用屏状态（仅收增量的客户端靠它知道 `vim` 起来了）；`cells` 长度必须等于 `cols`；`cursor`/`scroll` 的字段与 `snapshot` 同名同型 |
 | c→s | `scroll` | `pane_id: u32`, `offset: i32` | — | 负 = 往历史看（`-1` = 上滚一行）；`0` 回到底部。宿主按**每连接**记住位置，回一帧该位置的 `snapshot`（不带 `history`）；回看期间该 pane 不再推实时帧，`offset: 0` 才恢复 |
 
-- `seq` 每个 pane 单调递增，从 1 开始。客户端收到 `seq != last + 1` → 丢掉增量、重新 `attach`。
+- `seq` 只由 `delta` 递增（每 pane 从 1 开始）；`snapshot` 带的是它已包含的最新 `delta` 的 `seq`，自己不占号。所以别的窗口 `attach`/`scroll` 不会在这个窗口的增量流里留下空洞。客户端收到 `seq <= last` 的增量直接丢（快照已经包含）；`seq > last + 1` → 丢掉增量、重新 `attach`。
+- 宿主每 pane 每 16 ms 最多发一帧 `delta`（大量输出时合并脏行）；pane 尺寸变化后不发 `delta`，而是给每个观看者推一帧 `snapshot`（脏行装不下新的列数）。
 - `cursor.shape`：`0` 方块、`1` 下划线、`2` 竖线。
 - `cell = [codepoint: u32, attrs: u8, fg: u32, bg: u32, link?: u32]`。
   - 宽字符由 `codepoint` 的 `wcwidth` 推导；宽字符占两格，第二格是空 continuation，客户端按宽度跳过绘制。

@@ -39,6 +39,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var seenByHost: [String: Set<UInt32>] = [:]
     private var requestedByHost: [String: Set<UInt32>] = [:]
     private var pendingByHost: [String: [UInt32: Data]] = [:]
+    /// Last frame `seq` drawn per pane: a `delta` must be exactly the next one, otherwise a
+    /// frame went missing and the pane re-attaches for a snapshot (protocol §3.3).
+    private var seqByHost: [String: [UInt32: UInt32]] = [:]
     private var recovering: [String: Int] = [:]
     /// The host whose layout is on screen; every host stays connected in the background.
     private var activeHost = "local"
@@ -72,6 +75,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pendingSnapshots: [UInt32: Data] {
         get { pendingByHost[activeHost] ?? [:] }
         set { pendingByHost[activeHost] = newValue }
+    }
+    private var frameSeq: [UInt32: UInt32] {
+        get { seqByHost[activeHost] ?? [:] }
+        set { seqByHost[activeHost] = newValue }
     }
     /// Mode C keeps the VT state here (no host on the far side).
     private var localSession: LocalSession?
@@ -566,6 +573,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         seenByHost[host] = nil
         requestedByHost[host] = nil
         pendingByHost[host] = nil
+        seqByHost[host] = nil
     }
 
     private static func defaultSocketPath() -> String {
@@ -638,7 +646,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         send({ message in
             Wire.set(message, u32: "proto", 0x0100)
             Wire.set(message, str: "client", "pigeon-mac")
-            Wire.set(message, strings: "features", ["scrollback"])
+            // `delta` sends only the rows that changed: a keystroke costs ~2 KB instead of a
+            // full screen (~100 KB on a large pane), which is what makes ssh feel slow.
+            Wire.set(message, strings: "features", ["scrollback", "delta"])
         }, type: PG_MSG_HELLO)
     }
 
@@ -669,6 +679,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         send({ message in
             Wire.set(message, u32: "id", requestID())
             Wire.set(message, u32: "pane_id", pane)
+            // Scrollback is read through `scroll`, so the history (up to 2 MB) never needs to
+            // ride along — every session click re-attaches.
+            Wire.set(message, bool: "history", false)
         }, type: PG_MSG_ATTACH)
     }
 
@@ -1075,6 +1088,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard visible else { break }
             if container.applySnapshot(snapshot) {
                 haveSnapshot.insert(pane)
+                frameSeq[pane] = Wire.u32(message, "seq")
                 // `scroll` answers carry where the view is; plain snapshots do not, and then
                 // the indicator stays hidden (both fields are 0).
                 container.paneView(pane)?.setScrollPosition(
@@ -1083,6 +1097,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } else if let frame = Wire.frame(message) {
                 pendingSnapshots[pane] = frame
             }
+        case PG_MSG_DELTA:
+            applyDelta(message, visible: visible)
         case PG_MSG_STATUS:
             applyStatus(message)
         case PG_MSG_SIZE_STATE:
@@ -1114,6 +1130,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         default:
             break
         }
+    }
+
+    /// Patches a pane with the rows that changed. Anything that does not line up — a missed
+    /// frame, a grid of another size, a pane still waiting for its snapshot — falls back to
+    /// a fresh `attach`, the protocol's only recovery path.
+    private func applyDelta(_ message: OpaquePointer, visible: Bool) {
+        guard visible, let delta = pg_msg_delta(message) else { return }
+        defer { pg_delta_free(delta) }
+        let pane = delta.pointee.pane_id
+        guard haveSnapshot.contains(pane), let view = container.paneView(pane) else { return }
+        let drawn = frameSeq[pane] ?? 0
+        // Queued before our snapshot was taken: the snapshot already shows these rows.
+        if delta.pointee.seq <= drawn { return }
+        let expected = drawn + 1
+        if delta.pointee.seq == expected, view.apply(delta: delta) {
+            frameSeq[pane] = delta.pointee.seq
+            return
+        }
+        debugLog("delta pane=\(pane) seq=\(delta.pointee.seq) expected=\(expected): re-attach")
+        haveSnapshot.remove(pane)
+        frameSeq[pane] = nil
+        sendAttach(pane, force: true)
     }
 
     private func applySessions(_ message: OpaquePointer, visible: Bool) {
@@ -1392,6 +1430,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             defer { pg_snapshot_free(snapshot) }
             if container.applySnapshot(snapshot) {
                 haveSnapshot.insert(pane)
+                frameSeq[pane] = Wire.u32(decoded, "seq")
                 // `scroll` answers carry where the view is; plain snapshots do not, and then
                 // the indicator stays hidden (both fields are 0).
                 container.paneView(pane)?.setScrollPosition(

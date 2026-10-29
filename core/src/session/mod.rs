@@ -15,7 +15,9 @@ use unicode_width::UnicodeWidthChar;
 /// One pane's state.
 pub struct PaneState {
     pub pane_id: u32,
-    /// Monotonic per pane; shared by snapshots and deltas.
+    /// Counts deltas. A snapshot carries the current value without taking a new one, so
+    /// every client sees deltas as `n, n+1, …` after its own snapshot, however many other
+    /// windows attach or scroll in between; a gap then really means a lost frame.
     seq: u32,
     cols: u16,
     rows: u16,
@@ -115,7 +117,7 @@ impl PaneState {
         let total = snapshot.history.len();
         let applied = offset.min(total);
         let view = snapshot.scrolled(applied);
-        let mut message = message_from_snapshot(self.pane_id, self.next_seq(), &view, false);
+        let mut message = message_from_snapshot(self.pane_id, self.seq, &view, false);
         // The client draws its scroll indicator from these two numbers; they are only
         // meaningful on a `scroll` answer, so they stay out of every other snapshot.
         if let Message::Snapshot {
@@ -133,9 +135,12 @@ impl PaneState {
     /// Full picture for `attach`. `with_history` follows the negotiated
     /// `scrollback` capability.
     pub fn snapshot_message(&mut self, with_history: bool) -> Message {
-        let snapshot = self.term.snapshot();
-        let seq = self.next_seq();
-        message_from_snapshot(self.pane_id, seq, &snapshot, with_history)
+        let snapshot = if with_history {
+            self.term.snapshot()
+        } else {
+            self.term.screen_snapshot()
+        };
+        message_from_snapshot(self.pane_id, self.seq, &snapshot, with_history)
     }
 
     /// Dirty rows since the last call, or `None` when nothing changed.
@@ -144,7 +149,7 @@ impl PaneState {
         if dirty.is_empty() {
             return None;
         }
-        let snapshot = self.term.snapshot();
+        let snapshot = self.term.screen_snapshot();
         let rows: Vec<Row> = dirty
             .iter()
             .filter_map(|row| {
@@ -166,6 +171,7 @@ impl PaneState {
             cursor: Some(cursor_of(&snapshot)),
             scroll: Some(scroll_of(&snapshot)),
             links: None,
+            alt: Some(snapshot.alt),
         })
     }
 
@@ -291,30 +297,73 @@ fn rows_from_proto(rows: &[Vec<ProtoCell>], cols: u16) -> Option<Vec<Vec<crate::
         if row.len() != usize::from(cols) {
             return None;
         }
-        let mut cells = Vec::with_capacity(row.len());
-        let mut continuation = false;
-        for cell in row {
-            let ch = char::from_u32(cell.codepoint).unwrap_or(' ');
-            let width = if continuation {
-                continuation = false;
-                0
-            } else {
-                let width = ch.width().unwrap_or(1);
-                continuation = width == 2;
-                width.min(2) as u8
-            };
-            cells.push(crate::term::Cell {
-                codepoint: cell.codepoint,
-                fg: cell.fg,
-                bg: cell.bg,
-                attrs: u32::from(cell.attrs),
-                link: cell.link.unwrap_or(0),
-                width,
-            });
-        }
-        out.push(cells);
+        out.push(cells_from_proto(row));
     }
     Some(out)
+}
+
+/// One wire row as terminal cells; widths are re-derived the same way for snapshots and
+/// deltas, so a wide char looks identical whichever frame carried it.
+fn cells_from_proto(row: &[ProtoCell]) -> Vec<crate::term::Cell> {
+    let mut cells = Vec::with_capacity(row.len());
+    let mut continuation = false;
+    for cell in row {
+        let ch = char::from_u32(cell.codepoint).unwrap_or(' ');
+        let width = if continuation {
+            continuation = false;
+            0
+        } else {
+            let width = ch.width().unwrap_or(1);
+            continuation = width == 2;
+            width.min(2) as u8
+        };
+        cells.push(crate::term::Cell {
+            codepoint: cell.codepoint,
+            fg: cell.fg,
+            bg: cell.bg,
+            attrs: u32::from(cell.attrs),
+            link: cell.link.unwrap_or(0),
+            width,
+        });
+    }
+    cells
+}
+
+/// The changed rows of a `delta` message, decoded like a snapshot's rows.
+pub struct DeltaRows {
+    pub seq: u32,
+    pub alt: Option<bool>,
+    /// `(y, cells)`; every row is as wide as the pane was when the host sent it.
+    pub rows: Vec<(u16, Vec<crate::term::Cell>)>,
+    pub cursor: Option<crate::term::Cursor>,
+}
+
+/// Rebuilds the dirty rows of a `delta` message; `None` for any other message.
+pub fn delta_from_message(message: &Message) -> Option<DeltaRows> {
+    let Message::Delta {
+        seq,
+        rows,
+        cursor,
+        alt,
+        ..
+    } = message
+    else {
+        return None;
+    };
+    Some(DeltaRows {
+        seq: *seq,
+        alt: *alt,
+        rows: rows
+            .iter()
+            .map(|row| (row.y, cells_from_proto(&row.cells)))
+            .collect(),
+        cursor: cursor.map(|cursor| crate::term::Cursor {
+            x: cursor.x,
+            y: cursor.y,
+            visible: cursor.visible,
+            shape: cursor.shape,
+        }),
+    })
 }
 
 #[cfg(test)]
@@ -489,6 +538,41 @@ mod tests {
                 "only the cursor row may stay dirty"
             );
         }
+    }
+
+    #[test]
+    fn snapshots_do_not_consume_a_delta_sequence_number() {
+        // A second window attaching (or scrolling) must not open a gap in the first
+        // window's delta stream, or every attach elsewhere would force a re-attach here.
+        let mut pane = PaneState::new(1, 4, 2, 0);
+        pane.feed(b"x");
+        let Some(Message::Delta { seq: first, .. }) = pane.delta_message() else {
+            panic!("delta");
+        };
+        let Message::Snapshot { seq: snap, .. } = pane.snapshot_message(false) else {
+            panic!("snapshot");
+        };
+        let _ = pane.scroll_message(0);
+        assert_eq!(
+            snap, first,
+            "a snapshot reports the newest delta it already contains"
+        );
+        pane.feed(b"y");
+        let Some(Message::Delta { seq: next, alt, .. }) = pane.delta_message() else {
+            panic!("delta");
+        };
+        assert_eq!(next, first + 1);
+        assert_eq!(alt, Some(false));
+    }
+
+    #[test]
+    fn a_delta_reports_the_alternate_screen() {
+        let mut pane = PaneState::new(1, 4, 2, 0);
+        pane.feed(b"\x1b[?1049hz");
+        let Some(Message::Delta { alt, .. }) = pane.delta_message() else {
+            panic!("delta");
+        };
+        assert_eq!(alt, Some(true));
     }
 
     #[test]

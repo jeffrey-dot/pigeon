@@ -245,6 +245,10 @@ pub enum Message {
         pane_id: u32,
         #[serde(skip_serializing_if = "Option::is_none")]
         size_policy: Option<String>,
+        /// `false`: the snapshot leaves `history` out. A client that scrolls through the
+        /// host (`scroll`) never reads it, and over ssh it is up to 2 MB per attach.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        history: Option<bool>,
     },
     Snapshot {
         pane_id: u32,
@@ -277,6 +281,10 @@ pub enum Message {
         scroll: Option<Scroll>,
         #[serde(skip_serializing_if = "Option::is_none")]
         links: Option<Vec<Link>>,
+        /// Whether the alternate screen is up; the wheel means something else there, and
+        /// without it a delta-only client would never notice `vim` starting.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        alt: Option<bool>,
     },
     /// The client's current theme, so the host can answer `OSC 4/10/11` colour queries for
     /// the programs inside the panes. All fields are optional: a client that never sends this
@@ -602,11 +610,13 @@ mod tests {
                 id: 5,
                 pane_id: 1,
                 size_policy: None,
+                history: None,
             },
             Message::Attach {
                 id: 6,
                 pane_id: 1,
                 size_policy: Some("latest".into()),
+                history: Some(false),
             },
             Message::Snapshot {
                 pane_id: 1,
@@ -651,6 +661,7 @@ mod tests {
                 }),
                 scroll: None,
                 links: None,
+                alt: Some(true),
             },
             Message::Appearance {
                 fg: Some(0x0011_1111),

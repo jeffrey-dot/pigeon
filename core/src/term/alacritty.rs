@@ -179,6 +179,43 @@ impl AlacrittyTerm {
             })
             .collect()
     }
+
+    /// One picture of the pane; `with_history: false` skips converting the scrollback.
+    fn picture(&self, with_history: bool) -> Snapshot {
+        let size = self.size.lock().map(|size| *size).unwrap_or(GridSize {
+            cols: 80,
+            rows: 24,
+            history: 0,
+        });
+        let colors = self.term.colors();
+        let content = self.term.renderable_content();
+
+        let screen = (0..size.rows)
+            .map(|row| self.convert_row(Line(row as i32), colors))
+            .collect();
+
+        let history = if size.history == 0 || !with_history {
+            Vec::new()
+        } else {
+            let topmost = self.term.grid().topmost_line().0;
+            // Newest-first in alacritty's storage; emit oldest-first.
+            (topmost..0)
+                .map(|line| self.convert_row(Line(line), colors))
+                .collect()
+        };
+
+        Snapshot {
+            cols: size.cols,
+            rows: size.rows,
+            alt: self.term.mode().contains(TermMode::ALT_SCREEN),
+            cursor: cursor_of(content.cursor.shape, content.cursor.point),
+            // alacritty keeps DECSTBM private; M0 reports the full screen and
+            // documents the gap instead of guessing wrong values.
+            scroll: (0, size.rows.saturating_sub(1)),
+            screen,
+            history,
+        }
+    }
 }
 
 impl Term for AlacrittyTerm {
@@ -202,39 +239,11 @@ impl Term for AlacrittyTerm {
     }
 
     fn snapshot(&self) -> Snapshot {
-        let size = self.size.lock().map(|size| *size).unwrap_or(GridSize {
-            cols: 80,
-            rows: 24,
-            history: 0,
-        });
-        let colors = self.term.colors();
-        let content = self.term.renderable_content();
+        self.picture(true)
+    }
 
-        let screen = (0..size.rows)
-            .map(|row| self.convert_row(Line(row as i32), colors))
-            .collect();
-
-        let history = if size.history == 0 {
-            Vec::new()
-        } else {
-            let topmost = self.term.grid().topmost_line().0;
-            // Newest-first in alacritty's storage; emit oldest-first.
-            (topmost..0)
-                .map(|line| self.convert_row(Line(line), colors))
-                .collect()
-        };
-
-        Snapshot {
-            cols: size.cols,
-            rows: size.rows,
-            alt: self.term.mode().contains(TermMode::ALT_SCREEN),
-            cursor: cursor_of(content.cursor.shape, content.cursor.point),
-            // alacritty keeps DECSTBM private; M0 reports the full screen and
-            // documents the gap instead of guessing wrong values.
-            scroll: (0, size.rows.saturating_sub(1)),
-            screen,
-            history,
-        }
+    fn screen_snapshot(&self) -> Snapshot {
+        self.picture(false)
     }
 
     fn take_damage(&mut self) -> Vec<u16> {

@@ -18,7 +18,7 @@ use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
-use tokio::time::{interval, MissedTickBehavior};
+use tokio::time::{interval, sleep_until, Instant, MissedTickBehavior};
 
 use pigeon_core::error::PgError;
 use pigeon_core::layout::{Axis, Layout, LayoutNode};
@@ -29,6 +29,10 @@ use pigeon_core::term::Palette;
 /// Capabilities this build offers (protocol §5).
 const SERVER_FEATURES: &[&str] = &["delta", "scrollback", "osc7501"];
 const SCROLLBACK: usize = 10_000;
+/// At most one delta per pane per frame. A burst of output (`cat`, a build log) arrives in
+/// many small PTY reads, and one delta each would repaint the whole screen dozens of times
+/// per frame and flood an ssh link; a lone keystroke still goes out immediately.
+const FRAME: Duration = Duration::from_millis(16);
 const DEFAULT_COLS: u16 = 80;
 const DEFAULT_ROWS: u16 = 24;
 
@@ -131,6 +135,11 @@ enum Event {
     },
     /// Titles/cwd changed: clients should refresh `sessions`.
     SessionsChanged,
+    /// The pane's grid changed size. Delta rows cannot say that, so watchers get a fresh
+    /// snapshot instead (which also resets their `seq` base).
+    Resized {
+        pane_id: u32,
+    },
 }
 
 enum Cmd {
@@ -434,6 +443,16 @@ where
                         .await
                         {
                             send(&mut writer, &list).await?;
+                        }
+                    }
+                    Event::Resized { pane_id } => {
+                        if !state.watched.contains_key(&pane_id)
+                            || state.views.get(&pane_id).copied().unwrap_or(0) > 0
+                        {
+                            continue;
+                        }
+                        if let Some(snapshot) = snapshot_of(sessions, pane_id, false).await {
+                            send(&mut writer, &snapshot).await?;
                         }
                     }
                     Event::Delta { pane_id, message } => {
@@ -792,6 +811,7 @@ async fn dispatch(
             id,
             pane_id,
             size_policy,
+            history,
         } => {
             let session_id = {
                 let map = sessions.lock().await;
@@ -804,7 +824,8 @@ async fn dispatch(
                     id: Some(id),
                 });
             };
-            let Some(snapshot) = snapshot_of(sessions, pane_id, true).await else {
+            let Some(snapshot) = snapshot_of(sessions, pane_id, history.unwrap_or(true)).await
+            else {
                 return Some(Message::Error {
                     code: "no_such_pane".into(),
                     detail: format!("pane {pane_id}"),
@@ -1190,8 +1211,16 @@ fn spawn_pane(
         let mut commands_open = true;
         let mut last_revision = 0u32;
         let mut last_meta: Option<(Option<String>, Option<String>)> = None;
+        // When the last delta left, and whether the screen changed since.
+        let mut last_flush = Instant::now() - FRAME;
+        let mut dirty = false;
         loop {
             tokio::select! {
+                _ = sleep_until(last_flush + FRAME), if dirty => {
+                    dirty = false;
+                    last_flush = Instant::now();
+                    flush(&mut pane, &events);
+                }
                 command = cmd_rx.recv(), if commands_open => {
                     let Some(command) = command else {
                         commands_open = false;
@@ -1211,7 +1240,10 @@ fn spawn_pane(
                                     pixel_height: 0,
                                 });
                             }
-                            flush(&mut pane, &events);
+                            // Everything is dirty after a resize; the snapshot each watcher
+                            // gets covers it, so the damage must not go out a second time.
+                            let _ = pane.take_damage();
+                            let _ = events.send(Event::Resized { pane_id });
                         }
                         Cmd::Snapshot { history, reply } => {
                             let _ = reply.send(pane.snapshot_message(history));
@@ -1298,7 +1330,13 @@ fn spawn_pane(
                     if !replies.is_empty() {
                         let _ = write_tx.send(replies);
                     }
-                    flush(&mut pane, &events);
+                    if last_flush.elapsed() >= FRAME {
+                        dirty = false;
+                        last_flush = Instant::now();
+                        flush(&mut pane, &events);
+                    } else {
+                        dirty = true;
+                    }
                 }
             }
         }

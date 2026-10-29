@@ -63,6 +63,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             id: 1,
             pane_id,
             size_policy: None,
+            history: None,
         },
     )?;
     send(

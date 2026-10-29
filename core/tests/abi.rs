@@ -359,3 +359,54 @@ fn layout_message_exposes_rects_and_splits() {
 
     pigeon_core::ffi::pg_msg_free(handle);
 }
+
+#[test]
+fn delta_rows_cross_the_abi_with_cursor_and_alt() {
+    use pigeon_core::ffi::{pg_delta_free, pg_msg_decode_frame, pg_msg_delta, pg_msg_free};
+    use pigeon_core::proto;
+    use pigeon_core::session::PaneState;
+
+    let mut pane = PaneState::new(7, 6, 3, 0);
+    let _ = pane.snapshot_message(false);
+    pane.feed("a你".as_bytes());
+    let message = pane.delta_message().expect("the feed dirtied a row");
+    let frame = proto::encode_frame(&message).expect("frame");
+    let mut consumed = 0usize;
+    let handle = pg_msg_decode_frame(frame.as_ptr(), frame.len(), &mut consumed);
+    assert!(!handle.is_null());
+
+    let delta = pg_msg_delta(handle);
+    assert!(!delta.is_null(), "{}", error_text());
+    // SAFETY: owned here, freed below.
+    let view = unsafe { &*delta };
+    assert_eq!(view.pane_id, 7);
+    assert_eq!(view.seq, 1, "first delta after a snapshot at seq 0");
+    assert!(view.row_count >= 1);
+    let row = unsafe { &*view.rows };
+    assert_eq!((row.y, row.cols), (0, 6));
+    let cells = unsafe { std::slice::from_raw_parts(row.cells, 6) };
+    assert_eq!(cells[0].codepoint, 'a' as u32);
+    assert_eq!((cells[1].codepoint, cells[1].width), ('你' as u32, 2));
+    assert_eq!(cells[2].width, 0, "continuation derived like a snapshot's");
+    assert_eq!(view.has_cursor, 1);
+    assert_eq!((view.cursor.x, view.cursor.y), (3, 0));
+    assert_eq!(view.alt_screen, 0);
+    pg_delta_free(delta);
+    pg_msg_free(handle);
+}
+
+#[test]
+fn a_non_delta_message_yields_no_delta() {
+    use pigeon_core::ffi::{pg_delta_free, pg_msg_delta, pg_msg_free, pg_msg_new, PgMsgType};
+
+    let msg = pg_msg_new(PgMsgType::PG_MSG_SNAPSHOT);
+    assert!(pg_msg_delta(msg).is_null());
+    assert_eq!(pg_last_error_code(), PgErrorCode::PG_ERR_INVALID_ARG);
+    // An empty delta handle lacks `rows`: rejected by the schema, not read as zero rows.
+    let empty = pg_msg_new(PgMsgType::PG_MSG_DELTA);
+    assert!(pg_msg_delta(empty).is_null());
+    assert!(pg_msg_delta(std::ptr::null()).is_null());
+    pg_delta_free(std::ptr::null_mut());
+    pg_msg_free(msg);
+    pg_msg_free(empty);
+}

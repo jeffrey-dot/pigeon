@@ -133,10 +133,14 @@ impl PgMsg {
 
     /// Rebuilds the typed message; used by the snapshot accessor so the wire
     /// schema is validated in exactly one place.
-    fn to_message(&self) -> PgResult<Message> {
+    pub(super) fn to_message(&self) -> PgResult<Message> {
         let mut payload = Vec::new();
         ciborium::into_writer(&self.as_value(), &mut payload).map_err(|_| PgError::InvalidArg)?;
         proto::decode(&payload)
+    }
+
+    pub(super) fn kind(&self) -> PgMsgType {
+        type_of(&self.t)
     }
 
     fn as_value(&self) -> Value {
@@ -659,6 +663,11 @@ fn empty_str() -> PgStr {
         ptr: b"".as_ptr(),
         len: 0,
     }
+}
+
+/// For sibling FFI modules: the same null-checked borrow every accessor here uses.
+pub(super) fn msg_ref<'a>(msg: *const PgMsg) -> PgResult<&'a PgMsg> {
+    unsafe_ref(msg)
 }
 
 /// # Safety

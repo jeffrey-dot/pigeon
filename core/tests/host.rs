@@ -282,6 +282,7 @@ fn stable_snapshot(client: &mut Client, pane_id: u32) -> Message {
             id: 99,
             pane_id,
             size_policy: None,
+            history: None,
         });
         let message = normalized(&snapshot(client));
         if previous.as_ref() == Some(&message) {
@@ -370,6 +371,7 @@ fn shell_outlives_the_client_and_the_screen_is_restored() {
         id: 2,
         pane_id,
         size_policy: None,
+        history: None,
     });
     let initial = snapshot(&mut first);
     let Message::Snapshot {
@@ -384,7 +386,7 @@ fn shell_outlives_the_client_and_the_screen_is_restored() {
 
     first.send(&Message::Keys {
         pane_id,
-        bytes: b"echo pigeon-marker\r".to_vec(),
+        bytes: b"echo pigeon-\"\"marker\r".to_vec(),
     });
     // Wait until the shell has echoed the command into the grid.
     wait_for_text(&mut first, "pigeon-marker");
@@ -490,6 +492,7 @@ fn resize_reaches_the_shell() {
         id: 2,
         pane_id,
         size_policy: None,
+        history: None,
     });
     let _ = snapshot(&mut client);
 
@@ -515,6 +518,7 @@ fn attach(client: &mut Client, pane: u32, policy: Option<&str>) {
         id: 2,
         pane_id: pane,
         size_policy: policy.map(str::to_owned),
+        history: None,
     });
 }
 
@@ -771,6 +775,7 @@ fn scrollback_history_reaches_the_client_in_the_snapshot() {
         id: 9,
         pane_id: pane,
         size_policy: None,
+        history: None,
     });
     let message = client.wait_for(|message| match message {
         Message::Snapshot {
@@ -987,6 +992,7 @@ fn attach_first(client: &mut Client) -> u32 {
         id: 2,
         pane_id,
         size_policy: None,
+        history: None,
     });
     let _ = snapshot(client);
     let _ = wait_for_layout(client, |_| true);
@@ -1210,11 +1216,12 @@ fn split_makes_three_live_panes() {
             id: 71,
             pane_id: pane,
             size_policy: None,
+            history: None,
         });
         let _ = snapshot(&mut client);
         client.send(&Message::Keys {
             pane_id: pane,
-            bytes: format!("echo pane-{pane}\r").into_bytes(),
+            bytes: format!("echo pane-\"\"{pane}\r").into_bytes(),
         });
         wait_for_text(&mut client, &format!("pane-{pane}"));
     }
@@ -1237,11 +1244,12 @@ fn three_panes_survive_a_disconnect_and_restore_layout_and_screens() {
             id: 80,
             pane_id: pane,
             size_policy: None,
+            history: None,
         });
         let _ = snapshot(&mut client);
         client.send(&Message::Keys {
             pane_id: pane,
-            bytes: format!("echo alive-{pane}\r").into_bytes(),
+            bytes: format!("echo alive-\"\"{pane}\r").into_bytes(),
         });
         wait_for_text(&mut client, &format!("alive-{pane}"));
         before.push((pane, comparable(&stable_snapshot(&mut client, pane))));
@@ -1265,6 +1273,7 @@ fn three_panes_survive_a_disconnect_and_restore_layout_and_screens() {
         id: 81,
         pane_id: first,
         size_policy: None,
+        history: None,
     });
     let _ = snapshot(&mut after);
     let layout_after = after.wait_for(|m| matches!(m, Message::Layout { .. }));
@@ -1303,6 +1312,7 @@ fn three_panes_survive_a_disconnect_and_restore_layout_and_screens() {
             id: 82,
             pane_id: pane,
             size_policy: None,
+            history: None,
         });
         let now = comparable(&stable_snapshot(&mut after, pane));
         assert_eq!(now, screen_before, "pane {pane} restored cell for cell");
@@ -1363,6 +1373,7 @@ fn resizing_a_split_changes_the_tree_and_the_panes() {
             id: 61,
             pane_id: pane,
             size_policy: None,
+            history: None,
         });
         let snapshot = snapshot(&mut client);
         let Message::Snapshot { cols, rows, .. } = snapshot else {
@@ -1388,6 +1399,7 @@ fn vim_alternate_screen_survives_a_reconnect() {
         id: 95,
         pane_id: vim_pane,
         size_policy: None,
+        history: None,
     });
     let _ = snapshot(&mut client);
     client.send(&Message::Keys {
@@ -1428,6 +1440,7 @@ fn vim_alternate_screen_survives_a_reconnect() {
         id: 96,
         pane_id: vim_pane,
         size_policy: None,
+        history: None,
     });
     let restored = comparable(&stable_snapshot(&mut after, vim_pane));
     assert_eq!(
@@ -1503,6 +1516,7 @@ fn two_panes_on_one_connection_both_get_live_output() {
         id: 120,
         pane_id: second,
         size_policy: None,
+        history: None,
     });
     let _ = snapshot(&mut client);
 
@@ -1545,6 +1559,7 @@ fn closing_the_watched_pane_still_delivers_the_new_layout() {
         id: 130,
         pane_id: second,
         size_policy: None,
+        history: None,
     });
     let _ = snapshot(&mut client);
     client.send(&Message::Keys {
@@ -1687,6 +1702,7 @@ fn acked_status_is_not_replayed_after_reconnect() {
         id: 140,
         pane_id: pane,
         size_policy: None,
+        history: None,
     });
     let _ = snapshot(&mut again);
     // A second attach replays `latest_status` before its snapshot, so this window is
@@ -1695,6 +1711,7 @@ fn acked_status_is_not_replayed_after_reconnect() {
         id: 141,
         pane_id: pane,
         size_policy: None,
+        history: None,
     });
     let replayed = std::cell::Cell::new(false);
     again.wait_for(|message| {
@@ -1754,6 +1771,7 @@ fn a_pane_asks_for_its_background_and_the_host_answers() {
         id: 2,
         pane_id,
         size_policy: None,
+        history: None,
     });
     let _ = snapshot(&mut client);
     // Query, read the 25-byte reply, print it with the escapes visible (`cat -v`).
@@ -1789,6 +1807,7 @@ fn appearance_reaches_existing_panes_and_a_malformed_one_keeps_the_previous() {
         id: 2,
         pane_id,
         size_policy: None,
+        history: None,
     });
     let _ = snapshot(&mut client);
 
@@ -1852,4 +1871,95 @@ fn appearance_reaches_existing_panes_and_a_malformed_one_keeps_the_previous() {
         }
         other => panic!("expected sessions, got {}", other.name()),
     }
+}
+
+/// What a `delta` client sees: typing arrives as dirty rows with consecutive `seq`, an
+/// attach can leave the history out, and a resize is answered with a full snapshot.
+#[test]
+fn delta_clients_get_dirty_rows_in_sequence_and_a_snapshot_on_resize() {
+    let _serial = one_at_a_time();
+    let host = start_host();
+    let mut client = Client::connect(&host.socket);
+    client.send(&Message::Hello {
+        proto: proto::PROTO_VERSION,
+        client: "host-test".into(),
+        features: vec!["scrollback".into(), "delta".into()],
+    });
+    let Message::HelloAck { features, .. } =
+        client.wait_for(|m| matches!(m, Message::HelloAck { .. }))
+    else {
+        unreachable!()
+    };
+    assert!(features.iter().any(|f| f == "delta"));
+
+    client.send(&Message::NewSession {
+        id: 1,
+        cwd: None,
+        shell: None,
+        env: None,
+    });
+    let Message::Created { pane_id, .. } =
+        client.wait_for(|m| matches!(m, Message::Created { .. }))
+    else {
+        unreachable!()
+    };
+    client.send(&Message::Attach {
+        id: 2,
+        pane_id,
+        size_policy: None,
+        history: Some(false),
+    });
+    let Message::Snapshot {
+        seq: base, history, ..
+    } = client.wait_for(|m| matches!(m, Message::Snapshot { .. }))
+    else {
+        unreachable!()
+    };
+    assert!(
+        history.is_none(),
+        "history: false keeps the backlog off the wire"
+    );
+
+    client.send(&Message::Keys {
+        pane_id,
+        bytes: b"echo pigeon-delta\r".to_vec(),
+    });
+    // Every frame after the snapshot is a delta numbered base+1, base+2, … until the output
+    // line shows up in one of them.
+    let mut last = base;
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        assert!(
+            Instant::now() < deadline,
+            "the output never arrived as a delta"
+        );
+        let message =
+            client.wait_for(|m| matches!(m, Message::Delta { .. } | Message::Snapshot { .. }));
+        let Message::Delta { seq, rows, .. } = message else {
+            panic!("a delta client got a full snapshot for plain typing");
+        };
+        assert_eq!(seq, last + 1, "deltas must be consecutive");
+        last = seq;
+        let text = rows_text(&rows.into_iter().map(|row| row.cells).collect::<Vec<_>>());
+        if text.lines().any(|line| line.trim() == "pigeon-delta") {
+            break;
+        }
+    }
+
+    client.send(&Message::ResizePane {
+        pane_id,
+        cols: 50,
+        rows: 12,
+    });
+    let message = client.wait_for(|m| match m {
+        Message::Snapshot { cols, rows, .. } => (*cols, *rows) == (50, 12),
+        _ => false,
+    });
+    let Message::Snapshot { seq, .. } = message else {
+        unreachable!()
+    };
+    assert!(
+        seq >= last,
+        "the snapshot carries the newest delta it contains"
+    );
 }

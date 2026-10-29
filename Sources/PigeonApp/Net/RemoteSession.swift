@@ -201,7 +201,7 @@ final class RemoteSession {
         guard let hello = Wire.make(PG_MSG_HELLO) else { return false }
         Wire.set(hello, u32: "proto", 0x0100)
         Wire.set(hello, str: "client", "pigeon-mac")
-        Wire.set(hello, strings: "features", ["scrollback"])
+        Wire.set(hello, strings: "features", ["scrollback", "delta"])
         client.send(hello)
         Wire.free(hello)
         _ = ready.wait(timeout: .now() + 5)

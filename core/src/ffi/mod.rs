@@ -18,8 +18,10 @@ use crate::layout::{Axis, Layout};
 use crate::session::PaneState;
 use crate::status::{Kind as StatusKind, State as StatusState};
 
+pub mod delta;
 pub mod msg;
 
+pub use delta::*;
 pub use msg::*;
 
 /// ABI generation. Bumped only for non-additive changes.
@@ -882,7 +884,7 @@ fn snapshot_to_ffi(
     )
 }
 
-fn to_pg_cell(cell: &crate::term::Cell) -> PgCell {
+pub(crate) fn to_pg_cell(cell: &crate::term::Cell) -> PgCell {
     PgCell {
         size: std::mem::size_of::<PgCell>() as u32,
         codepoint: cell.codepoint,
