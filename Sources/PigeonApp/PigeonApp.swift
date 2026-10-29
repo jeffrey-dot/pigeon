@@ -43,6 +43,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// frame went missing and the pane re-attaches for a snapshot (protocol §3.3).
     private var seqByHost: [String: [UInt32: UInt32]] = [:]
     private var recovering: [String: Int] = [:]
+    private let hostAgent = HostAgent()
+    /// Set by "Stop Session Host…" so the dropped socket is not taken for a crash.
+    private var stoppedByUser = false
     /// The host whose layout is on screen; every host stays connected in the background.
     private var activeHost = "local"
     /// Stable order for namespaced sidebar ids (`host index * 100_000 + session`).
@@ -287,6 +290,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let appItem = NSMenuItem()
         mainMenu.addItem(appItem)
         let appMenu = NSMenu()
+        // Quitting leaves the host and its sessions running; ending them is its own command.
+        let stopHost = NSMenuItem(
+            title: "Stop Session Host…", action: #selector(stopLocalHost(_:)), keyEquivalent: "")
+        stopHost.target = self
+        appMenu.addItem(stopHost)
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit pigeon", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
 
@@ -472,6 +481,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// One host dropped: retry *that* host on its own budget, without touching the others.
     private func hostLost(host: String, _ reason: String) {
         clients[host] = nil
+        if host == "local", stoppedByUser {
+            stoppedByUser = false
+            if host == activeHost {
+                showStopped("Session host stopped. Retry starts a new one.")
+            }
+            refreshSidebar()
+            return
+        }
         if host == activeHost, let refused = refusedReason {
             refusedReason = nil
             showStopped(refused)
@@ -504,10 +521,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             guard !self.connectHost() else { return }
-            // No socket at all: start a local host and give it a moment to bind.
-            if let path = HostLauncher.find(candidates: HostLauncher.candidates()) {
-                HostLauncher.launch(path: path)
-            }
+            // No socket at all: have launchd start the host and give it a moment to bind.
+            self.startLocalHost()
             DispatchQueue.main.asyncAfter(deadline: .now() + HostRecovery.retryDelay) { [weak self] in
                 guard let self, !self.connectHost() else { return }
                 self.recover(host: host, reason: reason)
@@ -530,6 +545,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self?.recover(host: host, reason: "\(reason) (\(error))")
                 }
             }
+        }
+    }
+
+    /// The host runs as a launchd agent so it outlives this process (issue #2); a plain
+    /// child is the fallback only when launchd refuses, and then says so in the log.
+    private func startLocalHost() {
+        guard let path = HostLauncher.find(candidates: HostLauncher.candidates()) else {
+            debugLog("no pigeon-host binary found")
+            return
+        }
+        let environment = ProcessInfo.processInfo.environment
+        if let error = hostAgent.start(
+            hostPath: path, socket: Self.defaultSocketPath(), shell: environment["SHELL"])
+        {
+            debugLog("launchd: \(error); starting the host as a child instead")
+            HostLauncher.launch(path: path)
         }
     }
 
@@ -840,6 +871,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func selectHost(_ sender: NSMenuItem) {
         guard let host = sender.representedObject as? String else { return }
         switchTo(host: host)
+    }
+
+    @objc private func stopLocalHost(_ sender: Any?) {
+        let alert = NSAlert()
+        alert.messageText = "Stop the session host?"
+        alert.informativeText =
+            "Every session on this Mac ends, including programs still running in them."
+        alert.addButton(withTitle: "Stop Host")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        if let error = hostAgent.stop() {
+            // Most likely a host this launchd job did not start (run by hand, or by an
+            // older build); it keeps running, so say so instead of pretending.
+            let failure = NSAlert()
+            failure.messageText = "The session host is still running"
+            failure.informativeText = error
+            failure.runModal()
+            return
+        }
+        // The socket drop would normally restart the host; this time it must stay down.
+        stoppedByUser = true
     }
 
     @objc private func useThisMac(_ sender: Any?) {

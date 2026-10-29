@@ -143,9 +143,14 @@ tmux attach（前台，一个普通程序）
 **本机是不是装了两个应用？** 不是。`pigeon-host` 打包在 `Pigeon.app/Contents/Helpers/` 里，
 随 app 一起签名/公证/升级；Dock 里只有一个图标、/Applications 里只有一个 app。
 运行时 `ps` 会看到两个进程（`Pigeon` + `pigeon-host`）——和 Chrome 的 helper、VSCode 的后端进程一样。
-关窗口 = 窗口进程退出、`pigeon-host` 继续；`⌘Q` = 连 `pigeon-host` 一起退出（会提示还有几个会话在跑）。
-想只跑一个进程也可以（本地直接由 app 进程持有 PTY），但那样本地就失去“关窗口任务继续”，所以默认不这么做。
-不需要 systemctl/launchd，不需要 root，不开网络端口，`ps` 里只看到一个 `pigeon-host`。
+关窗口 / `⌘Q` / 窗口崩溃 = 窗口进程退出、`pigeon-host` 继续；结束全部会话走单独的菜单项 `Stop Session Host…`（会确认）。
+本机宿主由 **launchd** 拉起（issue #2）：连不上 socket 时，客户端写 `~/Library/LaunchAgents/dev.pigeon.host.plist`
+（这是 launchd 唯一认的位置，也是 pigeon 在 `~/.config/pigeon` 之外写的唯一文件），再 `launchctl bootstrap` + `kickstart`。
+宿主因此不是窗口的子进程，`kill -9` 窗口也带不走它；`KeepAlive = {SuccessfulExit: false}`，宿主崩了 launchd 拉回来
+（默认节流约 10 s），`Stop Session Host…` 走 `launchctl bootout` 并删掉 plist，不会在下次登录时复活。
+plist 里显式写 `--socket`/`--shell` 和 PATH/LANG 等几个环境变量：launchd 的环境很空，不写会挑到别的 socket 路径和 `/bin/sh`。
+日志写 `~/.config/pigeon/host.log`。launchd 拒绝时退回旧路径（作为窗口子进程启动），并在 `PIGEON_DEBUG` 日志里说明。
+不需要 root，不开网络端口，`ps` 里只看到一个 `pigeon-host`。Linux 客户端届时用 systemd user unit 做同样的事。
 
 ### 3.4 远端（SSH：同一后台进程装到服务器上）
 
