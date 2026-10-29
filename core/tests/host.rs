@@ -283,6 +283,7 @@ fn stable_snapshot(client: &mut Client, pane_id: u32) -> Message {
             pane_id,
             size_policy: None,
             history: None,
+            since: None,
         });
         let message = normalized(&snapshot(client));
         if previous.as_ref() == Some(&message) {
@@ -372,6 +373,7 @@ fn shell_outlives_the_client_and_the_screen_is_restored() {
         pane_id,
         size_policy: None,
         history: None,
+        since: None,
     });
     let initial = snapshot(&mut first);
     let Message::Snapshot {
@@ -493,6 +495,7 @@ fn resize_reaches_the_shell() {
         pane_id,
         size_policy: None,
         history: None,
+        since: None,
     });
     let _ = snapshot(&mut client);
 
@@ -519,6 +522,7 @@ fn attach(client: &mut Client, pane: u32, policy: Option<&str>) {
         pane_id: pane,
         size_policy: policy.map(str::to_owned),
         history: None,
+        since: None,
     });
 }
 
@@ -829,6 +833,7 @@ fn scrollback_history_reaches_the_client_in_the_snapshot() {
         pane_id: pane,
         size_policy: None,
         history: None,
+        since: None,
     });
     let message = client.wait_for(|message| match message {
         Message::Snapshot {
@@ -1046,6 +1051,7 @@ fn attach_first(client: &mut Client) -> u32 {
         pane_id,
         size_policy: None,
         history: None,
+        since: None,
     });
     let _ = snapshot(client);
     let _ = wait_for_layout(client, |_| true);
@@ -1270,6 +1276,7 @@ fn split_makes_three_live_panes() {
             pane_id: pane,
             size_policy: None,
             history: None,
+            since: None,
         });
         let _ = snapshot(&mut client);
         client.send(&Message::Keys {
@@ -1298,6 +1305,7 @@ fn three_panes_survive_a_disconnect_and_restore_layout_and_screens() {
             pane_id: pane,
             size_policy: None,
             history: None,
+            since: None,
         });
         let _ = snapshot(&mut client);
         client.send(&Message::Keys {
@@ -1327,6 +1335,7 @@ fn three_panes_survive_a_disconnect_and_restore_layout_and_screens() {
         pane_id: first,
         size_policy: None,
         history: None,
+        since: None,
     });
     let _ = snapshot(&mut after);
     let layout_after = after.wait_for(|m| matches!(m, Message::Layout { .. }));
@@ -1366,6 +1375,7 @@ fn three_panes_survive_a_disconnect_and_restore_layout_and_screens() {
             pane_id: pane,
             size_policy: None,
             history: None,
+            since: None,
         });
         let now = comparable(&stable_snapshot(&mut after, pane));
         assert_eq!(now, screen_before, "pane {pane} restored cell for cell");
@@ -1427,6 +1437,7 @@ fn resizing_a_split_changes_the_tree_and_the_panes() {
             pane_id: pane,
             size_policy: None,
             history: None,
+            since: None,
         });
         let snapshot = snapshot(&mut client);
         let Message::Snapshot { cols, rows, .. } = snapshot else {
@@ -1453,6 +1464,7 @@ fn vim_alternate_screen_survives_a_reconnect() {
         pane_id: vim_pane,
         size_policy: None,
         history: None,
+        since: None,
     });
     let _ = snapshot(&mut client);
     client.send(&Message::Keys {
@@ -1494,6 +1506,7 @@ fn vim_alternate_screen_survives_a_reconnect() {
         pane_id: vim_pane,
         size_policy: None,
         history: None,
+        since: None,
     });
     let restored = comparable(&stable_snapshot(&mut after, vim_pane));
     assert_eq!(
@@ -1570,6 +1583,7 @@ fn two_panes_on_one_connection_both_get_live_output() {
         pane_id: second,
         size_policy: None,
         history: None,
+        since: None,
     });
     let _ = snapshot(&mut client);
 
@@ -1613,6 +1627,7 @@ fn closing_the_watched_pane_still_delivers_the_new_layout() {
         pane_id: second,
         size_policy: None,
         history: None,
+        since: None,
     });
     let _ = snapshot(&mut client);
     client.send(&Message::Keys {
@@ -1756,6 +1771,7 @@ fn acked_status_is_not_replayed_after_reconnect() {
         pane_id: pane,
         size_policy: None,
         history: None,
+        since: None,
     });
     let _ = snapshot(&mut again);
     // A second attach replays `latest_status` before its snapshot, so this window is
@@ -1765,6 +1781,7 @@ fn acked_status_is_not_replayed_after_reconnect() {
         pane_id: pane,
         size_policy: None,
         history: None,
+        since: None,
     });
     let replayed = std::cell::Cell::new(false);
     again.wait_for(|message| {
@@ -1825,6 +1842,7 @@ fn a_pane_asks_for_its_background_and_the_host_answers() {
         pane_id,
         size_policy: None,
         history: None,
+        since: None,
     });
     let _ = snapshot(&mut client);
     // Query, read the 25-byte reply, print it with the escapes visible (`cat -v`).
@@ -1861,6 +1879,7 @@ fn appearance_reaches_existing_panes_and_a_malformed_one_keeps_the_previous() {
         pane_id,
         size_policy: None,
         history: None,
+        since: None,
     });
     let _ = snapshot(&mut client);
 
@@ -1961,6 +1980,7 @@ fn delta_clients_get_dirty_rows_in_sequence_and_a_snapshot_on_resize() {
         pane_id,
         size_policy: None,
         history: Some(false),
+        since: None,
     });
     let Message::Snapshot {
         seq: base, history, ..
@@ -2014,5 +2034,127 @@ fn delta_clients_get_dirty_rows_in_sequence_and_a_snapshot_on_resize() {
     assert!(
         seq >= last,
         "the snapshot carries the newest delta it contains"
+    );
+}
+
+fn hello_delta(client: &mut Client) -> Option<String> {
+    client.send(&Message::Hello {
+        proto: proto::PROTO_VERSION,
+        client: "host-test".into(),
+        features: vec!["scrollback".into(), "delta".into()],
+    });
+    let Message::HelloAck { instance, .. } =
+        client.wait_for(|m| matches!(m, Message::HelloAck { .. }))
+    else {
+        unreachable!()
+    };
+    instance
+}
+
+/// Issue #4: a client that drops and comes back says which `seq` its screen shows; the host
+/// replays only the deltas it missed, and when it cannot (a resize, or a `seq` it never
+/// sent) it answers with a snapshot as before.
+#[test]
+fn reconnect_with_since_replays_only_the_missed_deltas() {
+    let _serial = one_at_a_time();
+    let host = start_host();
+    let mut first = Client::connect(&host.socket);
+    let instance = hello_delta(&mut first);
+    assert!(instance.is_some(), "hello_ack names the host instance");
+    let pane = attach_first(&mut first);
+    first.send(&Message::Keys {
+        pane_id: pane,
+        bytes: b"echo before-\"\"drop\r".to_vec(),
+    });
+    let seen = loop {
+        let Message::Delta { seq, rows, .. } =
+            first.wait_for(|m| matches!(m, Message::Delta { .. }))
+        else {
+            unreachable!()
+        };
+        let text = rows_text(&rows.into_iter().map(|row| row.cells).collect::<Vec<_>>());
+        if text.lines().any(|line| line.trim() == "before-drop") {
+            break seq;
+        }
+    };
+    drop(first); // the network goes away
+
+    // Output while nobody watches; another client confirms it reached the screen.
+    let mut watcher = Client::connect(&host.socket);
+    hello(&mut watcher);
+    attach(&mut watcher, pane, None);
+    watcher.send(&Message::Keys {
+        pane_id: pane,
+        bytes: b"echo while-\"\"away\r".to_vec(),
+    });
+    wait_for_pane_text(&mut watcher, pane, "while-away");
+    drop(watcher);
+
+    let mut back = Client::connect(&host.socket);
+    assert_eq!(hello_delta(&mut back), instance, "same host process");
+    back.send(&Message::Attach {
+        id: 90,
+        pane_id: pane,
+        size_policy: None,
+        history: Some(false),
+        since: Some(seen),
+    });
+    let mut next = seen + 1;
+    loop {
+        let message =
+            back.wait_for(|m| matches!(m, Message::Delta { .. } | Message::Snapshot { .. }));
+        let Message::Delta { seq, rows, .. } = message else {
+            panic!("a short drop must not cost a full snapshot");
+        };
+        assert_eq!(
+            seq, next,
+            "the replay continues exactly where the client left off"
+        );
+        next += 1;
+        let text = rows_text(&rows.into_iter().map(|row| row.cells).collect::<Vec<_>>());
+        if text.lines().any(|line| line.trim() == "while-away") {
+            break;
+        }
+    }
+
+    // A resize empties the backlog: the old rows no longer fit, so a snapshot it is.
+    back.send(&Message::ResizePane {
+        pane_id: pane,
+        cols: 60,
+        rows: 20,
+    });
+    back.wait_for(|m| matches!(m, Message::Snapshot { cols: 60, .. }));
+    drop(back);
+    let mut late = Client::connect(&host.socket);
+    hello_delta(&mut late);
+    late.send(&Message::Attach {
+        id: 91,
+        pane_id: pane,
+        size_policy: None,
+        history: Some(false),
+        since: Some(seen),
+    });
+    let message = late.wait_for(|m| matches!(m, Message::Delta { .. } | Message::Snapshot { .. }));
+    assert!(
+        matches!(message, Message::Snapshot { cols: 60, .. }),
+        "frames from before the resize cannot be replayed"
+    );
+
+    // A `seq` this host never sent (the client talked to a host that has since restarted).
+    // A fresh connection: one already watching the pane could see a live delta first.
+    drop(late);
+    let mut late = Client::connect(&host.socket);
+    hello_delta(&mut late);
+    late.send(&Message::Attach {
+        id: 92,
+        pane_id: pane,
+        size_policy: None,
+        history: Some(false),
+        since: Some(u32::MAX - 1),
+    });
+    let message = late.wait_for(|m| matches!(m, Message::Delta { .. } | Message::Snapshot { .. }));
+    assert!(
+        matches!(message, Message::Snapshot { .. }),
+        "a foreign seq means a snapshot"
     );
 }

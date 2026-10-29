@@ -153,6 +153,11 @@ enum Cmd {
         history: bool,
         reply: oneshot::Sender<Message>,
     },
+    /// Deltas after `since`, or a snapshot when the backlog no longer has them all.
+    Since {
+        since: u32,
+        reply: oneshot::Sender<Vec<Message>>,
+    },
     /// Look `offset` lines into the history; the reply carries the view and the applied
     /// offset (protocol §3.3 `scroll`).
     Scroll {
@@ -299,6 +304,8 @@ struct ClientState {
     /// How far each pane is scrolled back for *this* window; 0 is the live screen. Two
     /// windows on one session scroll independently because this lives per connection.
     views: HashMap<u32, usize>,
+    /// Frames a request produced beyond its one reply (an `attach.since` replay).
+    outbox: Vec<Message>,
 }
 
 async fn handle_client<S>(
@@ -390,6 +397,10 @@ where
                                     }
                                 }
                             }
+                            // Outside the reply branch: a replay has no single reply.
+                            for frame in std::mem::take(&mut state.outbox) {
+                                send(&mut writer, &frame).await?;
+                            }
                         }
                         Ok(None) => break,
                         Err(PgError::Unsupported) => {
@@ -474,6 +485,14 @@ where
             }
         }
     }
+}
+
+/// What a reconnecting client missed since `since`: deltas, or one snapshot.
+async fn catch_up(sessions: &Sessions, pane_id: u32, since: u32) -> Option<Vec<Message>> {
+    let sender = sender_of(sessions, pane_id).await?;
+    let (tx, rx) = oneshot::channel();
+    sender.send(Cmd::Since { since, reply: tx }).await.ok()?;
+    rx.await.ok()
 }
 
 async fn snapshot_of(sessions: &Sessions, pane_id: u32, history: bool) -> Option<Message> {
@@ -706,6 +725,7 @@ async fn dispatch(
                 features: offered,
                 host_id: hostname(),
                 client_id: state.client_id,
+                instance: Some(instance().to_owned()),
             })
         }
         Message::Sessions { .. } => {
@@ -812,6 +832,7 @@ async fn dispatch(
             pane_id,
             size_policy,
             history,
+            since,
         } => {
             let session_id = {
                 let map = sessions.lock().await;
@@ -824,8 +845,18 @@ async fn dispatch(
                     id: Some(id),
                 });
             };
-            let Some(snapshot) = snapshot_of(sessions, pane_id, history.unwrap_or(true)).await
-            else {
+            // A reconnect (issue #4): replay what the client missed, which is usually a
+            // few rows instead of the whole screen. Only for a client that takes deltas.
+            let reply = match since.filter(|_| state.delta_ok) {
+                Some(since) => catch_up(sessions, pane_id, since).await.map(|frames| {
+                    state.outbox.extend(frames);
+                    None
+                }),
+                None => snapshot_of(sessions, pane_id, history.unwrap_or(true))
+                    .await
+                    .map(Some),
+            };
+            let Some(snapshot) = reply else {
                 return Some(Message::Error {
                     code: "no_such_pane".into(),
                     detail: format!("pane {pane_id}"),
@@ -860,7 +891,15 @@ async fn dispatch(
                 });
                 broadcast_size(session_id, session, events);
             }
-            Some(snapshot)
+            // `latest_status` takes the sessions lock again.
+            drop(map);
+            if snapshot.is_none() {
+                // The caught-up client still needs the status it may have missed.
+                if let Some(status) = latest_status(sessions, pane_id).await {
+                    state.outbox.push(status);
+                }
+            }
+            snapshot
         }
         Message::SplitPane {
             id,
@@ -1248,6 +1287,19 @@ fn spawn_pane(
                         Cmd::Snapshot { history, reply } => {
                             let _ = reply.send(pane.snapshot_message(history));
                         }
+                        Cmd::Since { since, reply } => {
+                            // Pending damage first, so the replay ends at the current screen
+                            // and the live stream continues right after it.
+                            if dirty {
+                                dirty = false;
+                                last_flush = Instant::now();
+                                flush(&mut pane, &events);
+                            }
+                            let frames = pane
+                                .deltas_since(since)
+                                .unwrap_or_else(|| vec![pane.snapshot_message(false)]);
+                            let _ = reply.send(frames);
+                        }
                         Cmd::Scroll { offset, reply } => {
                             let _ = reply.send(pane.scroll_message(offset));
                         }
@@ -1474,6 +1526,19 @@ fn shell_label(path: &str) -> String {
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.to_owned())
+}
+
+/// This process's identity for `hello_ack.instance`: pid plus start time is unique enough
+/// to tell a restarted host from the one a client last saw.
+fn instance() -> &'static str {
+    static INSTANCE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    INSTANCE.get_or_init(|| {
+        let started = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or(0);
+        format!("{:x}-{}", started, std::process::id())
+    })
 }
 
 fn hostname() -> String {

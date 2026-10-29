@@ -42,6 +42,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Last frame `seq` drawn per pane: a `delta` must be exactly the next one, otherwise a
     /// frame went missing and the pane re-attaches for a snapshot (protocol §3.3).
     private var seqByHost: [String: [UInt32: UInt32]] = [:]
+    /// Panes still showing what a dropped connection drew: their next `attach` carries
+    /// `since` so the host replays only the missed deltas (issue #4).
+    private var staleByHost: [String: Set<UInt32>] = [:]
+    /// `hello_ack.instance` per host; `since` is only meaningful to that same process.
+    private var instanceByHost: [String: String] = [:]
     private var recovering: [String: Int] = [:]
     private let hostAgent = HostAgent()
     /// Set by "Stop Session Host…" so the dropped socket is not taken for a crash.
@@ -466,6 +471,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         clients[host] = client
         recovering[host] = 0
+        // A reconnect keeps the screens on display; every pane drawn so far re-attaches,
+        // asking only for what it missed.
+        staleByHost[host] = seenByHost[host] ?? []
+        requestedByHost[host] = nil
         if host == activeHost {
             hostStatus.hide()
         }
@@ -605,6 +614,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         requestedByHost[host] = nil
         pendingByHost[host] = nil
         seqByHost[host] = nil
+        staleByHost[host] = nil
+        instanceByHost[host] = nil
     }
 
     private static func defaultSocketPath() -> String {
@@ -706,10 +717,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// the window never receives the selected session's layout.
     private func sendAttach(_ pane: UInt32, force: Bool = false) {
         guard pane != 0 else { return }
-        if !force, haveSnapshot.contains(pane) || !requested.insert(pane).inserted { return }
+        let stale = staleByHost[activeHost]?.contains(pane) ?? false
+        if !force, (haveSnapshot.contains(pane) && !stale) || !requested.insert(pane).inserted {
+            return
+        }
+        staleByHost[activeHost]?.remove(pane)
+        let since = HostRecovery.resumeSeq(
+            drawn: frameSeq[pane], stale: stale, onScreen: haveSnapshot.contains(pane))
         send({ message in
             Wire.set(message, u32: "id", requestID())
             Wire.set(message, u32: "pane_id", pane)
+            if let since { Wire.set(message, u32: "since", since) }
             // Scrollback is read through `scroll`, so the history (up to 2 MB) never needs to
             // ride along — every session click re-attaches.
             Wire.set(message, bool: "history", false)
@@ -1108,6 +1126,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func handleActive(_ message: OpaquePointer, visible: Bool) {
         switch Wire.type(message) {
         case PG_MSG_HELLO_ACK:
+            let instance = Wire.string(message, "instance")
+            if instanceByHost[activeHost] != instance {
+                // A restarted host numbers its frames from scratch.
+                staleByHost[activeHost] = nil
+                seqByHost[activeHost] = nil
+            }
+            instanceByHost[activeHost] = instance
             // Tell the host what we are drawing with, so programs inside the panes can pick
             // their light or dark theme (`OSC 4/10/11`).
             sendAppearance()

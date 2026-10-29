@@ -4,6 +4,10 @@
 //! Pure data plus conversions — no IO, no tokio. The host drives this; an
 //! embedded client would drive the same struct through the C ABI.
 
+mod backlog;
+
+pub use backlog::Backlog;
+
 use crate::proto::{Cell as ProtoCell, Cursor as ProtoCursor, Message, Row, Scroll};
 use crate::status::StatusStore;
 use crate::term::{alacritty::AlacrittyTerm, frozen::FrozenTerm, Snapshot, Term};
@@ -23,6 +27,8 @@ pub struct PaneState {
     rows: u16,
     term: Box<dyn Term + Send>,
     status: StatusStore,
+    /// Deltas already sent, for a reconnecting client's `attach.since`.
+    backlog: Backlog,
 }
 
 impl PaneState {
@@ -34,6 +40,7 @@ impl PaneState {
             rows,
             term: Box::new(AlacrittyTerm::new(cols, rows, scrollback)),
             status: StatusStore::new(),
+            backlog: Backlog::default(),
         }
     }
 
@@ -46,6 +53,7 @@ impl PaneState {
             rows: snapshot.rows,
             term: Box::new(FrozenTerm::new(snapshot)),
             status: StatusStore::new(),
+            backlog: Backlog::default(),
         }
     }
 
@@ -65,6 +73,8 @@ impl PaneState {
         self.cols = cols;
         self.rows = rows;
         self.term.resize(cols, rows);
+        // Rows sent before the resize no longer fit the grid; only a snapshot can.
+        self.backlog.clear();
     }
 
     /// Current cell size of this pane.
@@ -164,7 +174,7 @@ impl PaneState {
             return None;
         }
         let seq = self.next_seq();
-        Some(Message::Delta {
+        let message = Message::Delta {
             pane_id: self.pane_id,
             seq,
             rows,
@@ -172,7 +182,15 @@ impl PaneState {
             scroll: Some(scroll_of(&snapshot)),
             links: None,
             alt: Some(snapshot.alt),
-        })
+        };
+        self.backlog.push(seq, &message);
+        Some(message)
+    }
+
+    /// What a client whose screen shows delta `since` missed, or `None` when only a
+    /// snapshot can bring it up to date (frames evicted, a resize, another host instance).
+    pub fn deltas_since(&self, since: u32) -> Option<Vec<Message>> {
+        self.backlog.since(since, self.seq)
     }
 
     fn status_enabled(&self) -> bool {

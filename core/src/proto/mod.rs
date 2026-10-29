@@ -189,6 +189,10 @@ pub enum Message {
         features: Vec<String>,
         host_id: String,
         client_id: u32,
+        /// Changes every time the host process starts. `seq` and pane ids start over with
+        /// it, so a client may only send `attach.since` to the instance it got it from.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        instance: Option<String>,
     },
     HelloError {
         reason: String,
@@ -249,6 +253,11 @@ pub enum Message {
         /// host (`scroll`) never reads it, and over ssh it is up to 2 MB per attach.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         history: Option<bool>,
+        /// The `seq` the client's screen of this pane already shows (it reconnects after a
+        /// drop). If the host still has every delta after it, those are the answer instead
+        /// of a snapshot; otherwise it falls back to a snapshot as if this were absent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        since: Option<u32>,
     },
     Snapshot {
         pane_id: u32,
@@ -524,6 +533,7 @@ mod tests {
                 features: vec!["delta".into(), "scrollback".into()],
                 host_id: "local".into(),
                 client_id: 7,
+                instance: Some("1a2b-42".into()),
             },
             Message::HelloError {
                 reason: "version".into(),
@@ -611,12 +621,14 @@ mod tests {
                 pane_id: 1,
                 size_policy: None,
                 history: None,
+                since: None,
             },
             Message::Attach {
                 id: 6,
                 pane_id: 1,
                 size_policy: Some("latest".into()),
                 history: Some(false),
+                since: None,
             },
             Message::Snapshot {
                 pane_id: 1,

@@ -37,7 +37,7 @@
 | 方向 | 消息 | 必选字段 | 可选字段 | 说明 |
 |---|---|---|---|---|
 | c→s | `hello` | `proto: u16`, `client: str`, `features: [str]` | — | 必须是第一帧；5s 内未收到则断开 |
-| s→c | `hello_ack` | `proto: u16`, `server: str`, `features: [str]`, `host_id: str`, `client_id: u32` | — | `client_id` 由宿主分配，本连接内唯一 |
+| s→c | `hello_ack` | `proto: u16`, `server: str`, `features: [str]`, `host_id: str`, `client_id: u32` | `instance: str` | `client_id` 由宿主分配，本连接内唯一；`instance` 每次宿主进程启动都会变，`seq` 与 pane id 随之从头开始，客户端只能对同一个 `instance` 发 `attach.since` |
 | s→c | `hello_error` | `reason: "version"\|"busy"\|"unauthorized"`, `detail: str` | — | 发完即关闭连接 |
 
 - `proto = (major << 8) | minor`。当前 **major = 1，minor = 0**，即线上的 `0x0100`。
@@ -65,12 +65,16 @@
 
 | 方向 | 消息 | 必选字段 | 可选字段 | 说明 |
 |---|---|---|---|---|
-| c→s | `attach` | `id: u32`, `pane_id: u32` | `size_policy: str`, `history: bool` | `size_policy` ∈ `latest`(默认)/`smallest`/`locked`；`history: false` 时答复的 `snapshot` 不带 `history`（靠 `scroll` 回看的客户端用，省掉每次切会话最多 2 MB 的历史），缺省 = 按 `scrollback` 能力 |
+| c→s | `attach` | `id: u32`, `pane_id: u32` | `size_policy: str`, `history: bool`, `since: u32` | `size_policy` ∈ `latest`(默认)/`smallest`/`locked`；`history: false` 时答复的 `snapshot` 不带 `history`（靠 `scroll` 回看的客户端用，省掉每次切会话最多 2 MB 的历史），缺省 = 按 `scrollback` 能力；`since` 见下方“断线续传” |
 | s→c | `snapshot` | `pane_id: u32`, `seq: u32`, `cols: u16`, `rows: u16`, `alt: bool`, `cursor: {x: u16, y: u16, visible: bool, shape: u8}`, `scroll: {top: u16, bottom: u16}`, `screen: [[cell]]` | `history: [[cell]]`, `links: [{id: u32, uri: str}]` | 全量；`screen` 必须恰好 `rows` 行 × `cols` 列；`history` 仅在 `scrollback` 能力协商成功时出现；`links` 仅在至少一个 `cell.link` 非 0 时出现 |
 | s→c | `delta` | `pane_id: u32`, `seq: u32`, `rows: [{y: u16, cells: [cell]}]` | `cursor: {x: u16, y: u16, visible: bool, shape: u8}`, `scroll: {top: u16, bottom: u16}`, `links: [{id: u32, uri: str}]`, `alt: bool` | 只含脏行；`alt` 报备用屏状态（仅收增量的客户端靠它知道 `vim` 起来了）；`cells` 长度必须等于 `cols`；`cursor`/`scroll` 的字段与 `snapshot` 同名同型 |
 | c→s | `scroll` | `pane_id: u32`, `offset: i32` | — | 负 = 往历史看（`-1` = 上滚一行）；`0` 回到底部。宿主按**每连接**记住位置，回一帧该位置的 `snapshot`（不带 `history`）；回看期间该 pane 不再推实时帧，`offset: 0` 才恢复 |
 
 - `seq` 只由 `delta` 递增（每 pane 从 1 开始）；`snapshot` 带的是它已包含的最新 `delta` 的 `seq`，自己不占号。所以别的窗口 `attach`/`scroll` 不会在这个窗口的增量流里留下空洞。客户端收到 `seq <= last` 的增量直接丢（快照已经包含）；`seq > last + 1` → 丢掉增量、重新 `attach`。
+- **断线续传**（issue #4）：重连的客户端在 `attach.since` 里带上该 pane 屏幕上已有的最后一个 `seq`。宿主每 pane 保留最近的
+  `delta`（最多 4096 帧且合计 512 Ki 格），`since` 之后的帧都还在就按顺序只补这些帧（之后接实时流），**不发快照**；
+  帧已被淘汰、中间 resize 过（缓冲清空）、`since` 比当前还大（另一个宿主进程给的号）或连接没协商 `delta` 时，按没带 `since` 处理，回一帧快照。
+  客户端断线后保留屏幕不清空，重连后对已画过的 pane 带 `since`；`hello_ack.instance` 变了就丢掉所有 `seq`，改要快照。
 - 宿主每 pane 每 16 ms 最多发一帧 `delta`（大量输出时合并脏行）；pane 尺寸变化后不发 `delta`，而是给每个观看者推一帧 `snapshot`（脏行装不下新的列数）。
 - `cursor.shape`：`0` 方块、`1` 下划线、`2` 竖线。
 - `cell = [codepoint: u32, attrs: u8, fg: u32, bg: u32, link?: u32]`。

@@ -135,3 +135,19 @@ final class HostRecoveryTests: XCTestCase {
         XCTAssertEqual(HostLauncher.find(candidates: [missing, found.path]), found.path)
     }
 }
+
+/// Issue #4: which panes ask the host for just the frames they missed.
+final class ResumeTests: XCTestCase {
+    func testAPaneStillOnScreenResumesFromItsLastFrame() {
+        XCTAssertEqual(HostRecovery.resumeSeq(drawn: 41, stale: true, onScreen: true), 41)
+    }
+
+    func testEverythingElseGetsASnapshot() {
+        XCTAssertNil(HostRecovery.resumeSeq(drawn: 41, stale: false, onScreen: true),
+                     "not a reconnect: an ordinary attach")
+        XCTAssertNil(HostRecovery.resumeSeq(drawn: 41, stale: true, onScreen: false),
+                     "nothing drawn to patch")
+        XCTAssertNil(HostRecovery.resumeSeq(drawn: nil, stale: true, onScreen: true),
+                     "the host restarted; its numbers mean nothing here")
+    }
+}

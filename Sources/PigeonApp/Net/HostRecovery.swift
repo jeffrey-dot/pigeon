@@ -63,6 +63,14 @@ public enum HostRecovery {
         hasRemote ? .remote : .local
     }
 
+    /// The `attach.since` for a pane after a reconnect: the last frame it drew, if that
+    /// screen is still on display. A fresh pane, or one whose host restarted (the caller
+    /// then forgets `drawn`), gets a plain snapshot.
+    public static func resumeSeq(drawn: UInt32?, stale: Bool, onScreen: Bool) -> UInt32? {
+        guard stale, onScreen else { return nil }
+        return drawn
+    }
+
     /// The command line shown when no host binary can be found to start automatically.
     public static let startCommand = "cargo run --manifest-path core/Cargo.toml --bin pigeon-host"
 }
