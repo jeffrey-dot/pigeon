@@ -46,7 +46,7 @@ stdin/stdout 上说话（首次安装后的第一次启动用它）；之后它�
    ```
 
 4. 校验 sha256（客户端内嵌期望值，远端 `shasum -a 256` 比对；不一致就删文件并报错）；
-5. 启动：`ssh host ~/.pigeon/host/3.2.0/pigeon-host --proxy`（宿主已在远端常驻，桥接它的 unix socket；首次安装后用 `--stdio` 拉起常驻实例，两者都能被同一客户端复用）。
+5. 启动：`ssh host ~/.pigeon/host/3.2.0/pigeon-host --proxy`（宿主已在远端常驻，桥接它的 unix socket；socket 上没人监听时 `--proxy` 先拉起一个宿主——无共享 stdio、独立进程组，ssh 断开不会带走它——再桥接，所以重启后的第一次连接也只需要这一条命令）。
 
 ### 本机交叉构建（macOS → Linux）
 

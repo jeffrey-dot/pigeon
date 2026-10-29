@@ -234,7 +234,7 @@ async fn run() -> Result<(), String> {
     let palette: PaletteSlot = Arc::new(std::sync::Mutex::new(Some(Palette::default_dark())));
 
     if transport == Transport::Proxy {
-        return proxy(&socket).await;
+        return proxy(&socket, &shell).await;
     }
 
     if std::fs::metadata(&socket).is_ok_and(|meta| meta.file_type().is_socket()) {
@@ -1370,16 +1370,55 @@ where
 
 /// Bridges stdin/stdout to a running host. Frames are opaque bytes here on purpose: the
 /// bridge must not care which protocol version the two ends agreed on.
-async fn proxy(socket: &std::path::Path) -> Result<(), String> {
-    let stream = UnixStream::connect(socket)
-        .await
-        .map_err(|error| format!("cannot reach {}: {error}", socket.display()))?;
+///
+/// With nothing listening (first connect after a reboot, or the host crashed) it starts a
+/// host first, so `ssh host pigeon-host --proxy` is the only command a client ever needs.
+async fn proxy(socket: &std::path::Path, shell: &str) -> Result<(), String> {
+    let stream = match UnixStream::connect(socket).await {
+        Ok(stream) => stream,
+        Err(_) => {
+            start_detached_host(socket, shell)?;
+            connect_with_patience(socket).await?
+        }
+    };
     let mut stdio = tokio::io::join(tokio::io::stdin(), tokio::io::stdout());
     let mut stream = stream;
     tokio::io::copy_bidirectional(&mut stdio, &mut stream)
         .await
         .map_err(|error| format!("proxy failed: {error}"))?;
     Ok(())
+}
+
+/// A host that must outlive this bridge: no shared stdio (the ssh channel closing would
+/// break its pipes) and its own process group (sshd's hangup goes to the session's group).
+fn start_detached_host(socket: &std::path::Path, shell: &str) -> Result<(), String> {
+    use std::os::unix::process::CommandExt;
+    let program = std::env::current_exe().map_err(|error| format!("current_exe: {error}"))?;
+    std::process::Command::new(program)
+        .arg("--socket")
+        .arg(socket)
+        .args(["--shell", shell])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .process_group(0)
+        .spawn()
+        .map_err(|error| format!("cannot start a host: {error}"))?;
+    Ok(())
+}
+
+/// The host just started needs a moment to bind its socket.
+async fn connect_with_patience(socket: &std::path::Path) -> Result<UnixStream, String> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match UnixStream::connect(socket).await {
+            Ok(stream) => return Ok(stream),
+            Err(error) if Instant::now() >= deadline => {
+                return Err(format!("cannot reach {}: {error}", socket.display()));
+            }
+            Err(_) => tokio::time::sleep(Duration::from_millis(50)).await,
+        }
+    }
 }
 
 fn type_tag(buf: &[u8]) -> Option<String> {

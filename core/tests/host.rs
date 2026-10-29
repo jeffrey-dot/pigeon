@@ -635,6 +635,59 @@ fn proxy_mode_bridges_stdio_to_a_running_host() {
     wait_for_pane_text(&mut client, pane, "42");
 }
 
+/// `--proxy` with no host behind the socket starts one (issue #3): the first `ssh host
+/// pigeon-host --proxy` after a reboot must not fail, and the host it starts must outlive
+/// the bridge, or closing the window would end the remote sessions.
+#[test]
+fn proxy_mode_starts_a_host_when_none_is_running() {
+    let _serial = one_at_a_time();
+    let socket = unique_socket();
+    let quiet = script("#!/bin/sh\nexec env PS1= /bin/sh -i\n");
+    // Whatever the outcome, the host this test caused must not linger.
+    struct Reap(String);
+    impl Drop for Reap {
+        fn drop(&mut self) {
+            let _ = Command::new("pkill").args(["-f", &self.0]).status();
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+    let _reap = Reap(socket.clone());
+
+    let mut proxy = Command::new(env!("CARGO_BIN_EXE_pigeon-host"))
+        .args([
+            "--proxy",
+            "--socket",
+            &socket,
+            "--shell",
+            quiet.to_str().expect("utf8"),
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn pigeon-host --proxy");
+    let stdin = proxy.stdin.take().expect("stdin");
+    let stdout = proxy.stdout.take().expect("stdout");
+    let guard = Guard(proxy);
+    let mut client = Client::new(Box::new(stdout), Box::new(stdin));
+    hello(&mut client);
+    let pane = attach_first(&mut client);
+    drop(client);
+    drop(guard); // the ssh channel closes
+
+    let mut later = Client::connect(&socket);
+    hello(&mut later);
+    later.send(&Message::Sessions { items: Vec::new() });
+    let Message::Sessions { items } = later.wait_for(|m| matches!(m, Message::Sessions { .. }))
+    else {
+        unreachable!()
+    };
+    assert!(
+        items.iter().any(|session| session.panes.contains(&pane)),
+        "the host started by --proxy kept the session: {items:?}"
+    );
+}
+
 /// Protocol §6 `smallest`: two windows of different sizes get the smaller box, and both
 /// are told who won and how many clients are watching.
 #[test]
