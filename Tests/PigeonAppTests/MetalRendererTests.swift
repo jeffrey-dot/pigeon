@@ -87,15 +87,27 @@ final class MetalRendererTests: XCTestCase {
         XCTAssertNil(mailbox.poll())
     }
 
-    func testAClosedMailboxReleasesTheRenderThread() {
+    func testARestoredFrameNeverOverwritesANewerOne() {
         let mailbox = FrameMailbox()
-        let done = expectation(description: "take returns")
-        Thread.detachNewThread {
-            XCTAssertNil(mailbox.take())
-            done.fulfill()
-        }
+        var taken = DirtyRows.none
+        taken.mark(0)
+        mailbox.post(frame("cd", cols: 1, dirty: .none))
+        mailbox.restore(frame("ab", cols: 1, dirty: taken))
+        let next = mailbox.poll()
+        XCTAssertEqual(next?.cells.first?.codepoint, 99, "the newer screen stays")
+        XCTAssertEqual(next?.dirty.contains(0), true, "the restored frame's rows are still redrawn")
+        mailbox.restore(frame("ab", cols: 1))
+        XCTAssertEqual(mailbox.poll()?.cells.first?.codepoint, 97, "an empty mailbox takes it back")
+    }
+
+    func testAClosedMailboxHandsOutNothing() {
+        let mailbox = FrameMailbox()
+        mailbox.post(frame("ab", cols: 1))
         mailbox.close()
-        wait(for: [done], timeout: 2)
+        XCTAssertTrue(mailbox.isClosed)
+        XCTAssertNil(mailbox.poll(), "a stopped renderer must not draw a frame posted before stop")
+        mailbox.post(frame("cd", cols: 1))
+        XCTAssertNil(mailbox.poll())
     }
 
     // MARK: - instances

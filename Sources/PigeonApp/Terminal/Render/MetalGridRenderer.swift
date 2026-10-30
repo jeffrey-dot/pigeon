@@ -6,8 +6,13 @@ import QuartzCore
 ///
 /// The main thread only posts `GridFrame` values into a `FrameMailbox`; this thread takes
 /// the newest one, rebuilds the instance data of the dirty rows, and encodes one instanced
-/// draw per pass (backgrounds, glyphs, decorations + cursor). Nothing runs while no frame is
-/// posted, so an idle pane costs no CPU or GPU time.
+/// draw per pass (backgrounds, glyphs, decorations + cursor).
+///
+/// Frames are paced by a `CAMetalDisplayLink` on the thread's run loop (macOS 14+): a post
+/// unpauses the link, the next refresh draws whatever is newest, and an empty mailbox pauses
+/// it again. A burst of output (`cat` of a large file) costs one frame per refresh, not one
+/// per delta, and an idle pane costs no CPU or GPU time. macOS 13 has no display link for
+/// Metal layers, so there a post draws on the next run-loop turn instead.
 ///
 /// Instance buffers rotate through `inFlight` slots guarded by a semaphore (triple
 /// buffering): the CPU fills frame N+1 while the GPU still reads frame N.
@@ -22,6 +27,11 @@ final class MetalGridRenderer: @unchecked Sendable {
     private let mailbox = FrameMailbox()
     private let slots = DispatchSemaphore(value: MetalGridRenderer.inFlight)
     private var thread: Thread?
+    /// The render thread's run loop, published once by `start()`.
+    private var runLoop: CFRunLoop?
+    /// `CAMetalDisplayLink` on macOS 14+; typed `AnyObject` so the class needs no availability.
+    private var link: AnyObject?
+    private var linkDelegate: AnyObject?
 
     // Render-thread state.
     private var glyphs: GlyphCache?
@@ -78,34 +88,106 @@ final class MetalGridRenderer: @unchecked Sendable {
 
     func start() {
         guard thread == nil else { return }
-        let thread = Thread { [weak self] in self?.run() }
+        let ready = DispatchSemaphore(value: 0)
+        let thread = Thread { [weak self] in
+            guard let self else {
+                ready.signal()
+                return
+            }
+            self.run(ready: ready)
+        }
         thread.name = "pigeon.render"
         thread.qualityOfService = .userInteractive
         self.thread = thread
         thread.start()
+        // Posts go to the thread's run loop, so it must exist before `start` returns.
+        ready.wait()
     }
 
     /// Stops the thread; the caller drops the renderer afterwards.
     func stop() {
         mailbox.close()
+        perform { [self] in
+            if #available(macOS 14.0, *), let link = link as? CAMetalDisplayLink {
+                link.invalidate()
+            }
+            link = nil
+            linkDelegate = nil
+            CFRunLoopStop(CFRunLoopGetCurrent())
+        }
         thread = nil
     }
 
     func post(_ frame: GridFrame) {
         mailbox.post(frame)
+        perform { [self] in
+            if #available(macOS 14.0, *), let link = link as? CAMetalDisplayLink {
+                link.isPaused = false
+            } else {
+                drawPending(drawable: nil)
+            }
+        }
     }
 
-    private func run() {
-        while let frame = mailbox.take() {
-            autoreleasepool { render(frame) }
+    /// Runs `block` on the render thread.
+    private func perform(_ block: @escaping () -> Void) {
+        guard let runLoop else { return }
+        CFRunLoopPerformBlock(runLoop, CFRunLoopMode.defaultMode.rawValue, block)
+        CFRunLoopWakeUp(runLoop)
+    }
+
+    private func run(ready: DispatchSemaphore) {
+        runLoop = CFRunLoopGetCurrent()
+        if #available(macOS 14.0, *) {
+            let delegate = DisplayLinkDelegate { [weak self] update in
+                self?.drawPending(drawable: update.drawable)
+            }
+            let link = CAMetalDisplayLink(metalLayer: layer)
+            link.delegate = delegate
+            // ProMotion panels run at up to 120Hz; the link drops to the display's own rate.
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
+            link.preferredFrameLatency = 1
+            link.isPaused = true
+            link.add(to: .current, forMode: .default)
+            self.link = link
+            linkDelegate = delegate
+        }
+        // A run loop with no sources returns at once; the port keeps it alive between posts.
+        RunLoop.current.add(Port(), forMode: .default)
+        ready.signal()
+        while !mailbox.isClosed {
+            _ = autoreleasepool {
+                RunLoop.current.run(mode: .default, before: .distantFuture)
+            }
         }
         // Wait for the GPU to finish with every slot before the buffers go away.
         for _ in 0..<Self.inFlight { slots.wait() }
         for _ in 0..<Self.inFlight { slots.signal() }
     }
 
-    private func render(_ frame: GridFrame) {
+    /// Draws the newest posted frame, or pauses the link when nothing is waiting.
+    private func drawPending(drawable: CAMetalDrawable?) {
+        guard let frame = mailbox.poll() else {
+            if #available(macOS 14.0, *), let link = link as? CAMetalDisplayLink {
+                link.isPaused = true
+            }
+            return
+        }
+        autoreleasepool { render(frame, drawable: drawable) }
+    }
+
+    private func render(_ frame: GridFrame, drawable linked: CAMetalDrawable?) {
         guard frame.width > 0, frame.height > 0 else { return }
+        let size = CGSize(width: frame.width, height: frame.height)
+        if layer.drawableSize != size {
+            layer.drawableSize = size
+            // The link handed out a drawable of the old size; drawing into it would stretch
+            // this frame. Keep the frame for the next refresh, which brings a matching one.
+            if linked != nil {
+                mailbox.restore(frame)
+                return
+            }
+        }
         if glyphs == nil { glyphs = GlyphCache(device: device) }
         guard let glyphs else { return }
 
@@ -121,11 +203,8 @@ final class MetalGridRenderer: @unchecked Sendable {
             }
         }
 
-        let size = CGSize(width: frame.width, height: frame.height)
-        if layer.drawableSize != size { layer.drawableSize = size }
-
         slots.wait()
-        guard let drawable = layer.nextDrawable(),
+        guard let drawable = linked ?? layer.nextDrawable(),
               let commands = queue.makeCommandBuffer()
         else {
             slots.signal()
@@ -196,5 +275,19 @@ final class MetalGridRenderer: @unchecked Sendable {
         }
         encoder.setVertexBuffer(buffer, offset: 0, index: 0)
         encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: items.count)
+    }
+}
+
+/// Forwards `CAMetalDisplayLink` callbacks to the renderer.
+@available(macOS 14.0, *)
+private final class DisplayLinkDelegate: NSObject, CAMetalDisplayLinkDelegate {
+    let onUpdate: (CAMetalDisplayLink.Update) -> Void
+
+    init(_ onUpdate: @escaping (CAMetalDisplayLink.Update) -> Void) {
+        self.onUpdate = onUpdate
+    }
+
+    func metalDisplayLink(_ link: CAMetalDisplayLink, needsUpdate update: CAMetalDisplayLink.Update) {
+        onUpdate(update)
     }
 }
