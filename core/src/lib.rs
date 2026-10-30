@@ -7,14 +7,32 @@
 //! Two consumers, one implementation:
 //!   * `pigeon-host` (this crate's binary) owns the PTYs and speaks the wire
 //!     protocol from [`proto`];
-//!   * a native client links the C ABI from [`ffi`] and skips the wire.
+//!   * a native client links the C ABI from [`ffi`], or (in Rust) uses
+//!     [`api`], and skips the wire.
+//!
+//! The internal modules are public only with the `internals` feature, which
+//! `pigeon-host` and the integration tests turn on. A Rust client depends on
+//! this crate with `default-features = false` and sees [`api`] and [`ffi`] only.
 
+pub mod api;
 pub mod error;
 pub mod ffi;
-pub mod layout;
-pub mod proto;
-pub mod session;
-pub mod status;
-pub mod term;
+
+/// Declares a module that is public with `internals` and crate-private without.
+macro_rules! internal_mod {
+    ($name:ident) => {
+        #[cfg(feature = "internals")]
+        pub mod $name;
+        #[cfg(not(feature = "internals"))]
+        #[allow(dead_code)]
+        mod $name;
+    };
+}
+
+internal_mod!(layout);
+internal_mod!(proto);
+internal_mod!(session);
+internal_mod!(status);
+internal_mod!(term);
 
 pub use error::{PgError, PgResult};

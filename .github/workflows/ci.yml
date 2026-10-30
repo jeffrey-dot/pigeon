@@ -55,6 +55,11 @@ jobs:
         name: 不带 host feature 也能构建库
         run: cargo build --manifest-path core/Cargo.toml --lib --no-default-features
       - if: steps.core.outputs.exists == 'true'
+        name: 客户端视角（无 internals）只用 api 就够，且碰不到内部模块
+        run: |
+          cargo clippy --manifest-path core/Cargo.toml --all-targets --no-default-features -- -D warnings
+          cargo test --manifest-path core/Cargo.toml --no-default-features
+      - if: steps.core.outputs.exists == 'true'
         name: pigeon-host 体积上限 8MB
         run: |
           cargo build --release --manifest-path core/Cargo.toml \

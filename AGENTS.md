@@ -14,7 +14,7 @@ pigeon 是一个**跨平台**终端（macOS 首发，Linux 跟进），自带隐
 
 - **跨平台分层**：`core/`（Rust）必须能在 macOS 和 Linux 上编译运行；`PigeonApp`（Swift/AppKit）是平台专属，只有 macOS。
 - **不依赖 tmux**，也不 shell out 到 tmux。
-- **不 fork 其它终端**；VT 内核用 Rust 的 `alacritty_terminal` / `vte`（MIT / Apache-2.0），藏在自家 `Term` trait 后，只通过 C ABI（`include/pigeon_core.h`）暴露。
+- **不 fork 其它终端**；VT 内核用 Rust 的 `alacritty_terminal` / `vte`（MIT / Apache-2.0），藏在自家 `Term` trait 后，只通过客户端接口暴露：C ABI（`include/pigeon_core.h`）或 Rust 的 `pigeon_core::api`（两者一一对应，见 §3）。
 - **不修改用户的 shell/tmux 配置**，不安装任何东西到用户目录之外。
 - 状态只来自 **OSC 7501**，不做屏幕/标题启发式识别。
 
@@ -24,7 +24,7 @@ macOS + Xcode 命令行工具（`swift --version` ≥ 6）与 Rust（见 `rust-t
 
 ```sh
 cargo build --manifest-path core/Cargo.toml    # 内核 + pigeon-host（两平台都要能过）
-cargo test  --manifest-path core/Cargo.toml    # 内核单测 + ABI + 宿主端到端（64 个用例）
+cargo test  --manifest-path core/Cargo.toml    # 内核单测 + C ABI + 宿主端到端 + Rust 客户端 API
 cargo run   --manifest-path core/Cargo.toml --bin pigeon-host   # 会话宿主（本机自动拉起；远端按需推送；手动跑用于调试）
 cargo build                     # 先建核心：客户端链接 core/target/*/libpigeon_core.a
 swift build                     # 客户端（macOS only）
@@ -37,7 +37,19 @@ swift test                      # 客户端纯逻辑单测（SidebarModel / Grou
 
 ## 3. 模块划分（强制）
 
-依赖方向只有一条：`App → PigeonCore（C ABI） → core`。`App` 不认识 `core` 的内部类型，`core` 不知道 UI 存在。
+依赖方向只有一条：`客户端 → 客户端接口 → core`。Swift 客户端走 `PigeonApp → PigeonCore（C ABI） → core`；
+Rust 客户端走 `pigeon_core::api`。客户端不认识 `core` 的内部类型（`term`/`layout`/`status`/`session`/`proto` 的内部结构），`core` 不知道 UI 存在。
+
+客户端接口只有一份语义、两种外形：
+
+- `core/src/api/` —— **安全的 Rust 客户端 API**：pane / 快照 / 状态 / 布局 / 消息编解码，
+  与 C ABI 的函数分组一一对应，用所有权和 `Result<T, PgError>` 表达，不出现裸指针。
+- `core/src/ffi/` —— C ABI，是 `api` 的**薄包装**：只做指针/长度转换、错误码、`catch_unwind`，不实现语义。
+  `ffi` 只许调 `api`，不直接碰内部模块，保证两种外形不分叉。
+- `pigeon-host` 与 `core/tests/` 属于内核自身，可以用内部模块（`internals` feature，默认开）；
+  **客户端 crate 以 `default-features = false` 依赖 `pigeon-core`**，此时 `term`/`layout`/`status`/`session`/`proto`
+  是私有模块，编译期只看得到 `api` 与 `ffi`。
+
 `pigeon-host` 在 `core/` 里（同一个 crate 的 bin），所以宿主与嵌入模式跑的是同一份语义，不存在第二套实现。
 
 可移植性标记：
@@ -47,8 +59,9 @@ swift test                      # 客户端纯逻辑单测（SidebarModel / Grou
 - `include/pigeon_core.h` —— **生成物**：由 `cbindgen` 从 `core/src/ffi/mod.rs` 生成，**手改无效**（CI 会比对新旧输出）。
 - `Sources/PigeonCore/` —— **macOS only**：C 头的 module map + 类型映射，薄到没有语义。
 - `Sources/PigeonApp/` —— **macOS only**：AppKit 视图与 CoreText 渲染都在这里；不要往下泄漏。
-- 将来的 Linux 客户端是**另一个 target**（例如 `Sources/PigeonAppLinux`，GTK4），只依赖 C ABI 与
-  `docs/protocol.md`，不 import `PigeonApp`。
+- 将来的 Linux 客户端（GTK4，M5）是**独立的 crate / target**，不放进 `core/`（`core/` 不许 GUI 依赖）：
+  Rust 写就放 `clients/linux/`，只依赖 `pigeon_core::api` 与 `docs/protocol.md`；用 C/Vala 写就只依赖 C ABI。
+  两种都不 import `PigeonApp`。
 
 ```
 pigeon/
@@ -62,7 +75,8 @@ pigeon/
 │   ├── cbindgen.toml             # 头文件生成配置（名字/前缀/文档注释）
 │   ├── src/
 │   │   ├── lib.rs                # 模块声明；unsafe 只允许出现在 ffi.rs
-│   │   ├── ffi/                  # extern "C" 导出（头文件的唯一来源）
+│   │   ├── api/                  # 安全的 Rust 客户端 API（Rust 客户端唯一入口）
+│   │   ├── ffi/                  # extern "C" 导出（头文件的唯一来源；api 的薄包装）
 │   │   │   ├── mod.rs            # 生命周期 / pane / 快照 / 状态 / 布局
 │   │   │   └── msg.rs            # pg_msg_* 消息编解码
 │   │   ├── term/                 # VT：alacritty_terminal 包装 + 快照/脏行/滚动
@@ -71,7 +85,7 @@ pigeon/
 │   │   ├── session/              # session/window/pane 模型
 │   │   └── proto/                # 分帧 + CBOR 编解码（协议的唯一实现）
 │   ├── src/bin/pigeon-host.rs    # 会话宿主：PTY / unix socket / 多客户端（3–8MB 硬指标）
-│   └── tests/                    # abi（C ABI 内嵌路径）+ host（真实 PTY 端到端）
+│   └── tests/                    # abi（C 外形）+ api（Rust 外形）+ host（真实 PTY 端到端）
 └── Sources/
     ├── PigeonCore/               # C 头封装（module map + 类型映射，不实现语义）
     └── PigeonApp/                # macOS 客户端：只做 UI 与输入
@@ -132,7 +146,9 @@ pigeon/
 - **一个文件一个主要类型**，文件名 = 类型名；单文件 > 400 行就拆。
 - `core/src/term/` 是**唯一**实现 VT 语义的地方（包括 `alacritty_terminal` 的包装）；Swift 侧不得出现任何字节流解析。
 - `core/src/status/` 是**唯一**实现 OSC 7501 解析与记录生命周期的地方。
-- `core/src/proto/` 是**唯一**实现分帧与 CBOR 编解码的地方；客户端通过 C ABI 编解，不自己实现一份。
+- `core/src/proto/` 是**唯一**实现分帧与 CBOR 编解码的地方；客户端通过 C ABI 或 `pigeon_core::api` 编解，不自己实现一份。
+- 客户端接口的两种外形必须同步：给 C ABI 加函数就同时加 `api` 的对应项，反之亦然；
+  `core/tests/abi.rs` 测 C 外形，`api` 的用例测 Rust 外形。
 - `include/pigeon_core.h` 是**生成物**：改 ABI 就去改 `core/src/ffi/mod.rs`，然后跑 `cbindgen`，不要手改头文件。
 - `SidebarModel` / `Grouping` / `KeyEncoder` 必须是**纯逻辑**（无 AppKit、无 IO），可直接单测。
 - `pigeon-host` 里不能出现任何 UI 概念；`PigeonApp` 里不能出现 PTY 操作。
@@ -209,7 +225,7 @@ pigeon/
 - `docs/plan.md` —— 架构、选型、里程碑、验收、风险、已知缺口（**先读这个**）
 - `docs/core.md` —— 内核边界、C ABI 说明、快照/增量、语言选型、测试策略
 - `docs/protocol.md` —— 客户端 ⇄ 宿主的字段级契约（消息表、错误码、能力、尺寸策略）
-- `include/pigeon_core.h` —— C ABI 的生成产物（唯一对外 ABI 面）
+- `include/pigeon_core.h` —— C ABI 的生成产物（唯一对外的 C ABI 面；Rust 客户端对应 `pigeon_core::api`）
 - `docs/remote.md` —— SSH 方案：远端宿主、三种对接、安装与安全
 - `docs/gui.md` —— 前端路线：为何 AppKit/GTK、渲染与 IME 的归属
 - `docs/ui.md` —— 侧栏与窗口的可见规格（含参考图，`docs/images/`）

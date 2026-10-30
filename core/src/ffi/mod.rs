@@ -13,10 +13,8 @@ use std::cell::{Cell, RefCell};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr;
 
+use crate::api::{self, Axis, Core, StatusKind, StatusState};
 use crate::error::{PgError, PgResult};
-use crate::layout::{Axis, Layout};
-use crate::session::PaneState;
-use crate::status::{Kind as StatusKind, State as StatusState};
 
 pub mod msg;
 
@@ -142,11 +140,7 @@ pub extern "C" fn pg_core_abi_version() -> u32 {
 ///
 /// Declared in the generated header as `typedef struct PgCore PgCore;`.
 pub struct PgCore {
-    config: PgConfig,
-    panes: std::collections::BTreeMap<u32, PaneState>,
-    /// Geometry and focus live in the layout tree; the map only holds panes.
-    layout: Option<Layout>,
-    next_pane: u32,
+    core: Core,
 }
 
 #[repr(C)]
@@ -186,10 +180,9 @@ pub extern "C" fn pg_core_new(cfg: *const PgConfig) -> *mut PgCore {
             config
         };
         Ok(Box::into_raw(Box::new(PgCore {
-            config,
-            panes: std::collections::BTreeMap::new(),
-            layout: None,
-            next_pane: 1,
+            core: Core::new(api::Config {
+                scrollback_lines: config.scrollback_lines,
+            }),
         })))
     })
 }
@@ -225,30 +218,13 @@ pub extern "C" fn pg_pane_new(core: *mut PgCore, opts: *const PgPaneOptions) -> 
     ffi_call(0, || {
         let core = unsafe_mut(core)?;
         let (cols, rows) = read_pane_options(opts)?.unwrap_or((80, 24));
-        let pane_id = core.next_pane;
-        core.next_pane = core.next_pane.saturating_add(1);
-        if core.layout.is_some() {
-            // Extra panes come from `pg_layout_split`, which knows the geometry.
-            return Err(PgError::InvalidArg);
-        }
-        let history = scrollback_lines(&core.config);
-        core.panes
-            .insert(pane_id, PaneState::new(pane_id, cols, rows, history));
-        core.layout = Some(Layout::new(pane_id));
-        Ok(pane_id)
+        core.new_pane(cols, rows)
     })
 }
 
 #[no_mangle]
 pub extern "C" fn pg_pane_free(core: *mut PgCore, pane_id: u32) {
-    ffi_call((), || {
-        let core = unsafe_mut(core)?;
-        core.panes.remove(&pane_id).ok_or(PgError::NoSuchPane)?;
-        if let Some(layout) = core.layout.as_mut() {
-            let _ = layout.close(pane_id);
-        }
-        Ok(())
-    });
+    ffi_call((), || unsafe_mut(core)?.free_pane(pane_id));
 }
 
 /// Parses bytes; never blocks, never echoes.
@@ -263,8 +239,7 @@ pub extern "C" fn pg_pane_feed(
         let core = unsafe_mut(core)?;
         // SAFETY: caller promises `len` readable bytes at `data`.
         let bytes = unsafe { byte_slice(data, len) }?;
-        let pane = core.panes.get_mut(&pane_id).ok_or(PgError::NoSuchPane)?;
-        pane.feed(bytes);
+        core.feed(pane_id, bytes)?;
         Ok(true)
     })
 }
@@ -272,9 +247,7 @@ pub extern "C" fn pg_pane_feed(
 #[no_mangle]
 pub extern "C" fn pg_pane_resize(core: *mut PgCore, pane_id: u32, cols: u16, rows: u16) -> bool {
     ffi_call(false, || {
-        let core = unsafe_mut(core)?;
-        let pane = core.panes.get_mut(&pane_id).ok_or(PgError::NoSuchPane)?;
-        pane.resize(cols, rows);
+        unsafe_mut(core)?.resize(pane_id, cols, rows)?;
         Ok(true)
     })
 }
@@ -288,9 +261,7 @@ pub extern "C" fn pg_pane_respond(
     cap: usize,
 ) -> usize {
     ffi_call(0, || {
-        let core = unsafe_mut(core)?;
-        let pane = core.panes.get_mut(&pane_id).ok_or(PgError::NoSuchPane)?;
-        let replies = pane.take_replies();
+        let replies = unsafe_mut(core)?.take_replies(pane_id)?;
         if replies.is_empty() {
             return Ok(0);
         }
@@ -376,9 +347,7 @@ pub struct PgSnapshot {
 #[no_mangle]
 pub extern "C" fn pg_pane_snapshot(core: *mut PgCore, pane_id: u32) -> *mut PgSnapshot {
     ffi_call(ptr::null_mut(), || {
-        let core = unsafe_mut(core)?;
-        let pane = core.panes.get_mut(&pane_id).ok_or(PgError::NoSuchPane)?;
-        let snapshot = pane.snapshot();
+        let snapshot = unsafe_mut(core)?.snapshot(pane_id)?;
         snapshot_to_ffi(pane_id, &snapshot, true)
     })
 }
@@ -392,9 +361,7 @@ pub extern "C" fn pg_pane_dirty_rows(
     cap: usize,
 ) -> usize {
     ffi_call(0, || {
-        let core = unsafe_mut(core)?;
-        let pane = core.panes.get_mut(&pane_id).ok_or(PgError::NoSuchPane)?;
-        let dirty = pane.take_damage();
+        let dirty = unsafe_mut(core)?.take_dirty_rows(pane_id)?;
         if out.is_null() && !dirty.is_empty() {
             return Err(PgError::InvalidArg);
         }
@@ -561,8 +528,8 @@ pub struct PgStatus {
 #[no_mangle]
 pub extern "C" fn pg_status_count(core: *mut PgCore) -> usize {
     ffi_call(0, || {
-        let core = unsafe_ref(core)?;
-        Ok(focused(core)?.status().len())
+        let (_, records) = unsafe_ref(core)?.focused_status()?;
+        Ok(records.count())
     })
 }
 
@@ -574,19 +541,15 @@ pub extern "C" fn pg_status_at(core: *mut PgCore, index: usize, out: *mut PgStat
         if out.is_null() {
             return Err(PgError::InvalidArg);
         }
-        let pane = focused(core)?;
-        let record = pane
-            .status()
-            .records()
-            .nth(index)
-            .ok_or(PgError::InvalidArg)?;
+        let (pane_id, mut records) = core.focused_status()?;
+        let record = records.nth(index).ok_or(PgError::InvalidArg)?;
         // SAFETY: `out` checked above; `msg` borrows the record, which stays
         // alive until the next mutation of this core (documented in the header).
         unsafe {
             *out = PgStatus {
                 size: std::mem::size_of::<PgStatus>() as u32,
                 version: PG_CORE_ABI_VERSION,
-                pane_id: pane.pane_id,
+                pane_id,
                 seq: record.seq,
                 state: map_state(record.state),
                 kind: map_kind(record.kind),
@@ -604,11 +567,7 @@ pub extern "C" fn pg_status_at(core: *mut PgCore, index: usize, out: *mut PgStat
 /// Marks a done/error record as seen; it may then be evicted.
 #[no_mangle]
 pub extern "C" fn pg_status_ack(core: *mut PgCore, pane_id: u32, seq: u32) -> bool {
-    ffi_call(false, || {
-        let core = unsafe_mut(core)?;
-        let pane = core.panes.get_mut(&pane_id).ok_or(PgError::NoSuchPane)?;
-        Ok(pane.status_mut().ack("", seq))
-    })
+    ffi_call(false, || unsafe_mut(core)?.ack_status(pane_id, seq))
 }
 
 // ---------------------------------------------------------------- layout
@@ -643,31 +602,11 @@ pub extern "C" fn pg_layout_split(
     ratio: f32,
 ) -> u32 {
     ffi_call(0, || {
-        let core = unsafe_mut(core)?;
-        let (cols, rows) = core
-            .panes
-            .get(&pane_id)
-            .map(PaneState::size)
-            .ok_or(PgError::NoSuchPane)?;
         let axis = match axis {
             PgAxis::PG_AXIS_VERTICAL => Axis::Vertical,
             PgAxis::PG_AXIS_HORIZONTAL => Axis::Horizontal,
         };
-        // The target pane's own size is the extent being divided.
-        let new_id = core.next_pane;
-        core.next_pane = core.next_pane.saturating_add(1);
-        let layout = core.layout.as_mut().ok_or(PgError::NoSuchPane)?;
-        layout.split(pane_id, new_id, axis, ratio, cols, rows)?;
-        let (child_cols, child_rows) = match axis {
-            Axis::Vertical => ((cols / 2).max(2), rows),
-            Axis::Horizontal => (cols, (rows / 2).max(1)),
-        };
-        let history = scrollback_lines(&core.config);
-        let mut pane = PaneState::new(new_id, child_cols, child_rows, history);
-        pane.resize(child_cols, child_rows);
-        core.panes.insert(new_id, pane);
-        let _ = layout.focus(new_id);
-        Ok(new_id)
+        unsafe_mut(core)?.split(pane_id, axis, ratio)
     })
 }
 
@@ -675,11 +614,7 @@ pub extern "C" fn pg_layout_split(
 #[no_mangle]
 pub extern "C" fn pg_layout_close(core: *mut PgCore, pane_id: u32) -> bool {
     ffi_call(false, || {
-        let core = unsafe_mut(core)?;
-        core.panes.remove(&pane_id).ok_or(PgError::NoSuchPane)?;
-        if let Some(layout) = core.layout.as_mut() {
-            layout.close(pane_id)?;
-        }
+        unsafe_mut(core)?.close(pane_id)?;
         Ok(true)
     })
 }
@@ -688,10 +623,7 @@ pub extern "C" fn pg_layout_close(core: *mut PgCore, pane_id: u32) -> bool {
 #[no_mangle]
 pub extern "C" fn pg_layout_resize(core: *mut PgCore, split_id: u32, ratio: f32) -> bool {
     ffi_call(false, || {
-        let core = unsafe_mut(core)?;
-        let (cols, rows) = focused(core)?.size();
-        let layout = core.layout.as_mut().ok_or(PgError::NoSuchSplit)?;
-        layout.set_ratio(split_id, ratio, cols, rows)?;
+        unsafe_mut(core)?.set_split_ratio(split_id, ratio)?;
         Ok(true)
     })
 }
@@ -714,9 +646,7 @@ pub struct PgSplit {
 #[no_mangle]
 pub extern "C" fn pg_layout_rects(core: *mut PgCore, out: *mut PgRect, cap: usize) -> usize {
     ffi_call(0, || {
-        let core = unsafe_ref(core)?;
-        let layout = core.layout.as_ref().ok_or(PgError::NoSuchPane)?;
-        let rects = layout.rects();
+        let rects = unsafe_ref(core)?.rects()?;
         if rects.is_empty() {
             return Ok(0);
         }
@@ -744,41 +674,20 @@ pub extern "C" fn pg_layout_rects(core: *mut PgCore, out: *mut PgRect, cap: usiz
 /// 0 when the pane has no parent split.
 #[no_mangle]
 pub extern "C" fn pg_layout_split_of(core: *mut PgCore, pane_id: u32) -> u32 {
-    ffi_call(0, || {
-        let core = unsafe_ref(core)?;
-        if !core.panes.contains_key(&pane_id) {
-            return Err(PgError::NoSuchPane);
-        }
-        Ok(core
-            .layout
-            .as_ref()
-            .and_then(|layout| layout.split_of(pane_id))
-            .unwrap_or(0))
-    })
+    ffi_call(0, || Ok(unsafe_ref(core)?.split_of(pane_id)?.unwrap_or(0)))
 }
 
 #[no_mangle]
 pub extern "C" fn pg_layout_focus(core: *mut PgCore, pane_id: u32) -> bool {
     ffi_call(false, || {
-        let core = unsafe_mut(core)?;
-        let layout = core.layout.as_mut().ok_or(PgError::NoSuchPane)?;
-        if layout.focus(pane_id) {
-            Ok(true)
-        } else {
-            Err(PgError::NoSuchPane)
-        }
+        unsafe_mut(core)?.focus(pane_id)?;
+        Ok(true)
     })
 }
 
 #[no_mangle]
 pub extern "C" fn pg_layout_focused(core: *mut PgCore) -> u32 {
-    ffi_call(0, || {
-        Ok(unsafe_ref(core)?
-            .layout
-            .as_ref()
-            .and_then(Layout::focused)
-            .unwrap_or(0))
-    })
+    ffi_call(0, || Ok(unsafe_ref(core)?.focused().unwrap_or(0)))
 }
 
 // ---------------------------------------------------------------- helpers
@@ -800,36 +709,20 @@ pub(crate) unsafe fn byte_slice<'a>(data: *const u8, len: usize) -> PgResult<&'a
     Ok(unsafe { std::slice::from_raw_parts(data, len) })
 }
 
-fn unsafe_ref<'a>(core: *const PgCore) -> PgResult<&'a PgCore> {
+fn unsafe_ref<'a>(core: *const PgCore) -> PgResult<&'a Core> {
     if core.is_null() {
         return Err(PgError::InvalidArg);
     }
     // SAFETY: the caller guarantees a live handle.
-    Ok(unsafe { &*core })
+    Ok(unsafe { &(*core).core })
 }
 
-fn unsafe_mut<'a>(core: *mut PgCore) -> PgResult<&'a mut PgCore> {
+fn unsafe_mut<'a>(core: *mut PgCore) -> PgResult<&'a mut Core> {
     if core.is_null() {
         return Err(PgError::InvalidArg);
     }
     // SAFETY: the caller guarantees a live handle and serialized access.
-    Ok(unsafe { &mut *core })
-}
-
-fn focused(core: &PgCore) -> PgResult<&PaneState> {
-    let pane_id = core
-        .layout
-        .as_ref()
-        .and_then(Layout::focused)
-        .ok_or(PgError::NoSuchPane)?;
-    core.panes.get(&pane_id).ok_or(PgError::NoSuchPane)
-}
-
-fn scrollback_lines(config: &PgConfig) -> usize {
-    match config.scrollback_lines {
-        0 => 10_000,
-        lines => usize::try_from(lines.min(100_000)).unwrap_or(10_000),
-    }
+    Ok(unsafe { &mut (*core).core })
 }
 
 fn read_pane_options(opts: *const PgPaneOptions) -> PgResult<Option<(u16, u16)>> {
@@ -866,7 +759,7 @@ fn map_kind(kind: StatusKind) -> PgStatusKind {
 /// Converts a terminal-domain snapshot into an owned C snapshot.
 fn snapshot_to_ffi(
     pane_id: u32,
-    snapshot: &crate::term::Snapshot,
+    snapshot: &api::Snapshot,
     with_history: bool,
 ) -> PgResult<*mut PgSnapshot> {
     let screen = snapshot
@@ -905,7 +798,7 @@ fn snapshot_to_ffi(
     )
 }
 
-fn to_pg_cell(cell: &crate::term::Cell) -> PgCell {
+fn to_pg_cell(cell: &api::Cell) -> PgCell {
     PgCell {
         size: std::mem::size_of::<PgCell>() as u32,
         codepoint: cell.codepoint,

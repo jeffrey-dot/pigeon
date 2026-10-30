@@ -65,44 +65,6 @@ typedef struct PgMsg PgMsg;
 
 #define PG_ATTR_DIM (1 << 5)
 
-/**
- * Default minimum size of a pane, in cells.
- */
-#define MIN_COLS 10
-
-#define MIN_ROWS 3
-
-/**
- * A frame may not exceed 8 MiB (protocol §1).
- */
-#define MAX_FRAME ((8 * 1024) * 1024)
-
-/**
- * Exact wire version: major 1, minor 0.
- */
-#define PROTO_VERSION 256
-
-/**
- * At most this many records per pane.
- */
-#define MAX_RECORDS 256
-
-/**
- * Attribute bits, mirrored by `PG_ATTR_*` in the C ABI and by the protocol's
- * `cell[1]`.
- */
-#define ATTR_BOLD (1 << 0)
-
-#define ATTR_ITALIC (1 << 1)
-
-#define ATTR_UNDERLINE (1 << 2)
-
-#define ATTR_REVERSE (1 << 3)
-
-#define ATTR_STRIKETHROUGH (1 << 4)
-
-#define ATTR_DIM (1 << 5)
-
 typedef enum PgAxis {
     /**
      * Panes side by side, vertical divider ("v" in the protocol).
@@ -194,12 +156,6 @@ typedef enum PgStatusState {
     PG_STATE_DONE = 3,
     PG_STATE_ERROR = 4,
 } PgStatusState;
-
-/**
- * `[codepoint, attrs, fg, bg, link?]`. The fifth element is omitted when the
- * cell has no hyperlink (protocol §3.3); `null` is never emitted.
- */
-typedef struct Cell Cell;
 
 /**
  * UTF-8 bytes with an explicit length, never NUL-terminated.
@@ -361,8 +317,6 @@ typedef struct PgSessionInfo {
     uint32_t active_pane;
     struct PgStr active_title;
 } PgSessionInfo;
-
-
 
 #ifdef __cplusplus
 extern "C" {
@@ -534,7 +488,7 @@ PgMsg *pg_msg_decode_frame(const uint8_t *buf, size_t len, size_t *consumed);
  * Builds an owned snapshot from a `snapshot` message; free with
  * [`super::pg_snapshot_free`]. NULL for any other message type.
  *
- * Goes through [`crate::session::snapshot_from_message`], so cell widths (wide
+ * Goes through [`api::snapshot_of`], so cell widths (wide
  * chars and their continuation) are derived exactly like everywhere else.
  */
 struct PgSnapshot *pg_msg_snapshot(const PgMsg *msg);

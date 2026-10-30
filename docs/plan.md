@@ -67,7 +67,8 @@
 **结论：走 A —— 内核用 Rust（`alacritty_terminal` / `vte`，包在自家 `Term` trait 后），经 `cbindgen` 导出 C ABI，客户端按平台薄薄一层（前端路线见 `docs/gui.md`）。** 详细设计见 **`docs/core.md`**
 （边界、C 头、快照/增量、线程与所有权、测试策略）。
 **为什么是 Rust**：VT 状态机是最容易攒长尾 bug 的地方，`alacritty_terminal`/`vte` 是已经被大量终端验证过的实现，
-自己重写不划算；C ABI 又是天然的跨语言边界，GTK 客户端与将来的第三方消费者都从同一条缝进来。
+自己重写不划算；C ABI 又是天然的跨语言边界，Swift 客户端与将来的第三方消费者都从这条缝进来；
+Rust 写的客户端（如 GTK4 + `gtk4-rs`）走与之一一对应的安全 API `pigeon_core::api`（见 `docs/core.md` §4.1）。
 代价是「两门语言 + 两套构建 + 一层 FFI」，换来的是 M5 之前不必再赌一次内核重写。
 
 **什么时候改回 Swift（备选 B）**（触发任一即重新评估，届时换的是 `Term` 实现，UI/协议/C ABI 都不动）：
@@ -83,7 +84,7 @@
 |---|---|---|
 | `core/`（VT / 布局 / OSC 7501 / 协议 / 会话） | 全平台 | Rust；只许 std + POSIX 绑定；无 UI、无字体、无图形 API；`unsafe` 只在 `ffi.rs` |
 | `pigeon-host`（PTY + 会话宿主；本机与远端同一个二进制） | 全平台 | `core/` 里的 bin；用 `portable-pty`（forkpty/openpty 的安全封装）；静态单文件 3–8MB（见 `docs/remote.md`） |
-| `include/pigeon_core.h` | 全平台 | 由 `cbindgen` 从 `core/src/ffi/mod.rs` 生成，宿主与所有客户端共用的唯一 ABI 面 |
+| `include/pigeon_core.h` | 全平台 | 由 `cbindgen` 从 `core/src/ffi/mod.rs` 生成，非 Rust 客户端共用的唯一 C ABI 面；Rust 客户端用对应的 `pigeon_core::api` |
 | 客户端 | 按平台 | macOS：**AppKit**（`NSOutlineView` 侧栏 + 自绘网格，M0 首发）；Linux：**GTK4**（M5）。为什么不用 winit/Qt/Electron 见 `docs/gui.md` |
 
 - **协议是跨语言契约**：长度前缀 + 版本号，字段语义写进 `docs/protocol.md`（M0 随快照复原一起产出）。Linux 客户端可以用
@@ -269,6 +270,7 @@ M3 落地后仍在的洞。
 | 多客户端尺寸策略未实现 | 单客户端下由 pane rect 反推会话 box；多客户端的 `size_state` 仍留给 M2 |
 | 程序的颜色查询（OSC 4/10/11） | 客户端通过 `appearance` 把当前色板交给宿主，宿主用 `Event::ColorRequest` 的 formatter 回 `rgb:rrrr/gggg/bbbb`；TUI（pi 等）因此能自己选亮/深主题 | 见 `docs/protocol.md` §3 与 `core/tests/host.rs` 的 `appearance_reaches_existing_panes_and_a_malformed_one_keeps_the_previous` |
 | 侧栏（M3） | 已落地：`SidebarModel`/`Grouping`（git 根）+ 侧栏、OSC 7501 `status` 广播 + `ack_status`、OSC 7/标题、未读/needs-you、⌘J/⌘T/⌘⇧W、右键菜单、**行标题=应用名 / 分组可改名 / 不折叠**、排序持久化；视觉按 harp 源码对齐：`docs/ui.md` §7 是从 harp（`/tmp/harp`，AGPL/MIT，只取数值不取代码）提取的色值/尺寸/字号规格表；行高 30、行圆角 8、组头 11.5/橙色 `N need you`、`SIDEBAR #e8e8eb/#232326`、透明标题栏 + 内嵌红绿灯、右栏是一张大卡片（10pt 圆角、0.5pt 描边、投影、三面 8pt 外缩）、40pt 右栏头部，全部是动态色（浅/深各一套）；截图见 `docs/m3-checklist.md` §2.1 的 light/dark 两套 |
+| Rust 客户端接口 `pigeon_core::api` | 已建：`core/src/api/` + `internals` feature；`ffi` 只调 `api`；见 `docs/core.md` §4.1 |
 
 **仍在**：
 
