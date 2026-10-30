@@ -8,7 +8,7 @@
 # Keep the pigeon window in front while it runs: an occluded window's Metal frames are
 # throttled by the system (the script warns when that happened).
 #
-# Build first: cargo build --release --bin pigeon-host && cargo build && swift build
+# Build first: cargo build --release && cargo build && swift build
 # usage: tools/render-bench.sh [lines]   (default 200000)
 set -u
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -16,6 +16,10 @@ cd "$(dirname "$0")/.."
 
 APP=${APP:-.build/debug/pigeon}
 HOST=${HOST:-core/target/release/pigeon-host}
+# `swift build` links whichever libpigeon_core it finds first, which is the debug dylib: an
+# unoptimized CBOR decoder that costs ~4x the app's CPU and swamps the renderer. Load the
+# release core instead (needs `cargo build --release`); CORE_LIB= measures the linked one.
+CORE_LIB=${CORE_LIB-core/target/release/deps}
 LINES=${1:-200000}
 
 R=$(mktemp -d /tmp/pigeon-bench-XXXXXX)
@@ -56,7 +60,7 @@ SH
     "$HOST" --socket "$R/$renderer/pigeon.sock" --shell "$R/shell-$renderer.sh" >"$R/host-$renderer.log" 2>&1 &
     HOST_PID=$!
     sleep 1
-    PIGEON_FRAME_STATS=1 PIGEON_RENDERER=$renderer PIGEON_CONFIG_DIR="$R/$renderer/config" \
+    DYLD_LIBRARY_PATH=$CORE_LIB PIGEON_FRAME_STATS=1 PIGEON_RENDERER=$renderer PIGEON_CONFIG_DIR="$R/$renderer/config" \
         PIGEON_HOST_PATH="$HOST" XDG_RUNTIME_DIR="$R/$renderer" \
         "$APP" >"$R/app-$renderer.log" 2>&1 &
     APP_PID=$!
