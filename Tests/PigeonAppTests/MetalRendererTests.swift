@@ -179,6 +179,33 @@ final class MetalRendererTests: XCTestCase {
         XCTAssertEqual(RendererChoice.fromEnvironment("Metal"), .metal)
     }
 
+    // MARK: - frame stats
+
+    func testPercentilesUseNearestRank() {
+        let samples = (1...100).map(Double.init)
+        XCTAssertEqual(FrameStats.percentile(samples, 50), 50)
+        XCTAssertEqual(FrameStats.percentile(samples, 99), 99)
+        XCTAssertEqual(FrameStats.percentile([7], 99), 7)
+        XCTAssertNil(FrameStats.percentile([], 50))
+    }
+
+    func testTheSummaryReportsOncePerSecondAndStartsAFreshWindow() {
+        var stats = FrameStats(renderer: "metal")
+        XCTAssertNil(stats.summary(), "no frames, no line")
+        stats.reportIfDue(now: 1_000)
+        stats.record(cpuMicros: 400)
+        stats.record(cpuMicros: 2_000)
+        stats.record(gpuMicros: 120)
+        XCTAssertEqual(
+            stats.summary(),
+            "pigeon: frames renderer=metal n=2 cpu_p50=400us cpu_p99=2000us gpu_p50=120us gpu_p99=120us")
+        stats.reportIfDue(now: 500_000_000)
+        XCTAssertEqual(stats.cpu.count, 2, "half a second in: keep collecting")
+        stats.reportIfDue(now: 1_000_001_000)
+        XCTAssertTrue(stats.cpu.isEmpty)
+        XCTAssertTrue(stats.gpu.isEmpty)
+    }
+
     // MARK: - GPU smoke
 
     func testTheShadersCompileAndAGlyphRasterizes() throws {

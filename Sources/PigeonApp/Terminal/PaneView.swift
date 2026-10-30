@@ -44,6 +44,10 @@ final class PaneView: NSView {
     var metal: MetalGridRenderer?
     /// Rows changed since the last frame was posted to `metal`.
     var dirty = DirtyRows.everything
+    /// Draw times of the CoreText path, for comparing against Metal (`PIGEON_FRAME_STATS=1`).
+    private var cpuStats = FrameStats(renderer: "coretext")
+    /// Last occlusion state logged under `PIGEON_FRAME_STATS`.
+    var reportedVisible: Bool?
 
     var onInput: (([UInt8]) -> Void)?
     var onResize: ((UInt16, UInt16) -> Void)?
@@ -58,8 +62,19 @@ final class PaneView: NSView {
                 Data("pigeon: pane draw cells=\(cells.count) bounds=\(bounds)\n".utf8)
             )
         }
+        let start = FrameStats.enabled ? DispatchTime.now().uptimeNanoseconds : 0
         CoreTextRenderer.draw(cells: cells, cols: cols, rows: rows, cursor: cursor, in: bounds)
         drawScrollIndicator()
+        if FrameStats.enabled {
+            cpuStats.record(cpuMicros: Double(DispatchTime.now().uptimeNanoseconds - start) / 1000)
+            cpuStats.reportIfDue()
+            // AppKit has no "went idle" hook; report what a short burst left a second later.
+            if cpuStats.cpu.count == 1 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) { [weak self] in
+                    self?.cpuStats.flush()
+                }
+            }
+        }
     }
 
     /// Applies the position reported by a `scroll` answer; `total == 0` hides the indicator.

@@ -53,7 +53,10 @@ Rust core（VT / 布局 / 状态 / 协议）  ── C ABI ──┬─ mac 客�
   灰度/彩色两张字形图集、三份实例缓冲轮换、按 delta 只重建脏行、隐藏 pane 释放线程与 GPU 资源。
   帧节奏由渲染线程上的 `CAMetalDisplayLink` 驱动（macOS 14+，最高 120Hz）：有新帧才取消暂停，
   信箱空了就暂停，大量输出时每次刷新只画一帧；macOS 13 退回"投递即画"。
-  对齐后删除 CPU 路径；未做：Linux 后端、性能基准、滚动的行复用。
+  被遮挡的窗口，系统会把 display link 限到约 1Hz，所以遮挡时 Metal 几乎不出帧；CoreText 路径遮挡时仍按 ~60 帧/秒画。
+  基准：`PIGEON_FRAME_STATS=1` 每秒打一行帧时间 p50/p99（Metal 另带 GPU 时间），
+  `tools/render-bench.sh` 跑同一份大文件 `cat` 加 5 秒持续输出，对比两种渲染器；跑的时候窗口要在最前。
+  对齐后删除 CPU 路径；未做：Linux 后端、滚动的行复用。
   对账：`tools/metal-gui-check.sh`（同一会话两种渲染器、两种外观各截一张）。
 - **输入法**：实现 `NSTextInputClient`（候选窗定位、marked text）；这是原生前端的额外活，
   但也是 Electron/winit 路线最难对齐的部分，正是选 A 的理由之一。

@@ -28,6 +28,15 @@ extension PaneView {
     /// copy-on-write, and the thread rebuilds only the rows in `dirty`.
     func postFrame() {
         guard let metal, bounds.width > 0, bounds.height > 0 else { return }
+        if FrameStats.enabled {
+            // Frame rates of an occluded window are throttled by the system; benchmarks
+            // (`tools/render-bench.sh`) need to know which numbers they are looking at.
+            let visible = window?.occlusionState.contains(.visible) ?? false
+            if visible != reportedVisible {
+                reportedVisible = visible
+                FileHandle.standardError.write(Data("pigeon: window visible=\(visible)\n".utf8))
+            }
+        }
         let scale = window?.backingScaleFactor ?? 2
         let appearance = effectiveAppearance
         let palette = CellPalette.resolve(for: appearance)
