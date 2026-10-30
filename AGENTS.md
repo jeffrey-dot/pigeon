@@ -86,7 +86,9 @@ pigeon/
         ├── Terminal/
         │   ├── PaneView.swift          # 终端视图容器（焦点、IME、鼠标）
         │   ├── GridRenderer.swift      # 协议：把 PgSnapshot 画成像素（M0 直接调 CoreTextRenderer）
-        │   ├── CoreTextRenderer.swift  # 唯一 import CoreText 的文件
+        │   ├── CoreTextRenderer.swift  # 唯一 import CoreText 的文件（含 Metal 用的字形光栅化）
+        │   ├── PaneView+Metal.swift    # 把格子交给渲染线程（PIGEON_RENDERER=metal）
+        │   ├── Render/                 # GPU 渲染：图集、脏行、实例构建、Metal 线程与 shader
         │   └── KeyEncoder.swift        # 按键 → 字节（kitty protocol / legacy）
         └── Layout/               # M1 分屏
             ├── SplitView.swift         # 把 PgRect 画成 AppKit 视图

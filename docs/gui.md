@@ -48,8 +48,11 @@ Rust core（VT / 布局 / 状态 / 协议）  ── C ABI ──┬─ mac 客�
 - **macOS 首发用 AppKit**（不是 SwiftUI 全家桶）：侧栏用 `NSOutlineView` + diffable data source，
   行用 `NSTableCellView` 子类；窗口 chrome 用原生标题栏 + 内嵌红绿灯。
   SwiftUI 只用在少数“静态面板”（设置、连接对话框）。
-- **终端网格渲染**：M0 先用 `CoreText` + 自绘 `NSView`（简单、够用），M5 前评估换 Metal
-  （Ghostty 的做法）；渲染器藏在 `GridRenderer` 协议后，换实现不影响其它层。
+- **终端网格渲染**：M0 用 `CoreText` + 自绘 `NSView`；Metal 渲染器（issue #1）已在
+  `PIGEON_RENDERER=metal` 开关后落地：每个可见 pane 一个渲染线程、`FrameMailbox` 短持锁交帧、
+  灰度/彩色两张字形图集、三份实例缓冲轮换、按 delta 只重建脏行、隐藏 pane 释放线程与 GPU 资源。
+  对齐后删除 CPU 路径；未做：`CAMetalDisplayLink` 帧节奏、Linux 后端、性能基准。
+  对账：`tools/metal-gui-check.sh`（同一会话两种渲染器、两种外观各截一张）。
 - **输入法**：实现 `NSTextInputClient`（候选窗定位、marked text）；这是原生前端的额外活，
   但也是 Electron/winit 路线最难对齐的部分，正是选 A 的理由之一。
 - **Linux（M5）**：GTK4 + `GtkTextView` 不行（终端要自绘网格），用 `GtkDrawingArea` + Pango 排版；

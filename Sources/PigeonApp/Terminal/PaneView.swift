@@ -3,7 +3,7 @@ import PigeonCore
 
 /// The single terminal pane: shows a grid snapshot, sends keys, reports resizes.
 final class PaneView: NSView {
-    struct Cell {
+    struct Cell: Sendable {
         var codepoint: UInt32
         var attrs: UInt8
         var fg: UInt32
@@ -13,7 +13,7 @@ final class PaneView: NSView {
         static let blank = Cell(codepoint: 32, attrs: 0, fg: 0, bg: 0, width: 1)
     }
 
-    struct Cursor {
+    struct Cursor: Sendable {
         var x: Int
         var y: Int
         var visible: Bool
@@ -38,6 +38,13 @@ final class PaneView: NSView {
     private(set) var scrollOffset = 0
     private(set) var cursor = Cursor(x: 0, y: 0, visible: false)
 
+    static let rendererChoice = RendererChoice.fromEnvironment(
+        ProcessInfo.processInfo.environment["PIGEON_RENDERER"])
+    /// The GPU renderer while the pane is visible and `PIGEON_RENDERER=metal`; nil otherwise.
+    var metal: MetalGridRenderer?
+    /// Rows changed since the last frame was posted to `metal`.
+    var dirty = DirtyRows.everything
+
     var onInput: (([UInt8]) -> Void)?
     var onResize: ((UInt16, UInt16) -> Void)?
     private var reported: (UInt16, UInt16) = (0, 0)
@@ -59,7 +66,7 @@ final class PaneView: NSView {
     func setScrollPosition(total: Int, offset: Int) {
         scrollHistory = max(total, 0)
         scrollOffset = min(max(offset, 0), scrollHistory)
-        needsDisplay = true
+        screenChanged()
     }
 
     /// The indicator thumb in view coordinates, or nil when there is no history. Offset 0 is
@@ -142,17 +149,34 @@ final class PaneView: NSView {
         super.viewDidChangeEffectiveAppearance()
         // The grid's default fg/bg come from the theme, so a system appearance switch has to
         // repaint the cells (explicit colours are unaffected).
-        needsDisplay = true
+        screenChanged()
     }
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         syncGrid()
+        screenChanged()
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        syncRenderer()
         syncGrid()
+    }
+
+    override func viewDidHide() {
+        super.viewDidHide()
+        syncRenderer()
+    }
+
+    override func viewDidUnhide() {
+        super.viewDidUnhide()
+        syncRenderer()
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        screenChanged()
     }
 
     /// Recomputes the grid from the current bounds and tells the host.
@@ -248,7 +272,8 @@ final class PaneView: NSView {
                 Data("pigeon: grid pane=\(paneID ?? 0) \(cols)x\(rows) cursor=\(cursor.x),\(cursor.y) filled=\(filled) lastRow=\(lastRow) row0=\(String(first))\n".utf8)
             )
         }
-        needsDisplay = true
+        dirty = .everything
+        screenChanged()
     }
 
     /// Patches the rows a `delta` frame carries. Returns `false` when the frame does not fit
@@ -262,6 +287,7 @@ final class PaneView: NSView {
                 let row = changed[index]
                 let y = Int(row.y)
                 guard y < rows, Int(row.cols) == cols, let source = row.cells else { return false }
+                dirty.mark(y)
                 for column in 0..<cols {
                     let cell = source[column]
                     cells[y * cols + column] = Cell(
@@ -284,7 +310,7 @@ final class PaneView: NSView {
         if frame.alt_screen < 2 {
             alt = frame.alt_screen != 0
         }
-        needsDisplay = true
+        screenChanged()
         return true
     }
 
