@@ -18,8 +18,9 @@ use std::ptr;
 use ciborium::value::Value;
 
 use super::{ffi_call, PgAxis, PgRect, PgSnapshot, PgSplit, PgStr};
+use crate::api::{self, Axis, Message, MAX_FRAME};
 use crate::error::{PgError, PgResult};
-use crate::proto::{self, Message, MAX_FRAME};
+use crate::proto;
 
 /// The M0 subset of `docs/protocol.md` §3.
 #[repr(C)]
@@ -403,7 +404,7 @@ pub extern "C" fn pg_msg_decode_frame(
 /// Builds an owned snapshot from a `snapshot` message; free with
 /// [`super::pg_snapshot_free`]. NULL for any other message type.
 ///
-/// Goes through [`crate::session::snapshot_from_message`], so cell widths (wide
+/// Goes through [`api::snapshot_of`], so cell widths (wide
 /// chars and their continuation) are derived exactly like everywhere else.
 #[no_mangle]
 pub extern "C" fn pg_msg_snapshot(msg: *const PgMsg) -> *mut PgSnapshot {
@@ -412,13 +413,7 @@ pub extern "C" fn pg_msg_snapshot(msg: *const PgMsg) -> *mut PgSnapshot {
         if type_of(&msg.t) != PgMsgType::PG_MSG_SNAPSHOT {
             return Err(PgError::InvalidArg);
         }
-        let message = msg.to_message()?;
-        let pane_id = match message {
-            Message::Snapshot { pane_id, .. } => pane_id,
-            _ => return Err(PgError::InvalidArg),
-        };
-        let snapshot =
-            crate::session::snapshot_from_message(&message).ok_or(PgError::InvalidArg)?;
+        let (pane_id, snapshot) = api::snapshot_of(&msg.to_message()?)?;
         super::snapshot_to_ffi(pane_id, &snapshot, true)
     })
 }
@@ -465,8 +460,7 @@ pub extern "C" fn pg_msg_decode(payload: *const u8, len: usize) -> *mut PgMsg {
 #[no_mangle]
 pub extern "C" fn pg_msg_layout_rects(msg: *const PgMsg, out: *mut PgRect, cap: usize) -> usize {
     ffi_call(0, || {
-        let node = layout_node(unsafe_ref(msg)?)?;
-        let rects = node.rects();
+        let rects = api::layout_rects(&layout_message(unsafe_ref(msg)?)?)?;
         if rects.is_empty() {
             return Ok(0);
         }
@@ -494,25 +488,25 @@ pub extern "C" fn pg_msg_layout_rects(msg: *const PgMsg, out: *mut PgRect, cap: 
 #[no_mangle]
 pub extern "C" fn pg_msg_layout_splits(msg: *const PgMsg, out: *mut PgSplit, cap: usize) -> usize {
     ffi_call(0, || {
-        let node = layout_node(unsafe_ref(msg)?)?;
-        let splits = node.splits();
+        let splits = api::layout_splits(&layout_message(unsafe_ref(msg)?)?)?;
         if splits.is_empty() {
             return Ok(0);
         }
         if out.is_null() || cap < splits.len() {
             return Err(PgError::Overflow);
         }
-        for (index, (id, axis, ratio, rect)) in splits.iter().enumerate() {
+        for (index, split) in splits.iter().enumerate() {
+            let rect = split.rect;
             // SAFETY: the caller promised `cap` writable entries.
             unsafe {
                 *out.add(index) = PgSplit {
                     size: std::mem::size_of::<PgSplit>() as u32,
-                    id: *id,
-                    axis: match axis {
-                        crate::layout::Axis::Vertical => PgAxis::PG_AXIS_VERTICAL,
-                        crate::layout::Axis::Horizontal => PgAxis::PG_AXIS_HORIZONTAL,
+                    id: split.id,
+                    axis: match split.axis {
+                        Axis::Vertical => PgAxis::PG_AXIS_VERTICAL,
+                        Axis::Horizontal => PgAxis::PG_AXIS_HORIZONTAL,
                     },
-                    ratio: *ratio,
+                    ratio: split.ratio,
                     x: rect.x,
                     y: rect.y,
                     w: rect.w,
@@ -528,43 +522,16 @@ pub extern "C" fn pg_msg_layout_splits(msg: *const PgMsg, out: *mut PgSplit, cap
 #[no_mangle]
 pub extern "C" fn pg_msg_layout_focus(msg: *const PgMsg) -> u32 {
     ffi_call(0, || {
-        let msg = unsafe_ref(msg)?;
-        if type_of(&msg.t) != PgMsgType::PG_MSG_LAYOUT {
-            return Err(PgError::InvalidArg);
-        }
-        Ok(match msg.to_message()? {
-            Message::Layout { focus, .. } => focus.unwrap_or(0),
-            _ => 0,
-        })
+        let message = layout_message(unsafe_ref(msg)?)?;
+        Ok(api::layout_focus(&message)?.unwrap_or(0))
     })
 }
 
-fn layout_node(msg: &PgMsg) -> PgResult<crate::layout::LayoutNode> {
+fn layout_message(msg: &PgMsg) -> PgResult<Message> {
     if type_of(&msg.t) != PgMsgType::PG_MSG_LAYOUT {
         return Err(PgError::InvalidArg);
     }
-    match msg.to_message()? {
-        Message::Layout { tree, .. } => Ok(from_proto_node(&tree)),
-        _ => Err(PgError::InvalidArg),
-    }
-}
-
-fn from_proto_node(node: &crate::proto::Node) -> crate::layout::LayoutNode {
-    use crate::layout::{Axis as LayoutAxis, LayoutNode};
-    use crate::proto::Node;
-    match node {
-        Node::Leaf { leaf } => LayoutNode::Leaf(*leaf),
-        Node::Split { split } => LayoutNode::Split {
-            id: split.id,
-            axis: match split.axis {
-                crate::proto::SplitAxis::Vertical => LayoutAxis::Vertical,
-                crate::proto::SplitAxis::Horizontal => LayoutAxis::Horizontal,
-            },
-            ratio: split.ratio,
-            a: Box::new(from_proto_node(&split.a)),
-            b: Box::new(from_proto_node(&split.b)),
-        },
-    }
+    msg.to_message()
 }
 
 fn encode_payload(msg: &PgMsg) -> PgResult<Vec<u8>> {

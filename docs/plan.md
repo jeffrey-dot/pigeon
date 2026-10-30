@@ -270,6 +270,7 @@ M3 落地后仍在的洞。
 | 多客户端尺寸策略未实现 | 单客户端下由 pane rect 反推会话 box；多客户端的 `size_state` 仍留给 M2 |
 | 程序的颜色查询（OSC 4/10/11） | 客户端通过 `appearance` 把当前色板交给宿主，宿主用 `Event::ColorRequest` 的 formatter 回 `rgb:rrrr/gggg/bbbb`；TUI（pi 等）因此能自己选亮/深主题 | 见 `docs/protocol.md` §3 与 `core/tests/host.rs` 的 `appearance_reaches_existing_panes_and_a_malformed_one_keeps_the_previous` |
 | 侧栏（M3） | 已落地：`SidebarModel`/`Grouping`（git 根）+ 侧栏、OSC 7501 `status` 广播 + `ack_status`、OSC 7/标题、未读/needs-you、⌘J/⌘T/⌘⇧W、右键菜单、**行标题=应用名 / 分组可改名 / 不折叠**、排序持久化；视觉按 harp 源码对齐：`docs/ui.md` §7 是从 harp（`/tmp/harp`，AGPL/MIT，只取数值不取代码）提取的色值/尺寸/字号规格表；行高 30、行圆角 8、组头 11.5/橙色 `N need you`、`SIDEBAR #e8e8eb/#232326`、透明标题栏 + 内嵌红绿灯、右栏是一张大卡片（10pt 圆角、0.5pt 描边、投影、三面 8pt 外缩）、40pt 右栏头部，全部是动态色（浅/深各一套）；截图见 `docs/m3-checklist.md` §2.1 的 light/dark 两套 |
+| Rust 客户端接口 `pigeon_core::api` | 已建：`core/src/api/` + `internals` feature；`ffi` 只调 `api`；见 `docs/core.md` §4.1 |
 
 **仍在**：
 
@@ -286,7 +287,6 @@ M3 落地后仍在的洞。
 | `zstd` 能力只定义了帧内 tag | 阈值、何时启用未定 | M4 远端实测后 |
 | CI 缺 `unsafe` / 平台 crate 的静态检查 | 现有：fmt / clippy / test / tokio+portable-pty 引用检查 / `--lib --no-default-features` / 体积 / 头文件 diff / swift | 加 `unsafe`/`cfg(target_os)` 检查时 |
 | PTY 走 `portable-pty` 而不是原始 fd | 为了让 `core/src`（除 `ffi/`）零 `unsafe` | 需要原始 fd 做特殊 ioctl 时 |
-| Rust 客户端接口 `pigeon_core::api` 未建 | 规则已定（`docs/core.md` §4.1）；`ffi` 仍直接调内部模块，`lib.rs` 的内部模块仍是 `pub`，编译期拦不住客户端越界 | M5 Rust 客户端开工前 |
 | `swift test` 依赖完整 Xcode | `xcode-select` 指向 CLT 时需 `DEVELOPER_DIR` | 换 swift-testing 或写进 README |
 
 **平台说明**：`pigeon-host` 在 macOS 与 Linux 用同一份代码；CI 的 `rust` 作业在 ubuntu 与 macos 各跑一遍

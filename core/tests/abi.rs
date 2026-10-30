@@ -284,11 +284,11 @@ fn layout_splits_closes_and_focuses() {
 
 #[test]
 fn layout_message_exposes_rects_and_splits() {
+    use pigeon_core::api::{Message, Node, SplitAxis, SplitNode};
     use pigeon_core::ffi::{
         pg_msg_decode_frame, pg_msg_layout_focus, pg_msg_layout_rects, pg_msg_layout_splits,
         pg_msg_type, PgAxis, PgMsgType, PgSplit,
     };
-    use pigeon_core::proto::{Message, Node, SplitAxis, SplitNode};
 
     let message = Message::Layout {
         session_id: 1,
@@ -312,7 +312,7 @@ fn layout_message_exposes_rects_and_splits() {
         zoom: None,
         focus: Some(2),
     };
-    let frame = pigeon_core::proto::encode_frame(&message).expect("frame");
+    let frame = pigeon_core::api::encode_frame(&message).expect("frame");
     let mut consumed = 0usize;
     let handle = pg_msg_decode_frame(frame.as_ptr(), frame.len(), &mut consumed);
     assert!(!handle.is_null());

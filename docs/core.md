@@ -66,12 +66,12 @@ C ABI 是给非 Rust 客户端的。Rust 客户端（例如 M5 的 GTK4 客户�
 - `core/src/api/`：安全的 Rust API，分组与 §4 的表一一对应（pane / 快照 / 状态 / 布局 / 消息），
   用所有权表达生命周期，错误是 `Result<T, PgError>`。
 - `core/src/ffi/`：`api` 的薄包装，只做指针/长度转换、错误码、panic 捕获，不再直接碰内部模块。
-- `term` / `layout` / `status` / `session` / `proto` 的内部类型收成 `pub(crate)`，或只经 `api` 重导出协议需要的那几个，
-  让“客户端不认识内部类型”在编译期成立。`pigeon-host` 与 `core/tests/` 目前直接用内部模块，收口时要么迁到 `api`，
-  要么经 feature 暴露给它们。
+- `term` / `layout` / `status` / `session` / `proto` 只在 `internals` feature 下是 `pub`（默认开，给 `pigeon-host`
+  与 `core/tests/` 用）；客户端以 `default-features = false` 依赖时它们是私有模块，`api` 只重导出客户端需要的类型
+  （快照/格子、状态记录、布局矩形、协议 `Message` 与编解码），“客户端不认识内部类型”在编译期成立。
 - Rust 客户端是独立 crate（`clients/linux/`），不进 `core/`。
 
-现状：`api` 尚未建，`ffi` 仍直接调内部模块（缺口见 `docs/plan.md` §11）；在 Rust 客户端开工前补上。
+用例：`core/tests/api.rs` 测 Rust 外形，`core/tests/abi.rs` 测 C 外形。
 
 ## 5. 快照与增量
 
