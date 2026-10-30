@@ -1,6 +1,6 @@
 #!/bin/bash
-# Side-by-side check of the Metal renderer against CoreText (issue #1): the same
-# host session, one screenshot per renderer per appearance, written to $OUT.
+# Visual check of the Metal grid renderer (issue #1): one screen with colours, attributes,
+# wide glyphs and emoji, one screenshot per appearance, written to $OUT.
 # A private host on a temp socket, so nothing touches the user's own sessions.
 #
 # Build first: cargo build --release --bin pigeon-host && cargo build && swift build
@@ -32,24 +32,22 @@ HOST_PID=$!
 sleep 1
 
 for appearance in light dark; do
-    for renderer in coretext metal; do
-        PIGEON_DEBUG=1 PIGEON_RENDERER=$renderer PIGEON_APPEARANCE=$appearance \
-            PIGEON_CONFIG_DIR="$CONFIG" PIGEON_HOST_PATH="$HOST" XDG_RUNTIME_DIR="$R" \
-            "$APP" >"$R/app-$renderer-$appearance.log" 2>&1 &
-        APP_PID=$!
-        sleep 4
-        osascript -e 'tell application "System Events" to set frontmost of process "pigeon" to true' >/dev/null 2>&1
-        sleep 1
-        # Capture the window itself, not a screen rectangle: nothing else on screen
-        # (a leftover window, the terminal running this script) can end up in the shot.
-        WID=$(swift tools/window-id-of-pid.swift "$APP_PID" 2>/dev/null)
-        screencapture -x -o -l"$WID" "$OUT/$renderer-$appearance.png"
-        kill "$APP_PID" 2>/dev/null
-        wait "$APP_PID" 2>/dev/null
-        # One app at a time: the next one must attach as the only client.
-        while pgrep -f "$APP" >/dev/null; do sleep 0.2; done
-    done
+    PIGEON_DEBUG=1 PIGEON_APPEARANCE=$appearance \
+        PIGEON_CONFIG_DIR="$CONFIG" PIGEON_HOST_PATH="$HOST" XDG_RUNTIME_DIR="$R" \
+        "$APP" >"$R/app-$appearance.log" 2>&1 &
+    APP_PID=$!
+    sleep 4
+    osascript -e 'tell application "System Events" to set frontmost of process "pigeon" to true' >/dev/null 2>&1
+    sleep 1
+    # Capture the window itself, not a screen rectangle: nothing else on screen
+    # (a leftover window, the terminal running this script) can end up in the shot.
+    WID=$(swift tools/window-id-of-pid.swift "$APP_PID" 2>/dev/null)
+    screencapture -x -o -l"$WID" "$OUT/metal-$appearance.png"
+    kill "$APP_PID" 2>/dev/null
+    wait "$APP_PID" 2>/dev/null
+    # One app at a time: the next one must attach as the only client.
+    while pgrep -f "$APP" >/dev/null; do sleep 0.2; done
 done
-grep -h "gpu frame" "$R"/app-metal-*.log | tail -5
+grep -h "gpu frame" "$R"/app-*.log | tail -5
 kill "$HOST_PID" 2>/dev/null
 echo "screenshots: $OUT"

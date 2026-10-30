@@ -3,8 +3,8 @@
 #   * `cat` of a large coloured file: wall time until the PTY drained it.
 #   * a steady 5 s stream (one screenful every ~8 ms, like a busy build log): the app's CPU
 #     time and the frame-time percentiles the app logs (`PIGEON_FRAME_STATS=1`).
-# The `cat` runs in the host's PTY, so its wall time is bounded by the host; what differs
-# between renderers is how much CPU the app burns keeping up, and how long its frames take.
+# The `cat` runs in the host's PTY, so its wall time is bounded by the host; what the
+# renderer decides is how much CPU the app burns keeping up, and how long its frames take.
 # Keep the pigeon window in front while it runs: an occluded window's Metal frames are
 # throttled by the system (the script warns when that happened).
 #
@@ -32,7 +32,8 @@ with open(sys.argv[1], 'w') as out:
         out.write(f'\x1b[{c}m{i:08d}\x1b[0m the quick brown fox jumps over the lazy dog 中文 \x1b[1mbold\x1b[0m\n')
 " "$R/big.txt" "$LINES"
 
-for renderer in coretext metal; do
+# One run; `renderer` only names the files, so older logs stay comparable.
+for renderer in metal; do
     # The pane's shell waits until the window is up and attached, runs the cat and the
     # stream, writes the cat's start/end times for this script, then stays open.
     cat >"$R/shell-$renderer.sh" <<SH
@@ -60,7 +61,7 @@ SH
     "$HOST" --socket "$R/$renderer/pigeon.sock" --shell "$R/shell-$renderer.sh" >"$R/host-$renderer.log" 2>&1 &
     HOST_PID=$!
     sleep 1
-    DYLD_LIBRARY_PATH=$CORE_LIB PIGEON_FRAME_STATS=1 PIGEON_RENDERER=$renderer PIGEON_CONFIG_DIR="$R/$renderer/config" \
+    DYLD_LIBRARY_PATH=$CORE_LIB PIGEON_FRAME_STATS=1 PIGEON_CONFIG_DIR="$R/$renderer/config" \
         PIGEON_HOST_PATH="$HOST" XDG_RUNTIME_DIR="$R/$renderer" \
         "$APP" >"$R/app-$renderer.log" 2>&1 &
     APP_PID=$!

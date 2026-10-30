@@ -45,8 +45,7 @@ final class MetalGridRenderer: @unchecked Sendable {
     /// Render-thread only; GPU samples are handed back to this thread by `perform`.
     private var stats = FrameStats(renderer: "metal")
 
-    /// Nil when there is no Metal device or the shaders do not compile; the pane then keeps
-    /// the CoreText path.
+    /// Nil when there is no Metal device or the shaders do not compile.
     init?() {
         guard let device = MTLCreateSystemDefaultDevice(),
               let queue = device.makeCommandQueue(),

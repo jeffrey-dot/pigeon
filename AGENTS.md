@@ -85,9 +85,8 @@ pigeon/
         │   └── Grouping.swift          # 项目分组规则（git 根 / cwd 末级目录）
         ├── Terminal/
         │   ├── PaneView.swift          # 终端视图容器（焦点、IME、鼠标）
-        │   ├── GridRenderer.swift      # 协议：把 PgSnapshot 画成像素（M0 直接调 CoreTextRenderer）
-        │   ├── CoreTextRenderer.swift  # 唯一 import CoreText 的文件（含 Metal 用的字形光栅化）
-        │   ├── PaneView+Metal.swift    # 把格子交给渲染线程（PIGEON_RENDERER=metal）
+        │   ├── CoreTextRenderer.swift  # 唯一 import CoreText 的文件：字体度量 + Metal 用的字形光栅化
+        │   ├── PaneView+Metal.swift    # 把格子交给渲染线程（唯一的网格渲染路径）
         │   ├── Render/                 # GPU 渲染：图集、脏行、实例构建、Metal 线程与 shader
         │   └── KeyEncoder.swift        # 按键 → 字节（kitty protocol / legacy）
         └── Layout/               # M1 分屏
@@ -95,7 +94,7 @@ pigeon/
             └── Focus.swift             # 焦点与选择
 ```
 
-`Window/`、`Layout/`、`SidebarViewController.swift`、`SidebarRowView.swift`、`GridRenderer.swift`
+`Window/`、`Layout/`、`SidebarViewController.swift`、`SidebarRowView.swift`
 是后续里程碑（M1/M3）的落点；M0 只建了 `Terminal/{PaneView,CoreTextRenderer,KeyEncoder}.swift`、
 `Net/{HostClient,Wire}.swift`、`Sidebar/{SidebarModel,Grouping}.swift`。
 

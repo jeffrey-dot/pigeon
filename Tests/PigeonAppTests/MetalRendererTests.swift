@@ -161,22 +161,12 @@ final class MetalRendererTests: XCTestCase {
         XCTAssertEqual(colors.bg, 0x111111)
     }
 
-    /// The GPU path must paint the same colours as the CoreText path.
-    func testPaletteIndicesResolveLikeTheCoreTextRenderer() {
+    func testPaletteIndicesResolveThroughTheThemeAndTheXtermCube() {
         let resolved = CellPalette.resolve(for: NSAppearance(named: .darkAqua)!)
         XCTAssertEqual(resolved.rgb(0x0100_0001), TerminalPalette.hex(1, appearance: NSAppearance(named: .darkAqua)!))
         XCTAssertEqual(resolved.rgb(0x0100_0000 | 196), 0xff0000, "xterm cube")
         XCTAssertEqual(resolved.rgb(0x0100_0000 | 232), 0x080808, "grey ramp")
         XCTAssertEqual(resolved.rgb(0x00ab_cdef), 0xabcdef)
-        let defaults = CoreTextRenderer.defaultColors(for: NSAppearance(named: .darkAqua)!)
-        XCTAssertEqual(resolved.foreground, defaults.fg)
-        XCTAssertEqual(resolved.background, defaults.bg)
-    }
-
-    func testTheRendererFlagDefaultsToCoreText() {
-        XCTAssertEqual(RendererChoice.fromEnvironment(nil), .coreText)
-        XCTAssertEqual(RendererChoice.fromEnvironment("bogus"), .coreText)
-        XCTAssertEqual(RendererChoice.fromEnvironment("Metal"), .metal)
     }
 
     // MARK: - frame stats

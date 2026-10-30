@@ -1,15 +1,20 @@
 import AppKit
 
-/// The GPU path of `PaneView`: turns the cells the pane holds into `GridFrame`s for its
+/// How `PaneView` gets on screen: turns the cells the pane holds into `GridFrame`s for its
 /// render thread. Colours and geometry are resolved here, on the main thread, because
 /// dynamic `NSColor`s only resolve against the view's appearance.
 extension PaneView {
     /// Starts or stops the renderer to match visibility: a hidden pane (a zoomed-out
     /// sibling, a background session) keeps no thread, instance buffers or atlas.
     func syncRenderer() {
-        guard Self.rendererChoice == .metal else { return }
         let visible = window != nil && !isHiddenOrHasHiddenAncestor
-        if visible, metal == nil, let renderer = MetalGridRenderer() {
+        if visible, metal == nil {
+            guard let renderer = MetalGridRenderer() else {
+                // Every Mac that runs macOS 13 has a Metal device; this is a broken install
+                // (no device, shaders that do not compile), and the pane stays blank.
+                FileHandle.standardError.write(Data("pigeon: no Metal renderer for this pane\n".utf8))
+                return
+            }
             renderer.layer.contentsScale = window?.backingScaleFactor ?? 2
             // Layer-hosting: AppKit leaves the layer to us and stops calling `draw(_:)`.
             layer = renderer.layer
@@ -72,12 +77,9 @@ extension PaneView {
         dirty = .none
     }
 
-    /// Either redraws through AppKit (CoreText) or posts a frame (Metal).
+    /// Posts the current screen; a hidden pane has no renderer and catches up with one
+    /// full frame when it becomes visible again (`dirty` stays `.everything` until then).
     func screenChanged() {
-        if metal != nil {
-            postFrame()
-        } else {
-            needsDisplay = true
-        }
+        postFrame()
     }
 }

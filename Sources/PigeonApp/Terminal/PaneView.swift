@@ -38,14 +38,10 @@ final class PaneView: NSView {
     private(set) var scrollOffset = 0
     private(set) var cursor = Cursor(x: 0, y: 0, visible: false)
 
-    static let rendererChoice = RendererChoice.fromEnvironment(
-        ProcessInfo.processInfo.environment["PIGEON_RENDERER"])
-    /// The GPU renderer while the pane is visible and `PIGEON_RENDERER=metal`; nil otherwise.
+    /// The GPU renderer while the pane is visible; nil when hidden or off-window.
     var metal: MetalGridRenderer?
     /// Rows changed since the last frame was posted to `metal`.
     var dirty = DirtyRows.everything
-    /// Draw times of the CoreText path, for comparing against Metal (`PIGEON_FRAME_STATS=1`).
-    private var cpuStats = FrameStats(renderer: "coretext")
     /// Last occlusion state logged under `PIGEON_FRAME_STATS`.
     var reportedVisible: Bool?
 
@@ -55,27 +51,6 @@ final class PaneView: NSView {
 
     override var acceptsFirstResponder: Bool { true }
     override var isOpaque: Bool { true }
-
-    override func draw(_ dirtyRect: NSRect) {
-        if ProcessInfo.processInfo.environment["PIGEON_DEBUG"] != nil {
-            FileHandle.standardError.write(
-                Data("pigeon: pane draw cells=\(cells.count) bounds=\(bounds)\n".utf8)
-            )
-        }
-        let start = FrameStats.enabled ? DispatchTime.now().uptimeNanoseconds : 0
-        CoreTextRenderer.draw(cells: cells, cols: cols, rows: rows, cursor: cursor, in: bounds)
-        drawScrollIndicator()
-        if FrameStats.enabled {
-            cpuStats.record(cpuMicros: Double(DispatchTime.now().uptimeNanoseconds - start) / 1000)
-            cpuStats.reportIfDue()
-            // AppKit has no "went idle" hook; report what a short burst left a second later.
-            if cpuStats.cpu.count == 1 {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) { [weak self] in
-                    self?.cpuStats.flush()
-                }
-            }
-        }
-    }
 
     /// Applies the position reported by a `scroll` answer; `total == 0` hides the indicator.
     func setScrollPosition(total: Int, offset: Int) {
@@ -97,14 +72,6 @@ final class PaneView: NSView {
         let progress = CGFloat(min(max(offset, 0), history)) / CGFloat(history)
         return CGRect(
             x: bounds.maxX - width - 2, y: travel * progress, width: width, height: height)
-    }
-
-    private func drawScrollIndicator() {
-        guard let thumb = Self.scrollThumb(
-            bounds: bounds, rows: rows, history: scrollHistory, offset: scrollOffset)
-        else { return }
-        NSColor.secondaryLabelColor.withAlphaComponent(0.45).setFill()
-        NSBezierPath(roundedRect: thumb, xRadius: 1.5, yRadius: 1.5).fill()
     }
 
     /// Wheel delta in whole lines; the sub-line remainder is carried to the next event so a

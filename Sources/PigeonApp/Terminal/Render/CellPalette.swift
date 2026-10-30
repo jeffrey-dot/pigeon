@@ -3,7 +3,7 @@ import AppKit
 /// The colours one frame is drawn with, resolved on the main thread so the render thread
 /// never touches `NSAppearance` (dynamic colours only resolve against the drawing appearance).
 ///
-/// Mirrors `CoreTextRenderer`'s colour rules exactly: the sentinel 0 takes the theme default,
+/// Cell colour values: the sentinel 0 takes the theme default,
 /// `0x01000000 | idx` is a palette entry, anything else is `0xRRGGBB`.
 struct CellPalette: Equatable, Sendable {
     /// ANSI 0–15 for the appearance.

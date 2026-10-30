@@ -15,7 +15,7 @@ struct FrameStats {
         self.renderer = renderer
     }
 
-    /// Microseconds spent building and encoding (or drawing, on the CPU path) one frame.
+    /// Microseconds spent building and encoding one frame.
     mutating func record(cpuMicros: Double) {
         cpu.append(cpuMicros)
     }

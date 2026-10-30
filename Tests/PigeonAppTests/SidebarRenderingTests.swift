@@ -54,12 +54,12 @@ final class SidebarRenderingTests: XCTestCase {
     /// Cells without an explicit colour take the theme's foreground/background, resolved for
     /// the appearance that is drawing (harp `default_themes.rs:262/275`).
     func testTerminalDefaultsFollowTheAppearance() {
-        let light = CoreTextRenderer.defaultColors(for: NSAppearance(named: .aqua)!)
-        let dark = CoreTextRenderer.defaultColors(for: NSAppearance(named: .darkAqua)!)
-        XCTAssertEqual(light.fg, 0x0011_1111) // #111111
-        XCTAssertEqual(light.bg, 0x00ff_ffff) // #ffffff
-        XCTAssertEqual(dark.fg, 0x00ff_ffff) // #ffffff
-        XCTAssertEqual(dark.bg, 0x0005_0505) // #050505
+        let light = CellPalette.resolve(for: NSAppearance(named: .aqua)!)
+        let dark = CellPalette.resolve(for: NSAppearance(named: .darkAqua)!)
+        XCTAssertEqual(light.foreground, 0x0011_1111) // #111111
+        XCTAssertEqual(light.background, 0x00ff_ffff) // #ffffff
+        XCTAssertEqual(dark.foreground, 0x00ff_ffff) // #ffffff
+        XCTAssertEqual(dark.background, 0x0005_0505) // #050505
     }
 
     func testTheSidebarSurfaceFollowsTheAppearanceOnTheSameView() {
