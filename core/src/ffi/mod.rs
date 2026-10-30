@@ -261,11 +261,8 @@ pub extern "C" fn pg_pane_feed(
 ) -> bool {
     ffi_call(false, || {
         let core = unsafe_mut(core)?;
-        if data.is_null() && len > 0 {
-            return Err(PgError::InvalidArg);
-        }
-        // SAFETY: caller promises `len` readable bytes.
-        let bytes = unsafe { std::slice::from_raw_parts(data, len) };
+        // SAFETY: caller promises `len` readable bytes at `data`.
+        let bytes = unsafe { byte_slice(data, len) }?;
         let pane = core.panes.get_mut(&pane_id).ok_or(PgError::NoSuchPane)?;
         pane.feed(bytes);
         Ok(true)
@@ -382,7 +379,7 @@ pub extern "C" fn pg_pane_snapshot(core: *mut PgCore, pane_id: u32) -> *mut PgSn
         let core = unsafe_mut(core)?;
         let pane = core.panes.get_mut(&pane_id).ok_or(PgError::NoSuchPane)?;
         let snapshot = pane.snapshot();
-        Ok(snapshot_to_ffi(pane_id, &snapshot, true))
+        snapshot_to_ffi(pane_id, &snapshot, true)
     })
 }
 
@@ -447,8 +444,18 @@ pub(crate) fn build_snapshot(
     scroll: PgScrollRegion,
     screen: Vec<Vec<PgCell>>,
     history: Vec<Vec<PgCell>>,
-) -> *mut PgSnapshot {
-    let history_count = history.len() as u32;
+) -> PgResult<*mut PgSnapshot> {
+    // pg_snapshot_free reclaims `rows * cols` screen cells and
+    // `history_count * cols` history cells, and every PgRow below points
+    // `index * cols` cells into the flat grid, so the grids must be exactly
+    // that shape. Anything else (a malformed wire snapshot, say) is refused
+    // here rather than handed to C as an out-of-bounds pointer.
+    let col_count = usize::from(cols);
+    let well_formed = |grid: &[Vec<PgCell>]| grid.iter().all(|row| row.len() == col_count);
+    if screen.len() != usize::from(rows) || !well_formed(&screen) || !well_formed(&history) {
+        return Err(PgError::InvalidArg);
+    }
+    let history_count = u32::try_from(history.len()).map_err(|_| PgError::InvalidArg)?;
     let mut screen_cells = screen
         .into_iter()
         .flatten()
@@ -461,7 +468,6 @@ pub(crate) fn build_snapshot(
         .into_boxed_slice();
 
     let row_count = usize::from(rows);
-    let col_count = usize::from(cols);
 
     let screen_ptr = screen_cells.as_mut_ptr();
     let history_ptr = history_cells.as_mut_ptr();
@@ -469,7 +475,7 @@ pub(crate) fn build_snapshot(
     let screen_rows = (0..row_count)
         .map(|index| PgRow {
             size: std::mem::size_of::<PgRow>() as u32,
-            // SAFETY: `index * col_count < screen_cells.len()` by construction.
+            // SAFETY: `screen_cells.len() == row_count * col_count`, checked above.
             cells: unsafe { screen_ptr.add(index * col_count) }.cast_const(),
         })
         .collect::<Vec<_>>()
@@ -478,7 +484,7 @@ pub(crate) fn build_snapshot(
     let history_rows = (0..history_count as usize)
         .map(|index| PgRow {
             size: std::mem::size_of::<PgRow>() as u32,
-            // SAFETY: same bound as above for the history grid.
+            // SAFETY: `history_cells.len() == history_count * col_count`, checked above.
             cells: unsafe { history_ptr.add(index * col_count) }.cast_const(),
         })
         .collect::<Vec<_>>()
@@ -505,7 +511,7 @@ pub(crate) fn build_snapshot(
     std::mem::forget(screen_cells);
     std::mem::forget(history_cells);
 
-    Box::into_raw(Box::new(snapshot))
+    Ok(Box::into_raw(Box::new(snapshot)))
 }
 
 /// # Safety
@@ -777,6 +783,23 @@ pub extern "C" fn pg_layout_focused(core: *mut PgCore) -> u32 {
 
 // ---------------------------------------------------------------- helpers
 
+/// Borrows `len` bytes at `data` as a slice. `(NULL, 0)` is the empty slice:
+/// `std::slice::from_raw_parts` requires a non-null pointer even for length 0,
+/// and C/Swift callers routinely pass NULL for an empty buffer.
+///
+/// # Safety
+/// When `len > 0`, `data` must point to `len` readable bytes that outlive `'a`.
+pub(crate) unsafe fn byte_slice<'a>(data: *const u8, len: usize) -> PgResult<&'a [u8]> {
+    if len == 0 {
+        return Ok(&[]);
+    }
+    if data.is_null() {
+        return Err(PgError::InvalidArg);
+    }
+    // SAFETY: non-null and `len` readable bytes, per the caller's contract.
+    Ok(unsafe { std::slice::from_raw_parts(data, len) })
+}
+
 fn unsafe_ref<'a>(core: *const PgCore) -> PgResult<&'a PgCore> {
     if core.is_null() {
         return Err(PgError::InvalidArg);
@@ -845,7 +868,7 @@ fn snapshot_to_ffi(
     pane_id: u32,
     snapshot: &crate::term::Snapshot,
     with_history: bool,
-) -> *mut PgSnapshot {
+) -> PgResult<*mut PgSnapshot> {
     let screen = snapshot
         .screen
         .iter()
