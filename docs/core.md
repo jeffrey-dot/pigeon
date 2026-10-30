@@ -1,6 +1,6 @@
 # pigeon 内核（core）设计
 
-> 结论先行：**内核只写一次，用可移植语言实现并暴露 C ABI；各平台只写薄客户端。**
+> 结论先行：**内核只写一次，用可移植语言实现并暴露客户端接口（C ABI + 与之一一对应的 Rust API）；各平台只写薄客户端。**
 > 客户端可以每个平台各写一份（AppKit / GTK / 未来的 Windows），内核与后台会话进程共用同一份代码。
 > 语言推荐 **Rust**（理由见 §6），VT 引擎从 `alacritty_terminal` 起步，用我们自己的 `Term` trait 包住。
 
@@ -22,7 +22,7 @@
 
 ## 3. 两种消费方式，同一份内核
 
-1. **嵌入（首选，低延迟）**：客户端把 core 编进进程（静态库或 dylib + C ABI），
+1. **嵌入（首选，低延迟）**：客户端把 core 编进进程（Swift/C 走静态库或 dylib + C ABI；Rust 客户端直接依赖 crate 并只用 `pigeon_core::api`，见 §4.1），
    自己驱动渲染循环；PTY 可以由客户端进程持有，也可以接后台进程。
 2. **会话宿主（持久化，默认）**：`pigeon-host` 用同一份 core 持有 PTY 与会话状态，窗口通过 socket 消费
    **快照 + 增量**。远端场景（ssh）也走这条。
@@ -56,6 +56,22 @@
 - 同一个 `PgCore` 上的调用由调用方串行化（一次一个线程）；`PgSnapshot` 不可变，可跨线程。
 - 出错返回 `NULL`/0/`false` + `pg_last_error()`，不抛异常、不 abort（panic 必须在 FFI 边界被捕获，报 `PG_ERR_PANIC`）。
 - ABI 变更规则：只能**追加**字段（靠 `size` 判定）；要改已有字段含义或顺序，就 bump `PG_CORE_ABI_VERSION` 并让客户端拒绝加载。
+
+### 4.1 Rust 客户端接口（`pigeon_core::api`）
+
+C ABI 是给非 Rust 客户端的。Rust 客户端（例如 M5 的 GTK4 客户端用 `gtk4-rs`）如果也走 C 头，
+就要用 `unsafe` 裸指针调同一门语言的代码，手动释放 `PgSnapshot`，丢掉 Rust 选型的主要收益；
+而 `lib.rs` 的模块又都是 `pub`，规则拦不住它直接 `use` 内部类型。所以客户端接口定成**一份语义、两种外形**：
+
+- `core/src/api/`：安全的 Rust API，分组与 §4 的表一一对应（pane / 快照 / 状态 / 布局 / 消息），
+  用所有权表达生命周期，错误是 `Result<T, PgError>`。
+- `core/src/ffi/`：`api` 的薄包装，只做指针/长度转换、错误码、panic 捕获，不再直接碰内部模块。
+- `term` / `layout` / `status` / `session` / `proto` 的内部类型收成 `pub(crate)`，或只经 `api` 重导出协议需要的那几个，
+  让“客户端不认识内部类型”在编译期成立。`pigeon-host` 与 `core/tests/` 目前直接用内部模块，收口时要么迁到 `api`，
+  要么经 feature 暴露给它们。
+- Rust 客户端是独立 crate（`clients/linux/`），不进 `core/`。
+
+现状：`api` 尚未建，`ffi` 仍直接调内部模块（缺口见 `docs/plan.md` §11）；在 Rust 客户端开工前补上。
 
 ## 5. 快照与增量
 
@@ -115,4 +131,4 @@ SwiftTerm 同时保留为**对账参考**（M1 起的 `tools/vt-parity`），因
 | M1 | 布局在核心里（`pg_layout_*`），客户端只画矩形与分隔线 |
 | M2 | 协议版本协商、多窗口同看一个会话、后台进程崩溃提示 |
 | M3 | 状态记录（OSC 7501）从核心里读；侧栏只做展示与排序 |
-| M5 | Linux 客户端（GTK）复用同一内核与协议，不重写语义 |
+| M5 | Linux 客户端（GTK）复用同一内核与协议，不重写语义；Rust 写就经 `pigeon_core::api`（§4.1） |

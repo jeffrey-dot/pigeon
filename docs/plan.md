@@ -67,7 +67,8 @@
 **结论：走 A —— 内核用 Rust（`alacritty_terminal` / `vte`，包在自家 `Term` trait 后），经 `cbindgen` 导出 C ABI，客户端按平台薄薄一层（前端路线见 `docs/gui.md`）。** 详细设计见 **`docs/core.md`**
 （边界、C 头、快照/增量、线程与所有权、测试策略）。
 **为什么是 Rust**：VT 状态机是最容易攒长尾 bug 的地方，`alacritty_terminal`/`vte` 是已经被大量终端验证过的实现，
-自己重写不划算；C ABI 又是天然的跨语言边界，GTK 客户端与将来的第三方消费者都从同一条缝进来。
+自己重写不划算；C ABI 又是天然的跨语言边界，Swift 客户端与将来的第三方消费者都从这条缝进来；
+Rust 写的客户端（如 GTK4 + `gtk4-rs`）走与之一一对应的安全 API `pigeon_core::api`（见 `docs/core.md` §4.1）。
 代价是「两门语言 + 两套构建 + 一层 FFI」，换来的是 M5 之前不必再赌一次内核重写。
 
 **什么时候改回 Swift（备选 B）**（触发任一即重新评估，届时换的是 `Term` 实现，UI/协议/C ABI 都不动）：
@@ -83,7 +84,7 @@
 |---|---|---|
 | `core/`（VT / 布局 / OSC 7501 / 协议 / 会话） | 全平台 | Rust；只许 std + POSIX 绑定；无 UI、无字体、无图形 API；`unsafe` 只在 `ffi.rs` |
 | `pigeon-host`（PTY + 会话宿主；本机与远端同一个二进制） | 全平台 | `core/` 里的 bin；用 `portable-pty`（forkpty/openpty 的安全封装）；静态单文件 3–8MB（见 `docs/remote.md`） |
-| `include/pigeon_core.h` | 全平台 | 由 `cbindgen` 从 `core/src/ffi/mod.rs` 生成，宿主与所有客户端共用的唯一 ABI 面 |
+| `include/pigeon_core.h` | 全平台 | 由 `cbindgen` 从 `core/src/ffi/mod.rs` 生成，非 Rust 客户端共用的唯一 C ABI 面；Rust 客户端用对应的 `pigeon_core::api` |
 | 客户端 | 按平台 | macOS：**AppKit**（`NSOutlineView` 侧栏 + 自绘网格，M0 首发）；Linux：**GTK4**（M5）。为什么不用 winit/Qt/Electron 见 `docs/gui.md` |
 
 - **协议是跨语言契约**：长度前缀 + 版本号，字段语义写进 `docs/protocol.md`（M0 随快照复原一起产出）。Linux 客户端可以用
@@ -285,6 +286,7 @@ M3 落地后仍在的洞。
 | `zstd` 能力只定义了帧内 tag | 阈值、何时启用未定 | M4 远端实测后 |
 | CI 缺 `unsafe` / 平台 crate 的静态检查 | 现有：fmt / clippy / test / tokio+portable-pty 引用检查 / `--lib --no-default-features` / 体积 / 头文件 diff / swift | 加 `unsafe`/`cfg(target_os)` 检查时 |
 | PTY 走 `portable-pty` 而不是原始 fd | 为了让 `core/src`（除 `ffi/`）零 `unsafe` | 需要原始 fd 做特殊 ioctl 时 |
+| Rust 客户端接口 `pigeon_core::api` 未建 | 规则已定（`docs/core.md` §4.1）；`ffi` 仍直接调内部模块，`lib.rs` 的内部模块仍是 `pub`，编译期拦不住客户端越界 | M5 Rust 客户端开工前 |
 | `swift test` 依赖完整 Xcode | `xcode-select` 指向 CLT 时需 `DEVELOPER_DIR` | 换 swift-testing 或写进 README |
 
 **平台说明**：`pigeon-host` 在 macOS 与 Linux 用同一份代码；CI 的 `rust` 作业在 ubuntu 与 macos 各跑一遍
