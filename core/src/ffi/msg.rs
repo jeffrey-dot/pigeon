@@ -249,11 +249,8 @@ pub extern "C" fn pg_msg_set_bytes(
     ffi_call(false, || {
         let msg = unsafe_mut(msg)?;
         let field = field_name(field)?;
-        if data.is_null() && len > 0 {
-            return Err(PgError::InvalidArg);
-        }
-        // SAFETY: caller promises `len` readable bytes.
-        let bytes = unsafe { std::slice::from_raw_parts(data, len) }.to_vec();
+        // SAFETY: caller promises `len` readable bytes at `data`.
+        let bytes = unsafe { super::byte_slice(data, len) }?.to_vec();
         msg.fields.insert(field, Value::Bytes(bytes));
         Ok(true)
     })
@@ -422,7 +419,7 @@ pub extern "C" fn pg_msg_snapshot(msg: *const PgMsg) -> *mut PgSnapshot {
         };
         let snapshot =
             crate::session::snapshot_from_message(&message).ok_or(PgError::InvalidArg)?;
-        Ok(super::snapshot_to_ffi(pane_id, &snapshot, true))
+        super::snapshot_to_ffi(pane_id, &snapshot, true)
     })
 }
 
@@ -447,11 +444,8 @@ pub extern "C" fn pg_msg_encode(msg: *const PgMsg, out: *mut u8, cap: usize) -> 
 #[no_mangle]
 pub extern "C" fn pg_msg_decode(payload: *const u8, len: usize) -> *mut PgMsg {
     ffi_call(ptr::null_mut(), || {
-        if payload.is_null() && len > 0 {
-            return Err(PgError::InvalidArg);
-        }
-        // SAFETY: caller promises `len` readable bytes.
-        let bytes = unsafe { std::slice::from_raw_parts(payload, len) };
+        // SAFETY: caller promises `len` readable bytes at `payload`.
+        let bytes = unsafe { super::byte_slice(payload, len) }?;
         match proto::decode(bytes) {
             Ok(message) => Ok(Box::into_raw(Box::new(PgMsg::from_message(&message)?))),
             Err(PgError::Unsupported) => {
@@ -833,7 +827,8 @@ fn session_entry(msg: &PgMsg, index: usize) -> PgResult<Option<&Value>> {
 mod tests {
     use super::*;
     use crate::ffi::{
-        pg_last_error_code, pg_snapshot_free, PgErrorCode, PgMsgType, PgStatus, PG_CORE_ABI_VERSION,
+        pg_last_error_code, pg_snapshot_free, PgCell, PgCursor, PgErrorCode, PgMsgType,
+        PgScrollRegion, PgStatus, PG_CORE_ABI_VERSION,
     };
     use std::ffi::CString;
 
@@ -1006,6 +1001,114 @@ mod tests {
         assert_eq!(cell.fg, 0x00ff_0000);
         pg_snapshot_free(snap);
         pg_msg_free(decoded);
+    }
+
+    fn wire_snapshot(cols: u16, rows: u16, screen: Vec<Vec<proto::Cell>>) -> Message {
+        Message::Snapshot {
+            pane_id: 1,
+            seq: 1,
+            cols,
+            rows,
+            alt: false,
+            cursor: proto::Cursor {
+                x: 0,
+                y: 0,
+                visible: true,
+                shape: 0,
+            },
+            scroll: proto::Scroll {
+                top: 0,
+                bottom: rows.saturating_sub(1),
+            },
+            screen,
+            history: None,
+            links: None,
+        }
+    }
+
+    fn blank_wire_cell() -> proto::Cell {
+        proto::Cell {
+            codepoint: ' ' as u32,
+            attrs: 0,
+            fg: 0,
+            bg: 0,
+            link: None,
+        }
+    }
+
+    #[test]
+    fn snapshot_with_fewer_rows_than_declared_is_refused() {
+        // rows=24 but only one row on the wire: C would index 24 rows of a
+        // one-row grid and free it with the wrong length.
+        let short = wire_snapshot(2, 24, vec![vec![blank_wire_cell(); 2]]);
+        let frame = proto::encode_frame(&short).expect("frame");
+        let mut consumed = 0usize;
+        let decoded = pg_msg_decode_frame(frame.as_ptr(), frame.len(), &mut consumed);
+        assert!(!decoded.is_null());
+
+        assert!(pg_msg_snapshot(decoded).is_null());
+        assert_eq!(pg_last_error_code(), PgErrorCode::PG_ERR_INVALID_ARG);
+        pg_msg_free(decoded);
+    }
+
+    #[test]
+    fn build_snapshot_refuses_a_grid_that_does_not_match_its_shape() {
+        let cell = PgCell {
+            size: std::mem::size_of::<PgCell>() as u32,
+            codepoint: ' ' as u32,
+            fg: 0,
+            bg: 0,
+            attrs: 0,
+            hyperlink_id: 0,
+            width: 1,
+        };
+        let cursor = PgCursor {
+            size: std::mem::size_of::<PgCursor>() as u32,
+            x: 0,
+            y: 0,
+            visible: 1,
+            shape: 0,
+        };
+        let scroll = PgScrollRegion {
+            size: std::mem::size_of::<PgScrollRegion>() as u32,
+            top: 0,
+            bottom: 1,
+        };
+        let build = |screen: Vec<Vec<PgCell>>, history: Vec<Vec<PgCell>>| {
+            crate::ffi::build_snapshot(1, 2, 2, false, cursor, scroll, screen, history)
+        };
+
+        // Too few rows, a short row, a short history row.
+        assert!(build(vec![vec![cell; 2]], vec![]).is_err());
+        assert!(build(vec![vec![cell; 2], vec![cell; 1]], vec![]).is_err());
+        assert!(build(vec![vec![cell; 2]; 2], vec![vec![cell; 3]]).is_err());
+
+        let ok = build(vec![vec![cell; 2]; 2], vec![vec![cell; 2]]).expect("well formed");
+        pg_snapshot_free(ok);
+    }
+
+    #[test]
+    fn null_with_zero_length_is_an_empty_buffer() {
+        let msg = pg_msg_new(PgMsgType::PG_MSG_KEYS);
+        assert!(pg_msg_set_bytes(
+            msg,
+            field("bytes").as_ptr(),
+            ptr::null(),
+            0
+        ));
+        assert!(!pg_msg_set_bytes(
+            msg,
+            field("bytes").as_ptr(),
+            ptr::null(),
+            1
+        ));
+        assert_eq!(pg_last_error_code(), PgErrorCode::PG_ERR_INVALID_ARG);
+        pg_msg_free(msg);
+
+        // An empty payload is not a message, but it must fail cleanly rather
+        // than trip from_raw_parts' non-null precondition.
+        assert!(pg_msg_decode(ptr::null(), 0).is_null());
+        assert_ne!(pg_last_error_code(), PgErrorCode::PG_ERR_PANIC);
     }
 
     #[test]

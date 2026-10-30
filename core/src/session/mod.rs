@@ -228,6 +228,11 @@ pub fn snapshot_from_message(message: &Message) -> Option<Snapshot> {
     else {
         return None;
     };
+    // Each row is checked against `cols` below; the row count has to match
+    // `rows` too, or consumers indexing `rows x cols` read past the grid.
+    if screen.len() != usize::from(*rows) {
+        return None;
+    }
     Some(Snapshot {
         cols: *cols,
         rows: *rows,

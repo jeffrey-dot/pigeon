@@ -127,6 +127,9 @@ fn embedded_core_feeds_and_snapshots() {
         "你好".len()
     ));
 
+    // C and Swift pass NULL for an empty buffer; that is a no-op, not UB.
+    assert!(pg_pane_feed(core, pane, ptr::null(), 0));
+
     let snapshot = pg_pane_snapshot(core, pane);
     assert!(!snapshot.is_null());
     // SAFETY: owned here, freed below.
