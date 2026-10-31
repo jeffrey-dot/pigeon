@@ -40,6 +40,14 @@ pub async fn latest_status(sessions: &Sessions, pane_id: u32) -> Option<Message>
     rx.await.ok().flatten()
 }
 
+/// The pane's status as it stands, `idle` included.
+pub async fn current_status(sessions: &Sessions, pane_id: u32) -> Option<Message> {
+    let sender = sender_of(sessions, pane_id).await?;
+    let (tx, rx) = oneshot::channel();
+    sender.send(Cmd::Status { reply: tx }).await.ok()?;
+    rx.await.ok()
+}
+
 /// Every pane's pending status, for a `status_all` client that just connected; the session
 /// list goes first so the client can place each pane.
 pub async fn pending_statuses(sessions: &Sessions) -> Vec<Message> {

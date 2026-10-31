@@ -4,6 +4,7 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, WriteHalf};
+use tokio::sync::broadcast::error::RecvError;
 
 use pigeon_core::error::PgError;
 use pigeon_core::proto::{self, Message};
@@ -14,6 +15,7 @@ use crate::event::Event;
 use crate::handshake;
 use crate::host_state::HostState;
 use crate::pane_query::{latest_status, pending_statuses, snapshot_of};
+use crate::resync::resync;
 
 /// Connection ids the host hands out in `hello_ack` (protocol §3.1).
 static NEXT_CLIENT: AtomicU32 = AtomicU32::new(1);
@@ -51,8 +53,20 @@ where
                 }
             }
             event = subscribed.recv() => {
-                let Ok(event) = event else { continue };
-                forward(event, host, &state, &mut writer).await?;
+                match event {
+                    Ok(event) => forward(event, host, &state, &mut writer).await?,
+                    Err(RecvError::Lagged(missed)) => {
+                        if std::env::var_os("PIGEON_DEBUG").is_some() {
+                            eprintln!("pigeon-host: client {client_id} lagged by {missed} events");
+                        }
+                        // What is still queued predates the state about to be sent: skip it,
+                        // so nothing older than the resync reaches the window after it.
+                        subscribed = subscribed.resubscribe();
+                        resync(host, &state, &mut writer).await?;
+                    }
+                    // The host holds a sender for as long as it runs.
+                    Err(RecvError::Closed) => return Ok(()),
+                }
             }
         }
     }

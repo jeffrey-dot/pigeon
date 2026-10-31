@@ -18,6 +18,8 @@ pub type Sessions = Arc<Mutex<HashMap<u32, Session>>>;
 pub type Meta = Arc<Mutex<HashMap<u32, PaneMeta>>>;
 /// The colours the panes answer `OSC 4/10/11` with: harp's built-in dark theme until a client
 /// sends `appearance`, then whatever that client last reported.
+/// Exit codes of panes whose child is gone but that nobody has closed yet.
+pub type Exits = Arc<std::sync::Mutex<HashMap<u32, i32>>>;
 pub type PaletteSlot = Arc<std::sync::Mutex<Option<Palette>>>;
 
 #[derive(Clone)]
@@ -26,6 +28,7 @@ pub struct HostState {
     pub events: broadcast::Sender<Event>,
     pub meta: Meta,
     pub palette: PaletteSlot,
+    pub exits: Exits,
     /// The shell new sessions get unless they ask for another.
     pub shell: String,
 }
@@ -39,6 +42,7 @@ impl HostState {
             meta: Arc::new(Mutex::new(HashMap::new())),
             // Before a client speaks, answer colour queries with harp's built-in dark theme.
             palette: Arc::new(std::sync::Mutex::new(Some(Palette::default_dark()))),
+            exits: Arc::new(std::sync::Mutex::new(HashMap::new())),
             shell,
         }
     }
@@ -47,6 +51,11 @@ impl HostState {
     /// built-in dark theme before any client has spoken.
     pub fn current_palette(&self) -> Option<Palette> {
         self.palette.lock().ok().and_then(|slot| *slot)
+    }
+
+    /// The exit code of `pane_id` if its child is gone and the pane not yet closed.
+    pub fn exit_code(&self, pane_id: u32) -> Option<i32> {
+        self.exits.lock().ok()?.get(&pane_id).copied()
     }
 
     /// Protocol §6 `latest`: whoever last focused, typed or resized owns the size.

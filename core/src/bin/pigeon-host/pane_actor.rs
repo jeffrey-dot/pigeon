@@ -15,7 +15,7 @@ use pigeon_core::term::Palette;
 
 use crate::cmd::Cmd;
 use crate::event::Event;
-use crate::host_state::{HostState, Meta};
+use crate::host_state::{Exits, HostState, Meta};
 
 const SCROLLBACK: usize = 10_000;
 /// At most one delta per pane per frame. A burst of output (`cat`, a build log) arrives in
@@ -72,6 +72,7 @@ pub fn spawn_pane(
         write_tx,
         events: host.events.clone(),
         meta: Arc::clone(&host.meta),
+        exits: Arc::clone(&host.exits),
         last_revision: 0,
         last_meta: None,
         last_flush: Instant::now() - FRAME,
@@ -128,6 +129,7 @@ struct PaneActor {
     write_tx: std::sync::mpsc::Sender<Vec<u8>>,
     events: broadcast::Sender<Event>,
     meta: Meta,
+    exits: Exits,
     last_revision: u32,
     last_meta: Option<(Option<String>, Option<String>)>,
     /// When the last delta left, and whether the screen changed since.
@@ -148,7 +150,6 @@ impl PaneActor {
         // Panes are born with the client's palette (or the default dark one), so a program's
         // startup colour query is answered from the first byte.
         self.pane.set_palette(palette);
-        let pane_id = self.pane.pane_id;
         let mut ticker = interval(Duration::from_millis(150));
         ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
         let mut commands_open = true;
@@ -165,11 +166,7 @@ impl PaneActor {
                 }
                 _ = ticker.tick() => {
                     if let Ok(Some(status)) = self.child.try_wait() {
-                        self.pane.status_mut().on_process_exit();
-                        let _ = self.events.send(Event::Exited {
-                            pane_id,
-                            code: status.exit_code() as i32,
-                        });
+                        self.exited(status.exit_code() as i32);
                         break;
                     }
                 }
@@ -180,8 +177,7 @@ impl PaneActor {
                             .wait()
                             .map(|status| status.exit_code() as i32)
                             .unwrap_or(-1);
-                        self.pane.status_mut().on_process_exit();
-                        let _ = self.events.send(Event::Exited { pane_id, code });
+                        self.exited(code);
                         break;
                     };
                     self.output(&chunk).await;
@@ -245,6 +241,9 @@ impl PaneActor {
                 pane.set_palette(palette);
                 // No flush: the palette only affects query answers, not the screen.
             }
+            Cmd::Status { reply } => {
+                let _ = reply.send(pane.status_message());
+            }
             Cmd::LatestStatus { reply } => {
                 let pending = pane.status().latest_unacked().is_some();
                 let _ = reply.send(pending.then(|| pane.status_message()));
@@ -284,6 +283,17 @@ impl PaneActor {
         } else {
             self.dirty = true;
         }
+    }
+
+    /// The child is gone. The exit code is kept until `close_pane`, so a client that missed
+    /// the `Exited` event still learns about it when it resyncs.
+    fn exited(&mut self, code: i32) {
+        let pane_id = self.pane.pane_id;
+        self.pane.status_mut().on_process_exit();
+        if let Ok(mut exits) = self.exits.lock() {
+            exits.insert(pane_id, code);
+        }
+        let _ = self.events.send(Event::Exited { pane_id, code });
     }
 
     fn flush_now(&mut self) {

@@ -32,6 +32,11 @@ pub enum Cmd {
     LatestStatus {
         reply: oneshot::Sender<Option<Message>>,
     },
+    /// The pane's status as it stands, `idle` included: what a client that lost events
+    /// must be told to replace whatever it last saw.
+    Status {
+        reply: oneshot::Sender<Message>,
+    },
     /// The client's colours changed: answer the panes' `OSC 4/10/11` queries with these.
     SetPalette(Option<Palette>),
 }

@@ -2355,3 +2355,101 @@ fn status_without_the_feature_stays_with_watched_panes() {
         .drain(&|m| matches!(m, Message::Status { .. }))
         .is_none());
 }
+
+/// Reads exactly one frame from a raw socket (no reader thread, so the test decides when
+/// the socket stops being drained).
+fn read_frame(stream: &mut UnixStream) -> Message {
+    let mut header = [0u8; 4];
+    stream.read_exact(&mut header).expect("frame header");
+    let length = u32::from_le_bytes(header) as usize;
+    let mut frame = header.to_vec();
+    frame.resize(4 + length, 0);
+    stream.read_exact(&mut frame[4..]).expect("frame payload");
+    let (message, _) = proto::decode_frame(&frame)
+        .expect("decode")
+        .expect("whole frame");
+    message
+}
+
+/// A window that stops reading falls behind the host's event stream. Once it reads again it
+/// must still learn what it missed: here a status set while it was stalled, buried under
+/// far more events than the host buffers for one connection, plus the final size.
+#[test]
+fn a_lagging_client_gets_the_current_state_back() {
+    let _serial = one_at_a_time();
+    let host = start_host();
+    let mut worker = Client::connect(&host.socket);
+    hello(&mut worker);
+    let pane = attach_first(&mut worker);
+
+    // The slow window: a raw socket that is read through its attach and then left alone, so
+    // the host's writes to it block once the socket buffer fills and its share of the event
+    // stream piles up behind them.
+    let mut slow = UnixStream::connect(&host.socket).expect("connect");
+    for message in [
+        Message::Hello {
+            proto: proto::PROTO_VERSION,
+            client: "host-test-slow".into(),
+            features: vec!["delta".into()],
+        },
+        Message::Attach {
+            id: 2,
+            pane_id: pane,
+            size_policy: None,
+            history: Some(false),
+            since: None,
+        },
+    ] {
+        slow.write_all(&proto::encode_frame(&message).expect("encode"))
+            .expect("write");
+    }
+    let mut seen_snapshot = false;
+    loop {
+        match read_frame(&mut slow) {
+            Message::Snapshot { .. } => seen_snapshot = true,
+            Message::Layout { .. } if seen_snapshot => break,
+            _ => {}
+        }
+    }
+    expect_size_state(&mut worker, pane, (80, 24, "latest", 2));
+
+    // Every resize is a layout, a size_state and a fresh snapshot for each watcher: a few
+    // hundred of them overflow both the socket buffer and the host's event buffer.
+    let churn = |worker: &mut Client| {
+        for step in 0..400u16 {
+            let (cols, rows) = if step % 2 == 0 { (100, 30) } else { (90, 28) };
+            worker.send(&Message::ResizePane {
+                pane_id: pane,
+                cols,
+                rows,
+            });
+        }
+        expect_size_state(worker, pane, (90, 28, "latest", 2));
+    };
+    churn(&mut worker);
+    worker.send(&Message::Keys {
+        pane_id: pane,
+        bytes: b"printf '\\033]7501;state=working:app=claude\\007'\r".to_vec(),
+    });
+    worker.wait_for(|m| matches!(m, Message::Status { state, .. } if state == "working"));
+    churn(&mut worker);
+
+    let reader = slow.try_clone().expect("clone the socket for reading");
+    let mut slow = Client::new(Box::new(reader), Box::new(slow));
+    let status =
+        slow.wait_for(|m| matches!(m, Message::Status { state, .. } if state == "working"));
+    assert!(matches!(status, Message::Status { pane_id, .. } if pane_id == pane));
+    expect_size_state(&mut slow, pane, (90, 28, "latest", 2));
+    // And the screen is live again: new output reaches the window that lagged.
+    worker.send(&Message::Keys {
+        pane_id: pane,
+        bytes: b"echo after-the-lag\r".to_vec(),
+    });
+    slow.wait_for(|m| match m {
+        Message::Delta { rows, .. } => rows
+            .iter()
+            .any(|row| rows_text(std::slice::from_ref(&row.cells)).contains("after-the-lag")),
+        Message::Snapshot { .. } => screen_text(m).contains("after-the-lag"),
+        _ => false,
+    });
+}

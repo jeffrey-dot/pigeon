@@ -136,6 +136,9 @@ pub async fn close(host: &HostState, pane_id: u32) -> Option<Message> {
     if let Some(sender) = session.panes.remove(&pane_id) {
         send_or_queue(&sender, Cmd::Kill);
     }
+    if let Ok(mut exits) = host.exits.lock() {
+        exits.remove(&pane_id);
+    }
     let _ = session.layout.close(pane_id);
     if session.layout.is_empty() {
         let _ = host.events.send(Event::Layout {

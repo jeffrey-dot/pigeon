@@ -16,6 +16,7 @@ mod handshake;
 mod host_state;
 mod pane_actor;
 mod pane_query;
+mod resync;
 mod transport;
 
 use std::process::ExitCode;
