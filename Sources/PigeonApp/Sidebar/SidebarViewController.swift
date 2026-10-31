@@ -17,6 +17,7 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
     private let scroll = NSScrollView()
     private var rows: [Row] = []
     private var ticker: Timer?
+    private weak var plusButton: NSButton?
     private var selected: Int?
     /// Programmatic reloads must not look like the user clicking a row.
     private var suppressSelection = false
@@ -42,6 +43,9 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
     var onRenameGroup: ((String, String) -> Void)?
     var onReorder: (([Int]) -> Void)?
     var onNewSession: ((String) -> Void)?
+    /// The `+` dropdown (`docs/ui.md` §2.3): built by the app on each click, because the
+    /// known machines change while the window is open.
+    var newSessionMenu: (() -> NSMenu)?
     var onToggleSidebar: (() -> Void)?
 
     override func loadView() {
@@ -65,9 +69,12 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
         scroll.documentView = table
 
         // `docs/ui.md` §2.3: collapse and new-session buttons, right-aligned.
+        let plus = symbolButton("plus", action: #selector(newSessionClicked))
+        plus.setAccessibilityLabel("New Session")
+        plusButton = plus
         let buttons = NSStackView(views: [
             symbolButton("sidebar.left", action: #selector(toggleSidebarClicked)),
-            symbolButton("plus", action: #selector(newSessionClicked)),
+            plus,
         ])
         buttons.orientation = .horizontal
         buttons.spacing = SidebarMetrics.headerButtonSpacing
@@ -129,7 +136,13 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
         if ProcessInfo.processInfo.environment["PIGEON_DEBUG"] != nil {
             FileHandle.standardError.write(Data("pigeon: + clicked\n".utf8))
         }
-        onNewSession?("")
+        guard let menu = newSessionMenu?(), let plusButton else {
+            onNewSession?("")
+            return
+        }
+        // Just below the chip, left edges aligned, like a pull-down button.
+        let below = plusButton.isFlipped ? plusButton.bounds.maxY + 4 : -4
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: below), in: plusButton)
     }
 
     /// `machineName` turns a section's host into its heading text; it is asked once per machine.

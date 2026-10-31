@@ -181,6 +181,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sidebar.onRenameGroup = { [weak self] group, name in self?.renameGroup(group, name) }
         sidebar.onReorder = { [weak self] order in self?.reorder(order) }
         sidebar.onNewSession = { [weak self] cwd in self?.newSession(cwd.isEmpty ? nil : cwd) }
+        sidebar.newSessionMenu = { [weak self] in self?.buildNewSessionMenu() ?? NSMenu() }
         sidebar.onToggleSidebar = { [weak self] in self?.toggleSidebar(nil) }
 
         container = SplitContainerView(frame: frame)
@@ -998,6 +999,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func newSession(_ sender: Any?) {
         sendNewSession(cwd: rows[selectedSession ?? -1]?.cwd)
+    }
+
+    /// The sidebar `+` dropdown: a new session on any connected machine, or a way to reach one.
+    private func buildNewSessionMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        let items = SidebarModel.newSessionItems(
+            hosts: hosts.hosts,
+            connected: Set(clients.keys),
+            connecting: connectingHost,
+            localName: localMachineName)
+        for entry in items {
+            if entry.action == .connectNew { menu.addItem(.separator()) }
+            let item = NSMenuItem(
+                title: entry.title, action: #selector(newSessionMenuPicked(_:)), keyEquivalent: "")
+            item.target = self
+            item.isEnabled = entry.enabled
+            item.representedObject = NewSessionChoice(entry.action)
+            // Same shortcut as the Hosts menu item; ⌘T is not shown because it follows the
+            // machine on screen, which is not always this Mac.
+            if entry.action == .connectNew { item.keyEquivalent = "O" }
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    @objc private func newSessionMenuPicked(_ sender: NSMenuItem) {
+        guard let choice = sender.representedObject as? NewSessionChoice else { return }
+        switch choice.action {
+        case let .newSession(host):
+            // The new row must land in the window: `created` only selects on the visible host.
+            if host != activeHost { switchTo(host: host == "local" ? nil : host) }
+            sendNewSession(cwd: rows[selectedSession ?? -1]?.cwd)
+        case let .connect(host):
+            switchTo(host: host)
+        case .connectNew:
+            connectToHost(sender)
+        }
     }
 
     /// ⌘⇧↩ zooms the focused pane; pressing it again gives the siblings their space back.

@@ -108,6 +108,30 @@ final class SidebarOrderingTests: XCTestCase {
             "a ⌘T answer is on its way")
     }
 
+    func testThePlusMenuListsThisMacThenEverySavedHostThenConnect() {
+        let items = SidebarModel.newSessionItems(
+            hosts: ["arch", "pi", "box"], connected: ["local", "arch"], connecting: "pi",
+            localName: "MacBook Air")
+        XCTAssertEqual(items.map(\.title), [
+            "New Session on MacBook Air",
+            "New Session on arch",
+            "pi · connecting",
+            "Connect to box",
+            "Connect to Host…",
+        ])
+        XCTAssertEqual(items.map(\.action), [
+            .newSession(host: "local"), .newSession(host: "arch"), .connect(host: "pi"),
+            .connect(host: "box"), .connectNew,
+        ])
+        XCTAssertEqual(items.map(\.enabled), [true, true, false, true, true])
+    }
+
+    func testThePlusMenuWithNoSavedHostsStillOffersToConnect() {
+        let items = SidebarModel.newSessionItems(
+            hosts: [], connected: [], connecting: nil, localName: "")
+        XCTAssertEqual(items.map(\.title), ["New Session on This Mac", "Connect to Host…"])
+    }
+
     func testRowSubtitleShowsTheActiveApplication() {
         var session = row(1, .working, app: "vim")
         session.lastSeen = Date(timeIntervalSince1970: 1_000)

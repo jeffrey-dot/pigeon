@@ -122,6 +122,46 @@ public enum SidebarModel {
         }
     }
 
+    /// One item of the sidebar's `+` dropdown (`docs/ui.md` §2.3).
+    public struct NewSessionItem: Equatable {
+        public enum Action: Equatable {
+            /// `new_session` on this host (`"local"` is this Mac).
+            case newSession(host: String)
+            /// The host is known but not connected: connect it (its sessions come with it).
+            case connect(host: String)
+            /// Ask for an ssh destination (`Connect to Host…`).
+            case connectNew
+        }
+
+        public var title: String
+        public var action: Action
+        public var enabled: Bool
+    }
+
+    /// This Mac first, then every saved ssh host in the order it was added, then a way to add
+    /// one. A host still connecting is listed but disabled, so a click cannot race the probe.
+    public static func newSessionItems(
+        hosts: [String], connected: Set<String>, connecting: String?, localName: String
+    ) -> [NewSessionItem] {
+        var items = [NewSessionItem(
+            title: "New Session on \(machineLabel(host: "local", localName: localName))",
+            action: .newSession(host: "local"), enabled: true)]
+        for host in hosts where host != "local" {
+            if connected.contains(host) {
+                items.append(NewSessionItem(
+                    title: "New Session on \(host)", action: .newSession(host: host), enabled: true))
+            } else if host == connecting {
+                items.append(NewSessionItem(
+                    title: "\(host) · connecting", action: .connect(host: host), enabled: false))
+            } else {
+                items.append(NewSessionItem(
+                    title: "Connect to \(host)", action: .connect(host: host), enabled: true))
+            }
+        }
+        items.append(NewSessionItem(title: "Connect to Host…", action: .connectNew, enabled: true))
+        return items
+    }
+
     /// The machine heading above a host's groups: this computer's name for `local`, otherwise
     /// what the user typed to reach it (ssh alias or address).
     public static func machineLabel(host: String, localName: String) -> String {
