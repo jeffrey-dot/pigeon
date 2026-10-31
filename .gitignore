@@ -10,6 +10,8 @@ DerivedData/
 
 # 构建产物
 pigeon-host
+# ...but not the host's sources, which live in a directory of the same name.
+!core/src/bin/pigeon-host/
 *.p8
 *.dmg
 

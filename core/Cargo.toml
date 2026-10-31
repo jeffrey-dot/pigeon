@@ -13,7 +13,7 @@ crate-type = ["rlib", "staticlib", "cdylib"]
 
 [[bin]]
 name = "pigeon-host"
-path = "src/bin/pigeon-host.rs"
+path = "src/bin/pigeon-host/main.rs"
 required-features = ["host", "internals"]
 
 # Spawns the pigeon-host binary, which needs the host feature to exist.
