@@ -14,9 +14,18 @@ final class PaneView: NSView {
     }
 
     struct Cursor: Equatable, Sendable {
+        enum Shape: UInt8, Sendable {
+            case block = 0
+            case underline = 1
+            case bar = 2
+        }
+
         var x: Int
         var y: Int
         var visible: Bool
+        var shape: Shape = .block
+        /// The pane is not the key view: drawn as an outline, like every macOS terminal.
+        var hollow = false
     }
 
     /// Set by the container once the pane view is created.
@@ -252,7 +261,8 @@ final class PaneView: NSView {
         cursor = Cursor(
             x: Int(view.cursor.x),
             y: Int(view.cursor.y),
-            visible: view.cursor.visible != 0
+            visible: view.cursor.visible != 0,
+            shape: Cursor.Shape(rawValue: view.cursor.shape) ?? .block
         )
         alt = view.alt_screen != 0
         reported = (UInt16(cols), UInt16(rows))
@@ -310,7 +320,8 @@ final class PaneView: NSView {
             cursor = Cursor(
                 x: Int(frame.cursor.x),
                 y: Int(frame.cursor.y),
-                visible: frame.cursor.visible != 0
+                visible: frame.cursor.visible != 0,
+                shape: Cursor.Shape(rawValue: frame.cursor.shape) ?? .block
             )
         }
         if frame.alt_screen < 2 {

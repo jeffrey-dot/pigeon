@@ -38,8 +38,15 @@ struct RowInstances: Equatable {
                     origin: SIMD2(left, top), size: SIMD2(right - left, bottom - top),
                     color: CellPalette.components(bg)))
             }
-            let text = CellPalette.components(textColor(fg))
-            if cell.codepoint > 32, cell.codepoint != 0x7f {
+            // SGR 2 (faint): same hue at reduced opacity, which keeps it readable on both
+            // the light and the dark card where mixing toward the background would not.
+            let text = CellPalette.components(
+                textColor(fg), alpha: cell.attrs & CellAttrs.dim != 0 ? 0.6 : 1)
+            if let strokes = BoxDrawing.rects(
+                cell.codepoint, origin: SIMD2(left, top), size: SIMD2(right - left, bottom - top),
+                thin: metrics.lineThickness, color: text) {
+                out.decorations.append(contentsOf: strokes)
+            } else if cell.codepoint > 32, cell.codepoint != 0x7f {
                 let key = GlyphKey(
                     codepoint: cell.codepoint,
                     bold: cell.attrs & CellAttrs.bold != 0,

@@ -68,7 +68,11 @@ struct Preedit: Equatable {
         if after < cols, out[place.row * cols + after].width == 0 {
             out[place.row * cols + after] = .blank
         }
-        let moved = PaneView.Cursor(x: place.caretColumn, y: place.row, visible: true)
+        var moved = cursor
+        moved.x = place.caretColumn
+        moved.y = place.row
+        moved.visible = true
+        moved.shape = .bar
         return (out, moved, place.row)
     }
 }
