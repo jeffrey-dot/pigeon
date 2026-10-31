@@ -46,9 +46,8 @@ pub async fn new_session(
         DEFAULT_ROWS,
     );
     host.sessions.lock().await.insert(pane_id, session);
-    // The pane may already have announced its title (a shell that sets it on start) before
-    // the session was in the table, and that list went out without it. Every window learns
-    // of the new session from this one, and it carries whatever the pane has reported.
+    // The pane may have announced its title (a shell that sets it on start) before the
+    // session was in the table, and that list went out without the session; this one has it.
     let _ = host.events.send(Event::SessionsChanged);
     Message::Created {
         id,

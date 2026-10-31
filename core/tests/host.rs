@@ -994,14 +994,27 @@ fn a_prompt_like_title_is_not_used_as_the_program_name() {
     hello(&mut client);
     let pane = attach_first(&mut client);
 
-    let message = client.wait_for(|message| match message {
-        Message::Sessions { items } => items
+    // Ask for the list instead of waiting for a broadcast: the one carrying the title can
+    // arrive while `attach_first` is still waiting for `created`, and that wait discards it.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let items = loop {
+        client.send(&Message::Sessions { items: Vec::new() });
+        let Message::Sessions { items } =
+            client.wait_for(|message| matches!(message, Message::Sessions { .. }))
+        else {
+            unreachable!()
+        };
+        if items
             .iter()
-            .any(|session| session.active_title.as_deref() == Some("~/dev")),
-        _ => false,
-    });
-    let Message::Sessions { items } = message else {
-        unreachable!()
+            .any(|session| session.active_title.as_deref() == Some("~/dev"))
+        {
+            break items;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the title never reached the session list"
+        );
+        std::thread::sleep(Duration::from_millis(50));
     };
     let session = items
         .iter()
