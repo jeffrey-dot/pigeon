@@ -349,10 +349,20 @@ pub enum Message {
         pane_id: u32,
         state: String,
         seq: u32,
-        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         kind: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         msg: Option<String>,
+        /// Which agent reported (`app=` in OSC 7501), e.g. `claude`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        app: Option<String>,
+        /// The record's id (`id=`); nested agents use dotted ids (`main.sub1`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+        /// Milliseconds since the record entered this state, on the host's clock. A
+        /// duration rather than a timestamp, so client and server clocks need not agree.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        age_ms: Option<u64>,
     },
     AckStatus {
         pane_id: u32,
@@ -708,6 +718,16 @@ mod tests {
             Message::PaneExited {
                 pane_id: 1,
                 code: -1,
+            },
+            Message::Status {
+                pane_id: 1,
+                state: "blocked".into(),
+                seq: 3,
+                kind: Some("permission".into()),
+                msg: Some("Run cargo test?".into()),
+                app: Some("claude".into()),
+                id: Some("main".into()),
+                age_ms: Some(1500),
             },
             Message::Ping { ts: 1 },
             Message::Pong { ts: 1 },

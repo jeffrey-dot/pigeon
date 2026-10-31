@@ -1314,13 +1314,8 @@ fn spawn_pane(
                             // No flush: the palette only affects query answers, not the screen.
                         }
                         Cmd::LatestStatus { reply } => {
-                            let _ = reply.send(pane.status().latest_unacked().map(|record| Message::Status {
-                                pane_id,
-                                state: record.state.as_str().to_owned(),
-                                seq: record.seq,
-                                kind: (record.kind.as_str() != "").then(|| record.kind.as_str().to_owned()),
-                                msg: (!record.msg.is_empty()).then(|| record.msg.clone()),
-                            }));
+                            let pending = pane.status().latest_unacked().is_some();
+                            let _ = reply.send(pending.then(|| pane.status_message()));
                         }
                     }
                 }
@@ -1358,24 +1353,7 @@ fn spawn_pane(
                     let revision = pane.status().revision();
                     if revision != last_revision {
                         last_revision = revision;
-                        // A cleared record set must reach clients too: "idle" with
-                        // seq 0 means "nothing is pending".
-                        let message = match pane.status().latest_unacked() {
-                            Some(record) => Message::Status {
-                                pane_id,
-                                state: record.state.as_str().to_owned(),
-                                seq: record.seq,
-                                kind: (record.kind.as_str() != "").then(|| record.kind.as_str().to_owned()),
-                                msg: (!record.msg.is_empty()).then(|| record.msg.clone()),
-                            },
-                            None => Message::Status {
-                                pane_id,
-                                state: "idle".to_owned(),
-                                seq: 0,
-                                kind: None,
-                                msg: None,
-                            },
-                        };
+                        let message = pane.status_message();
                         let _ = events.send(Event::Status { pane_id, message });
                     }
                     let replies = pane.take_replies();

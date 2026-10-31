@@ -2,13 +2,15 @@
 //!
 //! The one place that decides what a status report means and how long it lives.
 //! Lifecycle rules come from the spec and from `AGENTS.md` §7:
-//!   * `done` / `error` stay until the user has seen them (`ack`);
+//!   * `done` / `error` stay until the user has seen them (`ack`); acking a live
+//!     `working` / `blocked` record is a no-op;
 //!   * `working` / `blocked` die with the process or at an OSC 133A prompt;
 //!   * at most [`MAX_RECORDS`] records per pane, evicting acked ones first.
 
 mod parse;
 
 use std::collections::BTreeMap;
+use std::time::Instant;
 
 /// At most this many records per pane.
 pub const MAX_RECORDS: usize = 256;
@@ -93,6 +95,9 @@ pub struct Record {
     pub seq: u32,
     /// True once the user has seen this record.
     pub acked: bool,
+    /// When the record entered `state`. A repeated report of the same state (an agent
+    /// refreshing its `msg`) keeps the original time, so "working · 3m" keeps counting.
+    pub since: Instant,
 }
 
 /// Per-pane status store.
@@ -167,11 +172,13 @@ impl StatusStore {
         self.revision = self.revision.wrapping_add(1);
     }
 
-    /// Marks whichever record carries `seq` as seen.
+    /// Marks whichever record carries `seq` as seen. Only `done`/`error` can be seen: a
+    /// `working`/`blocked` record is the agent's live state and lasts until the agent, its
+    /// process or a prompt replaces it, however often a client that is looking acks it.
     pub fn ack_seq(&mut self, seq: u32) -> bool {
         let mut acked = false;
         for record in self.records.values_mut() {
-            if record.seq == seq {
+            if record.seq == seq && record.state.is_terminal() {
                 record.acked = true;
                 acked = true;
             }
@@ -208,10 +215,11 @@ impl StatusStore {
         self.records.is_empty()
     }
 
-    /// Marks a record as seen by the user. Only the current `seq` can be acked.
+    /// Marks a record as seen by the user. Only the current `seq` of a `done`/`error`
+    /// record can be acked (see [`StatusStore::ack_seq`]).
     pub fn ack(&mut self, id: &str, seq: u32) -> bool {
         match self.records.get_mut(id) {
-            Some(record) if record.seq == seq => {
+            Some(record) if record.seq == seq && record.state.is_terminal() => {
                 record.acked = true;
                 true
             }
@@ -261,6 +269,10 @@ impl StatusStore {
                     return;
                 };
                 self.next_seq = self.next_seq.saturating_add(1);
+                let since = match self.records.get(&report.id) {
+                    Some(previous) if previous.state == state => previous.since,
+                    _ => Instant::now(),
+                };
                 let record = Record {
                     id: report.id.clone(),
                     state,
@@ -269,6 +281,7 @@ impl StatusStore {
                     app: report.app,
                     seq: self.next_seq,
                     acked: false,
+                    since,
                 };
                 self.records.insert(report.id, record);
                 self.touch();
@@ -433,6 +446,35 @@ mod tests {
         assert!(!store.ack("missing", 1));
         assert!(store.ack("a", 1));
         assert!(store.get("a").expect("record").acked);
+    }
+
+    #[test]
+    fn acking_a_live_state_keeps_it_visible() {
+        // A client acks whatever it is looking at; `blocked` must survive that until the
+        // agent moves on, otherwise the session the user is watching never shows it.
+        let mut store = StatusStore::new();
+        store.feed(&report("id=a:state=blocked:kind=permission"));
+        assert!(!store.ack_seq(1), "blocked is not something to acknowledge");
+        assert!(!store.ack("a", 1));
+        assert_eq!(store.latest_unacked().map(|r| r.state), Some(State::Blocked));
+        store.feed(&report("id=a:state=working"));
+        assert!(!store.ack_seq(2));
+        assert_eq!(store.latest_unacked().map(|r| r.state), Some(State::Working));
+        store.feed(&report("id=a:state=done"));
+        assert!(store.ack_seq(3), "done is acknowledged once seen");
+        assert!(store.latest_unacked().is_none());
+    }
+
+    #[test]
+    fn a_repeated_state_keeps_its_start_time() {
+        let mut store = StatusStore::new();
+        store.feed(&report("id=a:state=working:msg=b25l"));
+        let started = store.get("a").expect("record").since;
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        store.feed(&report("id=a:state=working:msg=dHdv"));
+        assert_eq!(store.get("a").expect("record").since, started, "same state, same clock");
+        store.feed(&report("id=a:state=blocked"));
+        assert!(store.get("a").expect("record").since > started, "a new state restarts it");
     }
 
     #[test]

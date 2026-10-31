@@ -107,6 +107,33 @@ impl PaneState {
             .or_else(|| self.status.title().map(str::to_owned))
     }
 
+    /// The `status` message clients get for this pane: the newest record the user has not
+    /// seen, or `idle` with `seq` 0 when nothing is pending (a cleared set must reach them).
+    pub fn status_message(&self) -> Message {
+        match self.status.latest_unacked() {
+            Some(record) => Message::Status {
+                pane_id: self.pane_id,
+                state: record.state.as_str().to_owned(),
+                seq: record.seq,
+                kind: (!record.kind.as_str().is_empty()).then(|| record.kind.as_str().to_owned()),
+                msg: (!record.msg.is_empty()).then(|| record.msg.clone()),
+                app: (!record.app.is_empty()).then(|| record.app.clone()),
+                id: (!record.id.is_empty()).then(|| record.id.clone()),
+                age_ms: Some(u64::try_from(record.since.elapsed().as_millis()).unwrap_or(u64::MAX)),
+            },
+            None => Message::Status {
+                pane_id: self.pane_id,
+                state: "idle".to_owned(),
+                seq: 0,
+                kind: None,
+                msg: None,
+                app: None,
+                id: None,
+                age_ms: None,
+            },
+        }
+    }
+
     pub fn status_mut(&mut self) -> &mut StatusStore {
         &mut self.status
     }

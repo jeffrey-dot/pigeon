@@ -1797,6 +1797,55 @@ fn acked_status_is_not_replayed_after_reconnect() {
 }
 
 #[test]
+fn blocked_survives_an_ack_and_names_its_agent() {
+    let _serial = one_at_a_time();
+    let host = start_host();
+    let mut client = Client::connect(&host.socket);
+    hello(&mut client);
+    let pane = attach_first(&mut client);
+    client.send(&Message::Keys {
+        pane_id: pane,
+        bytes: b"printf '\\033]7501;state=blocked:kind=permission:app=claude:msg=UnVuIHRlc3RzPw==\\007'\r"
+            .to_vec(),
+    });
+    let blocked =
+        client.wait_for(|m| matches!(m, Message::Status { state, .. } if state == "blocked"));
+    let Message::Status {
+        seq,
+        app,
+        msg,
+        kind,
+        age_ms,
+        ..
+    } = blocked
+    else {
+        unreachable!()
+    };
+    assert_eq!(app.as_deref(), Some("claude"));
+    assert_eq!(msg.as_deref(), Some("Run tests?"));
+    assert_eq!(kind.as_deref(), Some("permission"));
+    assert!(
+        age_ms.is_some(),
+        "the client needs the state's age to show `Needs you · 2m`"
+    );
+
+    // The window acks what it is looking at; the agent is still waiting, so the host must
+    // not answer with `idle` on the next output.
+    client.send(&Message::AckStatus { pane_id: pane, seq });
+    client.send(&Message::Keys {
+        pane_id: pane,
+        bytes: vec![b'\r'],
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(
+        client
+            .drain(&|m| matches!(m, Message::Status { state, .. } if state == "idle"))
+            .is_none(),
+        "an acked `blocked` must stay visible"
+    );
+}
+
+#[test]
 fn clearing_a_status_broadcasts_idle() {
     let _serial = one_at_a_time();
     let host = start_host();

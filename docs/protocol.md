@@ -97,10 +97,11 @@
 | c→s | `keys` | `pane_id: u32`, `bytes: bstr` | — | 已编码好的终端字节（kitty protocol 或 legacy 由客户端决定） |
 | c→s | `mouse` | `pane_id: u32`, `kind: "down"\|"up"\|"move"\|"wheel"`, `x: u16`, `y: u16`, `button: u8`, `mods: u8` | — | `mods` 位：`1` shift、`2` alt、`4` ctrl |
 | c→s | `paste` | `pane_id: u32`, `text: str` | — | 宿主负责括号粘贴包装 |
-| s→c | `status` | `pane_id: u32`, `state: "idle"\|"working"\|"blocked"\|"done"\|"error"`, `seq: u32` | `kind: "permission"\|"question"\|"auth"`, `msg: str` | 来自 OSC 7501；`msg` 只当纯文本 |
+| s→c | `status` | `pane_id: u32`, `state: "idle"\|"working"\|"blocked"\|"done"\|"error"`, `seq: u32` | `kind: "permission"\|"question"\|"auth"`, `msg: str`, `app: str`, `id: str`, `age_ms: u64` | 来自 OSC 7501；`msg`/`app` 只当纯文本；`app` 是上报的 agent 名（`app=`），`id` 是记录 id；`age_ms` = 进入当前 `state` 已多少毫秒（宿主时钟上的时长，不是时间戳，两端时钟不必一致；同一状态重复上报不重置） |
 
 - `status` 的生命周期由内核负责：进程退出或 OSC 133A 提示符 → 丢弃 `working`/`blocked`；
-  `done`/`error` 保留到客户端 `ack_status`。
+  `done`/`error` 保留到客户端 `ack_status`。`ack_status` 对 `working`/`blocked` 无效：那是 agent 当下的状态，
+  用户正看着也不能被“看过”清掉。
 - `msg` 含控制字符或解不出 UTF-8 → 整条丢弃（不带 `msg` 也不改写），见 `AGENTS.md` §7 不变量 3。
 
 ### 3.5 控制
