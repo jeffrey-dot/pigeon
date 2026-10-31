@@ -55,6 +55,7 @@ pub enum PgMsgType {
     PG_MSG_ZOOM_PANE = 26,
     PG_MSG_UNZOOM = 27,
     PG_MSG_SCROLL = 28,
+    PG_MSG_PASTE = 29,
 }
 
 /// Wire name ↔ enum. Kept in one place so the two can never drift.
@@ -87,6 +88,7 @@ const NAMES: &[(PgMsgType, &str)] = &[
     (PgMsgType::PG_MSG_ZOOM_PANE, "zoom_pane"),
     (PgMsgType::PG_MSG_UNZOOM, "unzoom"),
     (PgMsgType::PG_MSG_SCROLL, "scroll"),
+    (PgMsgType::PG_MSG_PASTE, "paste"),
 ];
 
 fn name_of(msg_type: PgMsgType) -> Option<&'static str> {

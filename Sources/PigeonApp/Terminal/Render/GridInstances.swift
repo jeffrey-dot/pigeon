@@ -79,6 +79,18 @@ struct GridInstances {
                 size: SIMD2(metrics.columnX(cursor.x + 1) - left, metrics.rowY(cursor.y + 1) - top),
                 color: CellPalette.components(frame.palette.foreground, alpha: 0.35)))
         }
+        let metrics = frame.metrics
+        for span in frame.selection where span.row >= 0 && span.row < frame.rows {
+            let first = max(span.first, 0)
+            let last = min(span.last, frame.cols - 1)
+            guard first <= last else { continue }
+            let left = metrics.columnX(first)
+            let top = metrics.rowY(span.row)
+            out.append(RectInstance(
+                origin: SIMD2(left, top),
+                size: SIMD2(metrics.columnX(last + 1) - left, metrics.rowY(span.row + 1) - top),
+                color: frame.selectionColor))
+        }
         if let thumb = frame.thumb {
             out.append(RectInstance(origin: thumb.origin, size: thumb.size, color: frame.thumbColor))
         }

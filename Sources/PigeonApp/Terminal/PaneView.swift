@@ -46,6 +46,11 @@ final class PaneView: NSView {
     var reportedVisible: Bool?
 
     var onInput: (([UInt8]) -> Void)?
+    /// Clipboard text for the host's `paste` (it adds bracketed-paste markers when asked).
+    var onPaste: ((String) -> Void)?
+    /// The drag in progress or last made; `selectionActive` once it covers any text.
+    var selection: TerminalSelection?
+    var selectionActive = false
     var onResize: ((UInt16, UInt16) -> Void)?
     private var reported: (UInt16, UInt16) = (0, 0)
 
@@ -296,10 +301,19 @@ final class PaneView: NSView {
         return true
     }
 
-    /// Clicks belong to the container (divider drags, focus); NSView does not
-    /// bubble unhandled mouse events, so forward them explicitly.
+    /// The container still sees every click first (focus, divider drags); the pane then
+    /// starts a selection of its own.
     override func mouseDown(with event: NSEvent) {
         nextResponder?.mouseDown(with: event)
+        beginSelection(with: event)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        extendSelection(with: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        nextResponder?.mouseUp(with: event)
     }
 
     override func keyDown(with event: NSEvent) {
@@ -310,6 +324,7 @@ final class PaneView: NSView {
             return
         }
         guard let bytes = KeyEncoder.encode(stroke) else { return }
+        clearSelection()
         // Typing while scrolled back snaps to the live screen, like every terminal.
         onScrollToBottom?()
         onInput?(bytes)

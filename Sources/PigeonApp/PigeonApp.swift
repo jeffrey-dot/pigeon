@@ -196,6 +196,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         container.onFocus = { [weak self] pane in self?.focus(pane) }
         container.onResizeSplit = { [weak self] split, ratio in self?.resizeSplit(split, ratio) }
         container.onPaneInput = { [weak self] pane, bytes in self?.sendKeys(pane, bytes) }
+        container.onPanePaste = { [weak self] pane, text in self?.sendPaste(pane, text) }
         container.onPaneResize = { [weak self] pane, cols, rows in
             self?.sendResize(pane, cols: cols, rows: rows)
         }
@@ -311,6 +312,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appMenu.addItem(withTitle: "Quit pigeon", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
 
+        // Standard actions with no target: AppKit routes them to the first responder, which
+        // is the focused pane (or the sidebar's rename field while editing a name).
+        let editItem = NSMenuItem()
+        mainMenu.addItem(editItem)
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editItem.submenu = editMenu
+
         let viewItem = NSMenuItem()
         mainMenu.addItem(viewItem)
         let viewMenu = NSMenu(title: "View")
@@ -423,6 +434,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let session = LocalSession()
         localSession = session
         container.onPaneInput = { [weak session] _, bytes in session?.write(bytes) }
+        container.onPanePaste = { [weak session] _, text in
+            session?.write(Array(text.replacingOccurrences(of: "\n", with: "\r").utf8))
+        }
         container.onPaneResize = { [weak session] _, cols, rows in
             session?.resize(cols: cols, rows: rows)
         }
@@ -751,6 +765,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }, type: PG_MSG_SCROLL)
     }
 
+    private func sendPaste(_ pane: UInt32, _ text: String) {
+        send({ message in
+            Wire.set(message, u32: "pane_id", pane)
+            Wire.set(message, str: "text", text)
+        }, type: PG_MSG_PASTE)
+    }
+
     private func sendKeys(_ pane: UInt32, _ bytes: [UInt8]) {
         send({ message in
             Wire.set(message, u32: "pane_id", pane)
@@ -985,6 +1006,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             container.apply(.empty)
             // A degraded session pointed these at its local VT; the protocol path takes over.
             container.onPaneInput = { [weak self] pane, bytes in self?.sendKeys(pane, bytes) }
+        container.onPanePaste = { [weak self] pane, text in self?.sendPaste(pane, text) }
             container.onPaneResize = { [weak self] pane, cols, rows in
                 self?.sendResize(pane, cols: cols, rows: rows)
             }
@@ -1556,6 +1578,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 report(false, "session-click then typing (no keys sent)")
             }
+        case 6:
+            // Edit menu: Select All then Copy must put the screen's text on the pasteboard,
+            // and Paste must reach the host as one `paste` message. Driven through the menu
+            // items' own actions and the responder chain, like a click on the menu.
+            guard let pane = focusedPane, let view = container.paneView(pane) else {
+                report(false, "copy (no pane)")
+                return
+            }
+            let saved = NSPasteboard.general.string(forType: .string)
+            func run(_ title: String) -> Bool {
+                // Menu-bar items carry no title of their own; the submenu does.
+                let edit = NSApp.mainMenu?.items.first { $0.submenu?.title == "Edit" }?.submenu
+                guard let item = edit?.item(withTitle: title),
+                      let action = item.action
+                else { return false }
+                // This session cannot make the window key, so `sendAction(to: nil)` finds
+                // no chain; walk this window's chain from its first responder instead, which
+                // is the chain the menu uses once the window is key.
+                return window.firstResponder?.tryToPerform(action, with: item) ?? false
+            }
+            window.makeFirstResponder(view)
+            let selected = run("Select All")
+            let copied = run("Copy")
+            let text = NSPasteboard.general.string(forType: .string) ?? ""
+            let visible = view.selectedText
+            guard selected, copied, !visible.isEmpty, text == visible else {
+                report(false, "copy (selectAll=\(selected) copy=\(copied) pasteboard=\(text.count) chars)")
+                return
+            }
+            let before = sentCounts[PG_MSG_PASTE] ?? 0
+            let pasted = run("Paste")
+            if let saved {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(saved, forType: .string)
+            }
+            report(pasted && (sentCounts[PG_MSG_PASTE] ?? 0) > before, "select all, copy, paste")
         default:
             FileHandle.standardError.write(Data("SELFTEST PASS\n".utf8))
             exit(0)

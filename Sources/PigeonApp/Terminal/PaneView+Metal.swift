@@ -73,8 +73,22 @@ extension PaneView {
             height: Int((bounds.height * scale).rounded()),
             thumb: thumb.map { (origin: $0.0, size: $0.1) },
             thumbColor: thumbColor,
-            dirty: dirty))
+            dirty: dirty,
+            selection: selectionSpans(),
+            selectionColor: selectionColor(appearance)))
         dirty = .none
+    }
+
+    /// The system's selection colour, translucent so the text under it stays readable.
+    private func selectionColor(_ appearance: NSAppearance) -> SIMD4<Float> {
+        var color = SIMD4<Float>(0.3, 0.5, 1, 0.35)
+        appearance.performAsCurrentDrawingAppearance {
+            let accent = NSColor.selectedContentBackgroundColor.usingColorSpace(.sRGB) ?? .systemBlue
+            color = SIMD4(
+                Float(accent.redComponent), Float(accent.greenComponent),
+                Float(accent.blueComponent), 0.38)
+        }
+        return color
     }
 
     /// Posts the current screen; a hidden pane has no renderer and catches up with one

@@ -13,6 +13,7 @@ final class SplitContainerView: NSView {
     var onFocus: ((UInt32) -> Void)?
     var onResizeSplit: ((UInt32, Double) -> Void)?
     var onPaneInput: ((UInt32, [UInt8]) -> Void)?
+    var onPanePaste: ((UInt32, String) -> Void)?
     var onPaneResize: ((UInt32, UInt16, UInt16) -> Void)?
     /// ⌘⇧↩: zoom the focused pane, or unzoom it when it already fills the window.
     var onToggleZoom: (() -> Void)?
@@ -57,6 +58,7 @@ final class SplitContainerView: NSView {
         let view = PaneView(frame: .zero)
         view.paneID = id
         view.onInput = { [weak self] bytes in self?.onPaneInput?(id, bytes) }
+        view.onPaste = { [weak self] text in self?.onPanePaste?(id, text) }
         view.onResize = { [weak self] cols, rows in self?.onPaneResize?(id, cols, rows) }
         view.onScroll = { [weak self] lines in self?.onPaneScroll?(id, lines) }
         view.onScrollToBottom = { [weak self] in self?.onPaneScrollBottom?(id) }
@@ -155,6 +157,12 @@ final class SplitContainerView: NSView {
     }
 
     // MARK: - menu actions
+
+    // Edit menu: the container is first responder until a pane is clicked (launch, after the
+    // sidebar), and the menu must work then too, on the focused pane.
+    @objc func copy(_ sender: Any?) { panes[model.focus]?.copy(sender) }
+    @objc func paste(_ sender: Any?) { panes[model.focus]?.paste(sender) }
+    @objc override func selectAll(_ sender: Any?) { panes[model.focus]?.selectAll(sender) }
 
     @objc func splitVertical(_ sender: Any?) { onSplit?(PG_AXIS_VERTICAL) }
     @objc func splitHorizontal(_ sender: Any?) { onSplit?(PG_AXIS_HORIZONTAL) }
