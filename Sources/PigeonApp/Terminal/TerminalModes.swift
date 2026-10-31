@@ -10,6 +10,7 @@ enum TerminalModes {
     static let focusEvents: UInt32 = 1 << 6
     static let appKeypad: UInt32 = 1 << 7
     static let alternateScroll: UInt32 = 1 << 8
+    static let cursorBlink: UInt32 = 1 << 9
 
     /// Any of the three mouse-reporting modes: clicks then belong to the program.
     static let anyMouse = mouseClick | mouseDrag | mouseMotion

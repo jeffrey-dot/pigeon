@@ -36,7 +36,13 @@ final class PaneView: NSView {
     /// The alternate screen keeps no scrollback: vim/htop/less own the whole screen.
     private(set) var alt = false
     /// `MODE_*` bits the program turned on (`docs/protocol.md` §3.3): arrows, mouse, paste.
-    var modes: UInt32 = 0
+    var modes: UInt32 = 0 {
+        didSet { if modes != oldValue { syncBlink() } }
+    }
+    /// The blink phase (`CursorBlink`) and the timer that redraws it; the timer only runs
+    /// while the program asked to blink and this pane has the keyboard.
+    var blink = CursorBlink(now: Date())
+    var blinkTimer: Timer?
     /// Lines the user wants to look back (positive) or forward (negative). The host owns the
     /// history and answers with the shifted screen (`scroll`, protocol §3.3), so a ten
     /// thousand line backlog never travels over the wire.
@@ -177,6 +183,8 @@ final class PaneView: NSView {
         super.viewDidMoveToWindow()
         syncRenderer()
         syncGrid()
+        // Off-window: the timer must not keep the pane (and its renderer) alive.
+        syncBlink()
     }
 
     override func viewDidHide() {

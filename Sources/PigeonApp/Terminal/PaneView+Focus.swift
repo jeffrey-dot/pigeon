@@ -10,7 +10,7 @@ extension PaneView {
     }
 
     override func becomeFirstResponder() -> Bool {
-        defer { screenChanged() }
+        defer { syncBlink(); screenChanged() }
         return super.becomeFirstResponder()
     }
 
@@ -18,7 +18,7 @@ extension PaneView {
         // Leaving with half-typed pinyin would strand it; commit what the user sees.
         if hasMarkedText() { unmarkText() }
         inputContext?.discardMarkedText()
-        defer { screenChanged() }
+        defer { syncBlink(); screenChanged() }
         return super.resignFirstResponder()
     }
 
@@ -36,6 +36,28 @@ extension PaneView {
 
     /// The cursor goes hollow with the window, not only with the pane.
     @objc func keyWindowChanged(_ note: Notification) {
+        syncBlink()
         screenChanged()
+    }
+
+    /// Starts the blink timer when the program wants a blinking cursor and this pane can be
+    /// typed into (an unfocused cursor is a steady outline); stops it otherwise.
+    func syncBlink() {
+        let wanted = modes & TerminalModes.cursorBlink != 0
+            && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            && window != nil
+            && (window?.isKeyWindow ?? false) && window?.firstResponder === self
+        if wanted, blinkTimer == nil {
+            let timer = Timer(timeInterval: CursorBlink.period / 2, repeats: true) { [weak self] _ in
+                self?.screenChanged()
+            }
+            timer.tolerance = 0.05
+            RunLoop.main.add(timer, forMode: .common)
+            blinkTimer = timer
+        } else if !wanted, let timer = blinkTimer {
+            timer.invalidate()
+            blinkTimer = nil
+            screenChanged()
+        }
     }
 }

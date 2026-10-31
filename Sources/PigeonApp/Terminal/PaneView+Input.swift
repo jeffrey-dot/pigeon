@@ -93,6 +93,7 @@ extension PaneView: NSTextInputClient {
     }
 
     func sendBytes(_ bytes: [UInt8]) {
+        blink.typed(at: Date())
         clearSelection()
         // Typing while scrolled back snaps to the live screen, like every terminal.
         onScrollToBottom?()

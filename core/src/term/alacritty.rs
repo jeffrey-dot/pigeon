@@ -288,8 +288,8 @@ impl Term for AlacrittyTerm {
     fn modes(&self) -> u32 {
         use super::{
             MODE_ALTERNATE_SCROLL, MODE_APP_CURSOR, MODE_APP_KEYPAD, MODE_BRACKETED_PASTE,
-            MODE_FOCUS_EVENTS, MODE_MOUSE_CLICK, MODE_MOUSE_DRAG, MODE_MOUSE_MOTION,
-            MODE_MOUSE_SGR,
+            MODE_CURSOR_BLINK, MODE_FOCUS_EVENTS, MODE_MOUSE_CLICK, MODE_MOUSE_DRAG,
+            MODE_MOUSE_MOTION, MODE_MOUSE_SGR,
         };
         let mode = self.term.mode();
         [
@@ -306,6 +306,11 @@ impl Term for AlacrittyTerm {
         .iter()
         .filter(|(flag, _)| mode.contains(*flag))
         .fold(0, |bits, (_, bit)| bits | bit)
+            | if self.term.cursor_style().blinking {
+                MODE_CURSOR_BLINK
+            } else {
+                0
+            }
     }
 
     fn take_replies(&mut self) -> Vec<u8> {

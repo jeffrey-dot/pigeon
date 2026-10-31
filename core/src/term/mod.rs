@@ -259,10 +259,12 @@ pub const MODE_FOCUS_EVENTS: u32 = 1 << 6;
 pub const MODE_APP_KEYPAD: u32 = 1 << 7;
 /// Wheel on the alternate screen scrolls by sending arrow keys (`?1007`, alacritty default on).
 pub const MODE_ALTERNATE_SCROLL: u32 = 1 << 8;
+/// The program asked for a blinking cursor (DECSCUSR 1/3/5, or `?12h`).
+pub const MODE_CURSOR_BLINK: u32 = 1 << 9;
 
 #[cfg(test)]
 mod tests {
-    use super::{alacritty::AlacrittyTerm, Palette, Term};
+    use super::{alacritty::AlacrittyTerm, Palette, Term, MODE_CURSOR_BLINK};
 
     fn term() -> AlacrittyTerm {
         AlacrittyTerm::new(20, 5, 100)
@@ -473,6 +475,20 @@ mod tests {
         }
         let sliced = start.elapsed() / steps as u32;
         eprintln!("scroll step: whole history {full:?}, one screen {sliced:?}");
+    }
+
+    #[test]
+    fn cursor_blink_follows_decscusr_and_a_bad_style_changes_nothing() {
+        let mut t = term();
+        assert_eq!(t.modes() & MODE_CURSOR_BLINK, 0, "steady by default");
+        t.feed(b"\x1b[5 q"); // blinking bar
+        assert_ne!(t.modes() & MODE_CURSOR_BLINK, 0);
+        assert_eq!(t.snapshot().cursor.shape, 2);
+        t.feed(b"\x1b[2 q"); // steady block
+        assert_eq!(t.modes() & MODE_CURSOR_BLINK, 0);
+        t.feed(b"\x1b[99 q"); // not a style
+        assert_eq!(t.modes() & MODE_CURSOR_BLINK, 0);
+        assert_eq!(t.snapshot().cursor.shape, 0);
     }
 
     #[test]

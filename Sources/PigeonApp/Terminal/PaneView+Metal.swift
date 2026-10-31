@@ -62,6 +62,7 @@ extension PaneView {
         }
         var shown = (cells: cells, cursor: cursor)
         shown.cursor.hollow = !hasKeyboardFocus
+        if blinkTimer != nil, !blink.isLit(at: Date()) { shown.cursor.visible = false }
         if let preedit, let overlay = preedit.overlay(cells: cells, cursor: cursor, cols: cols, rows: rows) {
             shown = (overlay.cells, overlay.cursor)
             dirty.mark(overlay.row)
