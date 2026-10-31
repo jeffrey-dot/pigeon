@@ -26,7 +26,7 @@ pub async fn serve(socket: &Path, transport: Transport, host: HostState) -> Resu
             state.display()
         );
     }
-    persist::start(host.clone(), state);
+    persist::start(host.clone(), state.clone());
     eprintln!("pigeon-host listening on {}", socket.display());
 
     if transport == Transport::Stdio {
@@ -43,7 +43,14 @@ pub async fn serve(socket: &Path, transport: Transport, host: HostState) -> Resu
     }
 
     loop {
-        let (stream, _) = match listener.accept().await {
+        let accepted = tokio::select! {
+            accepted = listener.accept() => accepted,
+            () = host.stop.notified() => {
+                shut_down(&host, socket, &state).await;
+                return Ok(());
+            }
+        };
+        let (stream, _) = match accepted {
             Ok(pair) => pair,
             Err(error) => {
                 eprintln!("pigeon-host: accept failed: {error}");
@@ -57,6 +64,27 @@ pub async fn serve(socket: &Path, transport: Transport, host: HostState) -> Resu
             }
         });
     }
+}
+
+/// `shutdown`: every session ends (SIGHUP → SIGKILL through `Cmd::Kill`), nothing is left
+/// to restore, and the socket goes away so the next window starts a fresh host.
+async fn shut_down(host: &HostState, socket: &Path, state: &Path) {
+    eprintln!("pigeon-host: shutting down on request");
+    let senders: Vec<_> = {
+        let map = host.sessions.lock().await;
+        map.values()
+            .flat_map(|session| session.panes.values().cloned())
+            .collect()
+    };
+    for sender in senders {
+        let _ = sender.send(crate::cmd::Cmd::Kill).await;
+    }
+    host.sessions.lock().await.clear();
+    let _ = std::fs::remove_file(socket);
+    // Give the pane tasks a moment to deliver the kills before the runtime goes away. The
+    // state file goes last, so a save already in flight cannot write it back.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let _ = std::fs::remove_file(state);
 }
 
 /// Takes over `socket` only if nobody answers on it: a live host keeps its socket and its
@@ -108,7 +136,7 @@ pub async fn proxy(socket: &Path, shell: &str) -> Result<(), String> {
     let stream = match UnixStream::connect(socket).await {
         Ok(stream) => stream,
         Err(_) => {
-            start_detached_host(socket, shell)?;
+            start_detached_host(socket, shell, None)?;
             connect_with_patience(socket).await?
         }
     };
@@ -120,18 +148,50 @@ pub async fn proxy(socket: &Path, shell: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// `--detach`: makes sure a host serves `socket`, then returns. A live host is left alone;
+/// otherwise one is started in its own process group and this waits until it answers, so
+/// the caller can connect as soon as this exits. Nothing is registered with the system
+/// (no launchd job): like a `tmux` server, the host lives until it is stopped or the
+/// user logs out.
+pub async fn detach(socket: &Path, shell: &str, log: Option<&Path>) -> Result<(), String> {
+    if UnixStream::connect(socket).await.is_ok() {
+        return Ok(());
+    }
+    start_detached_host(socket, shell, log)?;
+    connect_with_patience(socket).await.map(drop)
+}
+
 /// A host that must outlive this bridge: no shared stdio (the ssh channel closing would
 /// break its pipes) and its own process group (sshd's hangup goes to the session's group).
-fn start_detached_host(socket: &Path, shell: &str) -> Result<(), String> {
+fn start_detached_host(socket: &Path, shell: &str, log: Option<&Path>) -> Result<(), String> {
     use std::os::unix::process::CommandExt;
     let program = std::env::current_exe().map_err(|error| format!("current_exe: {error}"))?;
+    // The log is appended to, so a restarted host does not erase why the last one died.
+    let output = match log {
+        Some(path) => {
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .map_err(|error| format!("open {path:?}: {error}"))?;
+            let copy = file.try_clone().map_err(|error| format!("log: {error}"))?;
+            (
+                std::process::Stdio::from(file),
+                std::process::Stdio::from(copy),
+            )
+        }
+        None => (std::process::Stdio::null(), std::process::Stdio::null()),
+    };
     std::process::Command::new(program)
         .arg("--socket")
         .arg(socket)
         .args(["--shell", shell])
         .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stdout(output.0)
+        .stderr(output.1)
         .process_group(0)
         .spawn()
         .map_err(|error| format!("cannot start a host: {error}"))?;

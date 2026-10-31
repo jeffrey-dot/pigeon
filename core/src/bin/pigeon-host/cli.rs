@@ -13,12 +13,17 @@ pub enum Transport {
     /// Bridge stdin/stdout to an already running host. `ssh host pigeon-host --proxy` makes
     /// the ssh channel the transport; this mode knows nothing about the protocol.
     Proxy,
+    /// Start a host in the background, the way `tmux` starts its server, and return:
+    /// a fresh process group so the starter's exit (or `kill -9`) does not take it along.
+    Detach,
 }
 
 pub struct Options {
     pub socket: PathBuf,
     pub shell: String,
     pub transport: Transport,
+    /// Where a detached host writes its log (`--log`); none = discarded.
+    pub log: Option<PathBuf>,
 }
 
 pub enum Command {
@@ -31,6 +36,8 @@ const USAGE: &str = "usage: pigeon-host [--socket PATH] [--shell PATH] [--stdio|
   --socket-path  print the default socket path and exit
   --stdio  also serve one client on stdin/stdout (start a remote host)
   --proxy  bridge stdin/stdout to a running host's socket
+  --detach  start a host in the background (own process group) and return
+  --log PATH  where a --detach host writes its log
 ";
 
 pub fn parse(mut args: impl Iterator<Item = String>) -> Result<Command, String> {
@@ -38,6 +45,7 @@ pub fn parse(mut args: impl Iterator<Item = String>) -> Result<Command, String> 
         socket: default_socket_path(),
         shell: std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_owned()),
         transport: Transport::Socket,
+        log: None,
     };
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -45,6 +53,7 @@ pub fn parse(mut args: impl Iterator<Item = String>) -> Result<Command, String> 
                 options.socket = PathBuf::from(args.next().ok_or("--socket needs a path")?)
             }
             "--shell" => options.shell = args.next().ok_or("--shell needs a path")?,
+            "--log" => options.log = Some(PathBuf::from(args.next().ok_or("--log needs a path")?)),
             "--stdio" => options.transport = Transport::Stdio,
             // Prints where the socket would be and exits: the client needs the exact path to
             // set up `ssh -L` without duplicating the rule (protocol §1).
@@ -55,6 +64,7 @@ pub fn parse(mut args: impl Iterator<Item = String>) -> Result<Command, String> 
                 )))
             }
             "--proxy" => options.transport = Transport::Proxy,
+            "--detach" => options.transport = Transport::Detach,
             "-h" | "--help" => return Ok(Command::Print(USAGE.to_owned())),
             other => return Err(format!("unknown argument: {other}")),
         }

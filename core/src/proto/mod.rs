@@ -384,6 +384,8 @@ pub enum Message {
     Ping {
         ts: u64,
     },
+    /// Ends the host and every session in it (the window's "Stop Session Host…").
+    Shutdown,
     Pong {
         ts: u64,
     },
@@ -428,6 +430,7 @@ impl Message {
             Self::Status { .. } => "status",
             Self::AckStatus { .. } => "ack_status",
             Self::Ping { .. } => "ping",
+            Self::Shutdown => "shutdown",
             Self::Pong { .. } => "pong",
             Self::Error { .. } => "error",
             Self::Unsupported { .. } => "unsupported",
@@ -525,6 +528,7 @@ fn is_known(tag: &str) -> bool {
             | "status"
             | "ack_status"
             | "ping"
+            | "shutdown"
             | "pong"
             | "error"
             | "unsupported"
@@ -751,6 +755,7 @@ mod tests {
                 text: "ls -la\n".into(),
             },
             Message::Ping { ts: 1 },
+            Message::Shutdown,
             Message::Pong { ts: 1 },
             Message::Error {
                 code: "no_such_pane".into(),

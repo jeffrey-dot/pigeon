@@ -121,6 +121,7 @@
 |---|---|---|---|---|
 | c→s | `ack_status` | `pane_id: u32`, `seq: u32` | — | 用户已看过该条状态，可被淘汰 |
 | c→s | `ping` | `ts: u64` | — | `ts` = 发送方单调时钟（毫秒），只用于回显 |
+| c→s | `shutdown` | — | — | 结束宿主：杀掉所有 pane 的进程、删掉 socket 与状态文件后退出（窗口的 “Stop Session Host…”）；`hello` 之前发同样按 `protocol` 错误处理 |
 | s→c | `pong` | `ts: u64` | — | 原样回显 `ping.ts` |
 | s→c | `unsupported` | `t_of: str` | — | 收到不认识的消息；不断开 |
 | s→c | `error` | `code: str`, `detail: str` | `id: u32` | `id` 回显出错请求 |

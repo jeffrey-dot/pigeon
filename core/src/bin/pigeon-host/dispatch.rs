@@ -79,6 +79,11 @@ pub async fn dispatch(
             None
         }
         Message::Ping { ts } => Some(Message::Pong { ts }),
+        Message::Shutdown => {
+            // `notify_one` keeps the permit if `serve` is between two accepts.
+            host.stop.notify_one();
+            None
+        }
         // Protocol rule 2: a message we do not know is not an error.
         other => Some(Message::Unsupported {
             t_of: other.name().to_owned(),

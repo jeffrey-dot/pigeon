@@ -115,6 +115,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appearanceObservation = NSApp.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
             self?.sendAppearance()
         }
+        // Older builds registered a launchd job, which macOS lists as a background item;
+        // the host now starts like a tmux server instead. Tests never touch the real one.
+        if ProcessInfo.processInfo.environment["PIGEON_CONFIG_DIR"] == nil, hostAgent.removeLegacyJob() {
+            debugLog("removed the legacy launchd job \(HostAgent.defaultLabel)")
+        }
         state = store.load()
         hosts = hostsStore.load()
         buildMenu()
@@ -604,19 +609,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// The host runs as a launchd agent so it outlives this process (issue #2); a plain
-    /// child is the fallback only when launchd refuses, and then says so in the log.
+    /// The host starts like a `tmux` server (`pigeon-host --detach`): its own process group,
+    /// nothing registered with the system, so it outlives this window without macOS listing
+    /// it as a background item. It lives until "Stop Session Host…" or logout.
     private func startLocalHost() {
         guard let path = HostLauncher.find(candidates: HostLauncher.candidates()) else {
             debugLog("no pigeon-host binary found")
             return
         }
-        let environment = ProcessInfo.processInfo.environment
-        if let error = hostAgent.start(
-            hostPath: path, socket: Self.defaultSocketPath(), shell: environment["SHELL"])
-        {
-            debugLog("launchd: \(error); starting the host as a child instead")
-            HostLauncher.launch(path: path)
+        let log = TerminalSettingsStore.defaultURL.deletingLastPathComponent()
+            .appendingPathComponent("host.log").path
+        let arguments = HostLauncher.detachArguments(
+            socket: Self.defaultSocketPath(),
+            shell: ProcessInfo.processInfo.environment["SHELL"],
+            log: log)
+        if !HostLauncher.launch(path: path, arguments: arguments) {
+            debugLog("cannot start \(path)")
         }
     }
 
@@ -978,17 +986,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: "Stop Host")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        if let error = hostAgent.stop() {
-            // Most likely a host this launchd job did not start (run by hand, or by an
-            // older build); it keeps running, so say so instead of pretending.
+        guard let client = clients["local"] else {
             let failure = NSAlert()
-            failure.messageText = "The session host is still running"
-            failure.informativeText = error
+            failure.messageText = "The session host is not running"
             failure.runModal()
             return
         }
         // The socket drop would normally restart the host; this time it must stay down.
         stoppedByUser = true
+        onHost("local") { send({ _ in }, type: PG_MSG_SHUTDOWN) }
+        client.flushWrites()
     }
 
     @objc private func useThisMac(_ sender: Any?) {

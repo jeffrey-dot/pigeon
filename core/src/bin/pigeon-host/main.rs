@@ -59,6 +59,9 @@ async fn run() -> Result<(), String> {
     if options.transport == Transport::Proxy {
         return transport::proxy(&options.socket, &options.shell).await;
     }
+    if options.transport == Transport::Detach {
+        return transport::detach(&options.socket, &options.shell, options.log.as_deref()).await;
+    }
     let host = HostState::new(options.shell);
     transport::serve(&options.socket, options.transport, host).await
 }

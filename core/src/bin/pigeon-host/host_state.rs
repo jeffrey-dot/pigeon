@@ -31,6 +31,8 @@ pub struct HostState {
     pub exits: Exits,
     /// The shell new sessions get unless they ask for another.
     pub shell: String,
+    /// Fired by `shutdown`: `serve` stops, ends every pane and removes its socket.
+    pub stop: Arc<tokio::sync::Notify>,
 }
 
 impl HostState {
@@ -44,6 +46,7 @@ impl HostState {
             palette: Arc::new(std::sync::Mutex::new(Some(Palette::default_dark()))),
             exits: Arc::new(std::sync::Mutex::new(HashMap::new())),
             shell,
+            stop: Arc::new(tokio::sync::Notify::new()),
         }
     }
 

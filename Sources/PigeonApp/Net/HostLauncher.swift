@@ -33,12 +33,23 @@ public enum HostLauncher {
         candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
-    /// Starts the host in the background; `false` when it cannot be spawned at all.
+    /// The arguments that start a host the way `tmux` starts its server: `--detach` puts it
+    /// in its own process group and returns once it answers, so the window quitting, crashing
+    /// or being killed never takes the sessions along. Nothing is registered with the system
+    /// (no launchd job, no login item): the host lives until "Stop Session Host…" or logout.
+    public static func detachArguments(socket: String, shell: String?, log: String) -> [String] {
+        var arguments = ["--detach", "--socket", socket, "--log", log]
+        if let shell, !shell.isEmpty { arguments += ["--shell", shell] }
+        return arguments
+    }
+
+    /// Runs `path` with `arguments` in the background; `false` when it cannot be spawned.
     @discardableResult
-    public static func launch(path: String) -> Bool {
+    public static func launch(path: String, arguments: [String] = []) -> Bool {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
-        // The host writes its log to stderr; inheriting keeps it visible next to ours.
+        process.arguments = arguments
+        process.standardInput = FileHandle.nullDevice
         do {
             try process.run()
         } catch {

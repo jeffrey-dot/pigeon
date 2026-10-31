@@ -145,6 +145,7 @@ typedef enum PgMsgType {
     PG_MSG_UNZOOM = 27,
     PG_MSG_SCROLL = 28,
     PG_MSG_PASTE = 29,
+    PG_MSG_SHUTDOWN = 30,
 } PgMsgType;
 
 typedef enum PgStatusKind {

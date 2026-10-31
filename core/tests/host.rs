@@ -2832,3 +2832,139 @@ fn a_corrupt_state_file_restores_nothing_and_the_host_still_serves() {
     let _ = attach_first(&mut client);
     let _ = std::fs::remove_file(&state);
 }
+
+/// The local host starts like a `tmux` server (no launchd job): `--detach` returns once a
+/// host answers on the socket, the host is in its own process group (so the window's exit
+/// does not take it along), and a second `--detach` reuses the live host.
+#[test]
+fn detach_starts_one_host_that_outlives_its_starter() {
+    let _serial = one_at_a_time();
+    let quiet = script("#!/bin/sh\nexec env PS1= /bin/sh -i\n");
+    let socket = unique_socket();
+    let log = std::path::Path::new(&socket).with_extension("log");
+    struct Reap(String);
+    impl Drop for Reap {
+        fn drop(&mut self) {
+            let _ = Command::new("pkill")
+                .args(["-f", "--", &format!("--socket {}", self.0)])
+                .status();
+            let path = std::path::Path::new(&self.0);
+            for file in [
+                path.to_path_buf(),
+                path.with_extension("state"),
+                path.with_extension("log"),
+            ] {
+                let _ = std::fs::remove_file(file);
+            }
+        }
+    }
+    let _reap = Reap(socket.clone());
+    let detach = || {
+        Command::new(env!("CARGO_BIN_EXE_pigeon-host"))
+            .args([
+                "--detach",
+                "--socket",
+                &socket,
+                "--shell",
+                quiet.to_str().expect("utf8"),
+            ])
+            .arg("--log")
+            .arg(&log)
+            .status()
+            .expect("run --detach")
+    };
+    assert!(
+        detach().success(),
+        "the starter exits cleanly once the host answers"
+    );
+    let mut client = Client::connect(&socket);
+    hello(&mut client);
+    let pane = attach_first(&mut client);
+
+    let pgrep = |pattern: &str| {
+        let out = Command::new("pgrep")
+            .args(["-f", "--", pattern])
+            .output()
+            .expect("pgrep");
+        String::from_utf8_lossy(&out.stdout)
+            .split_whitespace()
+            .filter_map(|pid| pid.parse::<i32>().ok())
+            .collect::<Vec<_>>()
+    };
+    let hosts = pgrep(&format!("--socket {socket} --shell"));
+    assert_eq!(hosts.len(), 1, "exactly one host: {hosts:?}");
+    let pgid = Command::new("ps")
+        .args(["-o", "pgid=", "-p", &hosts[0].to_string()])
+        .output()
+        .expect("ps");
+    let pgid: i32 = String::from_utf8_lossy(&pgid.stdout)
+        .trim()
+        .parse()
+        .expect("pgid");
+    assert_eq!(pgid, hosts[0], "the host leads its own process group");
+
+    assert!(detach().success());
+    assert_eq!(
+        pgrep(&format!("--socket {socket} --shell")),
+        hosts,
+        "the live host was reused"
+    );
+    client.send(&Message::Keys {
+        pane_id: pane,
+        bytes: b"echo still-here\r".to_vec(),
+    });
+    wait_for_pane_text(&mut client, pane, "still-here");
+    assert!(log.exists(), "the host writes its log where it was told");
+}
+
+/// "Stop Session Host…": `shutdown` ends every session, removes the socket and the saved
+/// screens (nothing comes back on the next start), and the host process exits.
+#[test]
+fn shutdown_ends_the_host_and_leaves_nothing_to_restore() {
+    let _serial = one_at_a_time();
+    let mut host = start_host();
+    let mut client = Client::connect(&host.socket);
+    hello(&mut client);
+    let pane = attach_first(&mut client);
+    client.send(&Message::Keys {
+        pane_id: pane,
+        bytes: b"echo $$ > /dev/null\r".to_vec(),
+    });
+    client.send(&Message::Shutdown);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        if let Some(status) = host.child.try_wait().expect("wait") {
+            break status;
+        }
+        assert!(Instant::now() < deadline, "the host did not exit");
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert!(status.success(), "a requested shutdown is a clean exit");
+    assert!(
+        !std::path::Path::new(&host.socket).exists(),
+        "socket removed"
+    );
+    assert!(
+        !std::path::Path::new(&host.socket)
+            .with_extension("state")
+            .exists(),
+        "no screens left to restore"
+    );
+}
+
+/// `shutdown` before `hello` is refused like any other message: a stray connection cannot
+/// end the user's sessions without speaking the protocol first.
+#[test]
+fn shutdown_before_hello_is_a_protocol_error() {
+    let _serial = one_at_a_time();
+    let mut host = start_host();
+    let mut client = Client::connect(&host.socket);
+    client.send(&Message::Shutdown);
+    let reply = client.wait_for(|m| matches!(m, Message::Error { .. }));
+    assert!(matches!(reply, Message::Error { code, .. } if code == "protocol"));
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(
+        host.child.try_wait().expect("wait").is_none(),
+        "the host keeps running"
+    );
+}
