@@ -60,7 +60,9 @@
   每客户端出站队列（事件只编码一次，慢客户端只留每 pane 最新 delta，Layout/Status/Exited 不丢）。
   - ✅ 拆成 `core/src/bin/pigeon-host/` 下 15 个文件（最大 309 行）；`SessionState`/`SizeVote`/`SizePolicy`/`PaneMeta` 进了库。
   - ✅ 慢客户端在广播里落后（`Lagged`）时补发会话列表、布局、尺寸、状态、退出与快照，不再静默丢事件（有端到端测试）。
-  - ⏳ 真正的每客户端队列（只编码一次、合并 delta）未做：现在的补发已保证不丢，队列是性能优化。
+  - ✅ 每客户端出站队列：每个连接拆成读、写两个 task，写 task 排空 `OutQueue`；广播事件只编码一次（`Arc<[u8]>`），
+    同一 pane 排着第二帧 delta 时合并成一帧发出时现取的 snapshot（`seq` 不跳号），控制消息不丢、保序；
+    队列超 64 MiB 断开该连接。慢客户端的内存只与它看的 pane 数成正比（有单测与端到端测试）。
 
 ### P5 视觉 ✅
 

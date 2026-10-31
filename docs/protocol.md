@@ -82,6 +82,11 @@
   帧已被淘汰、中间 resize 过（缓冲清空）、`since` 比当前还大（另一个宿主进程给的号）或连接没协商 `delta` 时，按没带 `since` 处理，回一帧快照。
   客户端断线后保留屏幕不清空，重连后对已画过的 pane 带 `since`；`hello_ack.instance` 变了就丢掉所有 `seq`，改要快照。
 - 宿主每 pane 每 16 ms 最多发一帧 `delta`（大量输出时合并脏行）；pane 尺寸变化后不发 `delta`，而是给每个观看者推一帧 `snapshot`（脏行装不下新的列数）。
+- **慢客户端**：宿主给每个连接一条出站队列。某 pane 已有一帧 `delta` 在队里没发出去时又来一帧，两帧都换成该 pane 的一帧
+  `snapshot`（发出时现取，即最新屏幕；`seq` 照常是它包含的最新 `delta`），所以读得慢的客户端看到的是 `delta … snapshot`
+  而不是一长串 `delta`，`seq` 不会跳号。这帧 `snapshot` 不带 `history`。`layout`/`size_state`/`status`/`pane_exited`/`sessions`
+  与请求的答复从不丢弃、彼此保持顺序。队列里编码后的字节超过 64 MiB 时宿主直接断开该连接（不发 `backpressure`），客户端照
+  §7 重连、重新 `attach`。
 - `cursor.shape`：`0` 方块、`1` 下划线、`2` 竖线。
 - `cell = [codepoint: u32, attrs: u8, fg: u32, bg: u32, link?: u32]`。
   - 宽字符由 `codepoint` 的 `wcwidth` 推导；宽字符占两格，第二格是空 continuation，客户端按宽度跳过绘制。
@@ -161,6 +166,7 @@
 - 客户端断开不影响宿主；重连走一次新的 `hello + attach`。
 - 宿主退出 → 所有连接收到 `error{code:"shutdown"}` 后关闭。
 - 客户端发现 `seq` 跳号 / 收到 `backpressure` → 重新 `attach` 拿快照，不要尝试补齐。
+- 读得太慢、出站队列超过上限（§3.3）的连接会被宿主断开；这与断线相同，客户端重连即可。
 
 ## 8. 兼容规则
 

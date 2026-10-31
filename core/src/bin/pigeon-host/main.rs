@@ -1,8 +1,8 @@
 //! Session host: owns the PTYs and outlives every client window.
 //!
 //! One tokio runtime, one task per pane (that task is the only owner of the
-//! pane's terminal state), one task per client. A client disconnecting only drops
-//! its task — the PTYs and the layout keep running, which is the point of pigeon.
+//! pane's terminal state), a reader and a writer task per client. A client disconnecting
+//! only drops its tasks — the PTYs and the layout keep running, which is the point of pigeon.
 
 mod cli;
 mod client;
@@ -14,6 +14,8 @@ mod dispatch_pane;
 mod event;
 mod handshake;
 mod host_state;
+mod out_queue;
+mod outbound;
 mod pane_actor;
 mod pane_query;
 mod resync;
