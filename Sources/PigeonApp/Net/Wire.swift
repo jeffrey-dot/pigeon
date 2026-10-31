@@ -92,6 +92,17 @@ enum Wire {
         }
     }
 
+    /// Whether a string-array field (`hello_ack.features`) contains `value`.
+    static func contains(_ message: OpaquePointer, strings field: String, _ value: String) -> Bool {
+        var bytes = Array(value.utf8)
+        return bytes.withUnsafeMutableBufferPointer { buffer in
+            let text = PgStr(
+                size: UInt32(MemoryLayout<PgStr>.size),
+                ptr: UnsafePointer(buffer.baseAddress), len: buffer.count)
+            return field.withCString { pg_msg_str_array_contains(message, $0, text) }
+        }
+    }
+
     static func u32(_ message: OpaquePointer, _ field: String, fallback: UInt32 = 0) -> UInt32 {
         field.withCString { pg_msg_get_u32(message, $0, fallback) }
     }

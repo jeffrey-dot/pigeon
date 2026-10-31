@@ -27,6 +27,15 @@ pub fn snapshot_of(message: &Message) -> PgResult<(PaneId, Snapshot)> {
     Ok((*pane_id, snapshot))
 }
 
+/// Whether the host offered `feature` in its `hello_ack` (the Rust side of
+/// `pg_msg_str_array_contains` on `features`). Any other message is refused.
+pub fn offers_feature(message: &Message, feature: &str) -> PgResult<bool> {
+    let Message::HelloAck { features, .. } = message else {
+        return Err(PgError::InvalidArg);
+    };
+    Ok(features.iter().any(|offered| offered == feature))
+}
+
 /// Rects of a `layout` message, in tree order.
 pub fn layout_rects(message: &Message) -> PgResult<Vec<(PaneId, Rect)>> {
     Ok(layout_node(message)?.rects())

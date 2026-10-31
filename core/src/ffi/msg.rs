@@ -719,6 +719,28 @@ pub extern "C" fn pg_msg_set_str_array(
     })
 }
 
+/// Whether a string-array field (e.g. `hello_ack.features`) holds `value`. A missing field
+/// is `false`; a field of another type is an error (`false`, `PG_ERR_INVALID_ARG`).
+#[no_mangle]
+pub extern "C" fn pg_msg_str_array_contains(
+    msg: *const PgMsg,
+    field: *const c_char,
+    value: PgStr,
+) -> bool {
+    ffi_call(false, || {
+        let msg = unsafe_ref(msg)?;
+        let field = field_name(field)?;
+        let wanted = pg_str_to_string(value)?;
+        match msg.fields.get(&field) {
+            Some(Value::Array(items)) => Ok(items
+                .iter()
+                .any(|item| matches!(item, Value::Text(text) if *text == wanted))),
+            None => Ok(false),
+            Some(_) => Err(PgError::InvalidArg),
+        }
+    })
+}
+
 /// Number of entries in a `sessions` message.
 #[no_mangle]
 pub extern "C" fn pg_msg_sessions_count(msg: *const PgMsg) -> usize {
@@ -851,6 +873,48 @@ mod tests {
         let msg = pg_msg_new(PgMsgType::PG_MSG_UNKNOWN);
         assert!(msg.is_null());
         assert_eq!(pg_last_error_code(), PgErrorCode::PG_ERR_INVALID_ARG);
+    }
+
+    #[test]
+    fn a_string_array_answers_membership_and_rejects_other_types() {
+        let features = [text("delta"), text("status_all")];
+        let msg = pg_msg_new(PgMsgType::PG_MSG_HELLO);
+        assert!(pg_msg_set_str_array(
+            msg,
+            field("features").as_ptr(),
+            features.as_ptr(),
+            features.len()
+        ));
+        assert!(pg_msg_set_str(msg, field("client").as_ptr(), text("x")));
+        let features = field("features");
+        assert!(pg_msg_str_array_contains(
+            msg,
+            features.as_ptr(),
+            text("status_all")
+        ));
+        assert!(!pg_msg_str_array_contains(
+            msg,
+            features.as_ptr(),
+            text("status")
+        ));
+        assert!(!pg_msg_str_array_contains(
+            msg,
+            field("absent").as_ptr(),
+            text("delta")
+        ));
+        // A text field is not an array: refused, not read as one.
+        assert!(!pg_msg_str_array_contains(
+            msg,
+            field("client").as_ptr(),
+            text("x")
+        ));
+        assert_eq!(pg_last_error_code(), PgErrorCode::PG_ERR_INVALID_ARG);
+        assert!(!pg_msg_str_array_contains(
+            std::ptr::null(),
+            features.as_ptr(),
+            text("delta")
+        ));
+        pg_msg_free(msg);
     }
 
     #[test]

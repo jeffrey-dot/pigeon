@@ -27,7 +27,7 @@ use pigeon_core::session::PaneState;
 use pigeon_core::term::Palette;
 
 /// Capabilities this build offers (protocol §5).
-const SERVER_FEATURES: &[&str] = &["delta", "scrollback", "osc7501"];
+const SERVER_FEATURES: &[&str] = &["delta", "scrollback", "osc7501", "status_all"];
 const SCROLLBACK: usize = 10_000;
 /// At most one delta per pane per frame. A burst of output (`cat`, a build log) arrives in
 /// many small PTY reads, and one delta each would repaint the whole screen dozens of times
@@ -331,6 +331,9 @@ struct ClientState {
     session: Option<u32>,
     /// Whether the handshake negotiated `delta` for this connection.
     delta_ok: bool,
+    /// `status_all`: this connection gets every pane's `status`, attached or not, so a
+    /// sidebar can follow all agents without joining (and resizing) every session.
+    status_all: bool,
     /// How far each pane is scrolled back for *this* window; 0 is the live screen. Two
     /// windows on one session scroll independently because this lives per connection.
     views: HashMap<u32, usize>,
@@ -425,6 +428,11 @@ where
                                     {
                                         send(&mut writer, &list).await?;
                                     }
+                                    if state.status_all {
+                                        for status in pending_statuses(sessions).await {
+                                            send(&mut writer, &status).await?;
+                                        }
+                                    }
                                 }
                             }
                             // Outside the reply branch: a replay has no single reply.
@@ -467,7 +475,7 @@ where
                         }
                     }
                     Event::Status { pane_id, message } => {
-                        if state.watched.contains_key(&pane_id) {
+                        if state.status_all || state.watched.contains_key(&pane_id) {
                             send(&mut writer, &message).await?;
                         }
                     }
@@ -541,6 +549,24 @@ async fn latest_status(sessions: &Sessions, pane_id: u32) -> Option<Message> {
     let (tx, rx) = oneshot::channel();
     sender.send(Cmd::LatestStatus { reply: tx }).await.ok()?;
     rx.await.ok().flatten()
+}
+
+/// Every pane's pending status, for a `status_all` client that just connected; the session
+/// list goes first so the client can place each pane.
+async fn pending_statuses(sessions: &Sessions) -> Vec<Message> {
+    let panes: Vec<u32> = {
+        let map = sessions.lock().await;
+        let mut panes: Vec<u32> = map.values().flat_map(|s| s.panes.keys().copied()).collect();
+        panes.sort_unstable();
+        panes
+    };
+    let mut out = Vec::new();
+    for pane_id in panes {
+        if let Some(status) = latest_status(sessions, pane_id).await {
+            out.push(status);
+        }
+    }
+    out
 }
 
 async fn sender_of(sessions: &Sessions, pane_id: u32) -> Option<mpsc::Sender<Cmd>> {
@@ -763,6 +789,7 @@ async fn dispatch(
                 .map(|feature| (*feature).to_owned())
                 .collect();
             state.delta_ok = offered.iter().any(|f| f == "delta");
+            state.status_all = offered.iter().any(|f| f == "status_all");
             Some(Message::HelloAck {
                 proto: PROTO_VERSION,
                 server: format!("pigeon-host {}", env!("CARGO_PKG_VERSION")),

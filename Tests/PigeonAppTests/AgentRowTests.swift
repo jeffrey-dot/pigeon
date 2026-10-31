@@ -59,3 +59,17 @@ final class AgentRowTests: XCTestCase {
         XCTAssertEqual(unknown.since, now, "an older host: arrival time stands in")
     }
 }
+
+final class StatusPulseTests: XCTestCase {
+    func testTurningBlockedPulsesOnce() {
+        XCTAssertTrue(SidebarModel.shouldPulse(from: .working, to: .blocked))
+        XCTAssertTrue(SidebarModel.shouldPulse(from: .idle, to: .blocked))
+        XCTAssertFalse(SidebarModel.shouldPulse(from: .blocked, to: .blocked))
+    }
+
+    func testFirstSightAndOtherStatesDoNotPulse() {
+        XCTAssertFalse(SidebarModel.shouldPulse(from: nil, to: .blocked))
+        XCTAssertFalse(SidebarModel.shouldPulse(from: .working, to: .done))
+        XCTAssertFalse(SidebarModel.shouldPulse(from: .blocked, to: .working))
+    }
+}

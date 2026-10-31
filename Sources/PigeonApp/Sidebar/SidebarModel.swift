@@ -359,4 +359,12 @@ public enum SidebarModel {
         case .idle: return nil
         }
     }
+
+    /// A row pulses once when its session turns `blocked`, not on every redraw while it
+    /// waits, and not when a cell first shows a session that was already blocked (launch,
+    /// scrolling) — that would make a whole list of waiting agents flash at once.
+    public static func shouldPulse(from previous: SidebarSession.Status?, to next: SidebarSession.Status) -> Bool {
+        guard let previous else { return false }
+        return next == .blocked && previous != .blocked
+    }
 }

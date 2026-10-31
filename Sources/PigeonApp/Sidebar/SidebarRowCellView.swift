@@ -8,7 +8,7 @@ final class SidebarRowCellView: NSTableCellView {
 
     private let circle = NSView()
     private let glyph = NSImageView()
-    private let badge = NSImageView()
+    private let badge = SidebarStatusBadge()
     private let title = NSTextField(labelWithString: "")
     /// The agent's task or question, under the title; hidden for a one-line row.
     private let detail = NSTextField(labelWithString: "")
@@ -29,7 +29,8 @@ final class SidebarRowCellView: NSTableCellView {
         build()
     }
 
-    func configure(with session: SidebarSession) {
+    /// `pulse`: the session just turned `blocked` (`SidebarModel.shouldPulse`).
+    func configure(with session: SidebarSession, pulse: Bool = false) {
         let tint = SidebarTheme.appTints[
             SidebarModel.tintIndex(cwd: session.cwd, buckets: SidebarTheme.appTints.count)]
         circle.layer?.backgroundColor = tint.cgColor
@@ -63,13 +64,9 @@ final class SidebarRowCellView: NSTableCellView {
         }
 
         // Status on the circle's corner, the way harp draws it; no state → no badge.
-        if let symbol = SidebarModel.statusSymbol(for: session) {
-            badge.image = Self.symbol(symbol, size: SidebarMetrics.statusBadgeSize, weight: .bold)
-            badge.contentTintColor = statusColor(session)
-            badge.isHidden = false
-        } else {
-            badge.isHidden = true
-        }
+        badge.show(
+            symbol: SidebarModel.statusSymbol(for: session), color: statusColor(session),
+            working: session.status == .working, pulse: pulse)
         close.isHidden = true
         age.isHidden = false
     }
@@ -95,10 +92,9 @@ final class SidebarRowCellView: NSTableCellView {
         circle.layer?.cornerRadius = SidebarMetrics.rowIconSize / 2
         addSubview(circle)
 
-        for view in [glyph, badge] {
-            addSubview(view)
-            view.imageScaling = .scaleProportionallyDown
-        }
+        addSubview(glyph)
+        glyph.imageScaling = .scaleProportionallyDown
+        addSubview(badge)
         addSubview(title)
         addSubview(detail)
         detail.font = .systemFont(ofSize: SidebarMetrics.rowDetailSize)

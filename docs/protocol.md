@@ -142,6 +142,7 @@
 | `scrollback` | s→c | `snapshot.history` 与 `scroll` 可用 | 不下发历史，客户端隐藏滚动条 |
 | `zstd` | 双向 | 帧 payload 带 1 字节 tag，`0x01` 为 zstd | payload 必须是不带 tag 的裸 CBOR |
 | `osc7501` | s→c | 发 `status` | 不发 `status`，侧栏不显示 agent 状态 |
+| `status_all` | s→c | 不 `attach` 也收到**所有** pane 的 `status`：握手后紧跟 `sessions` 补发每个 pane 当前未确认的状态，之后实时推送；这类连接不进任何会话的尺寸投票 | 只收已 `attach` 的 pane 的 `status`（侧栏要靠逐个 `attach` 才能看到后台会话） |
 
 新增能力只是往表里加一行；客户端必须忽略不认识的名称。
 

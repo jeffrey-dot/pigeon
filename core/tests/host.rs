@@ -2272,3 +2272,86 @@ fn the_socket_is_private_from_the_moment_it_exists() {
         & 0o777;
     assert_eq!(mode & 0o077, 0, "group/other must have no access: {mode:o}");
 }
+
+fn hello_with(client: &mut Client, features: &[&str]) -> Vec<String> {
+    client.send(&Message::Hello {
+        proto: proto::PROTO_VERSION,
+        client: "host-test".into(),
+        features: features.iter().map(|f| (*f).to_owned()).collect(),
+    });
+    let Message::HelloAck { features, .. } =
+        client.wait_for(|m| matches!(m, Message::HelloAck { .. }))
+    else {
+        unreachable!()
+    };
+    features
+}
+
+/// A sidebar follows every agent without attaching: `status_all` delivers status for panes
+/// the connection never attached, both what was pending when it connected and what comes
+/// later, and it never joins the session's size vote.
+#[test]
+fn status_all_follows_agents_without_attaching() {
+    let _serial = one_at_a_time();
+    let host = start_host();
+    let mut worker = Client::connect(&host.socket);
+    hello(&mut worker);
+    let pane = attach_first(&mut worker);
+    worker.send(&Message::Keys {
+        pane_id: pane,
+        bytes: b"printf '\\033]7501;state=working:app=claude\\007'\r".to_vec(),
+    });
+    worker.wait_for(|m| matches!(m, Message::Status { state, .. } if state == "working"));
+
+    let mut sidebar = Client::connect(&host.socket);
+    let offered = hello_with(&mut sidebar, &["status_all"]);
+    assert!(offered.iter().any(|f| f == "status_all"));
+    let pending = sidebar.wait_for(|m| matches!(m, Message::Status { .. }));
+    assert!(
+        matches!(&pending, Message::Status { pane_id, state, .. } if *pane_id == pane && state == "working"),
+        "the pending status arrives right after the session list"
+    );
+
+    worker.send(&Message::Keys {
+        pane_id: pane,
+        bytes: b"printf '\\033]7501;state=blocked:kind=question\\007'\r".to_vec(),
+    });
+    let live =
+        sidebar.wait_for(|m| matches!(m, Message::Status { state, .. } if state == "blocked"));
+    assert!(matches!(live, Message::Status { pane_id, .. } if pane_id == pane));
+    // Status only: no screen for a pane it never attached, and it is not a size voter.
+    assert!(sidebar
+        .drain(&|m| matches!(m, Message::Snapshot { .. } | Message::Delta { .. }))
+        .is_none());
+    worker.send(&Message::ResizePane {
+        pane_id: pane,
+        cols: 90,
+        rows: 30,
+    });
+    expect_size_state(&mut worker, pane, (90, 30, "latest", 1));
+}
+
+/// Without the feature a connection keeps the old behaviour: status only for watched panes.
+#[test]
+fn status_without_the_feature_stays_with_watched_panes() {
+    let _serial = one_at_a_time();
+    let host = start_host();
+    let mut worker = Client::connect(&host.socket);
+    hello(&mut worker);
+    let pane = attach_first(&mut worker);
+
+    let mut other = Client::connect(&host.socket);
+    let offered = hello_with(&mut other, &["no_such_feature"]);
+    assert!(!offered
+        .iter()
+        .any(|f| f == "status_all" || f == "no_such_feature"));
+    worker.send(&Message::Keys {
+        pane_id: pane,
+        bytes: b"printf '\\033]7501;state=blocked\\007'\r".to_vec(),
+    });
+    worker.wait_for(|m| matches!(m, Message::Status { state, .. } if state == "blocked"));
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(other
+        .drain(&|m| matches!(m, Message::Status { .. }))
+        .is_none());
+}

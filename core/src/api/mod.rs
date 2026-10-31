@@ -18,7 +18,9 @@ mod core;
 mod msg;
 
 pub use self::core::{Config, Core};
-pub use self::msg::{layout_focus, layout_rects, layout_splits, snapshot_of, Split};
+pub use self::msg::{
+    layout_focus, layout_rects, layout_splits, offers_feature, snapshot_of, Split,
+};
 
 pub use crate::error::{PgError, PgResult};
 pub use crate::layout::{Axis, PaneId, Rect, SplitId};

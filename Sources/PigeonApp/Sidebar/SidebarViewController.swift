@@ -146,6 +146,11 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
     }
 
     /// `machineName` turns a section's host into its heading text; it is asked once per machine.
+    /// Statuses as of the last update, and the rows that turned `blocked` in it; a pulse is
+    /// used up by the first cell that shows it, so scrolling does not replay it.
+    private var lastStatus: [Int: SidebarSession.Status] = [:]
+    private var pendingPulse: Set<Int> = []
+
     func update(sections: [SidebarSection], selected: Int?, machineName: (String) -> String) {
         suppressSelection = true
         defer { suppressSelection = false }
@@ -165,6 +170,12 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
             ))
             built += section.sessions.map(Row.session)
         }
+        var statuses: [Int: SidebarSession.Status] = [:]
+        for case let .session(session) in built { statuses[session.id] = session.status }
+        pendingPulse = Set(statuses.compactMap { id, status in
+            SidebarModel.shouldPulse(from: lastStatus[id], to: status) ? id : nil
+        })
+        lastStatus = statuses
         rows = built
         table.reloadData()
         if let selected, let index = rows.firstIndex(where: {
@@ -251,7 +262,7 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
 
     private func sessionCell(_ session: SidebarSession) -> NSView {
         let view = SidebarRowCellView()
-        view.configure(with: session)
+        view.configure(with: session, pulse: pendingPulse.remove(session.id) != nil)
         view.onClose = { [weak self] in self?.onClose?(session.id) }
         return view
     }

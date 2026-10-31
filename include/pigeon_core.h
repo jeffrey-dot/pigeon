@@ -593,6 +593,12 @@ bool pg_msg_set_u32_array(PgMsg *msg, const char *field, const uint32_t *values,
 bool pg_msg_set_str_array(PgMsg *msg, const char *field, const struct PgStr *values, size_t count);
 
 /**
+ * Whether a string-array field (e.g. `hello_ack.features`) holds `value`. A missing field
+ * is `false`; a field of another type is an error (`false`, `PG_ERR_INVALID_ARG`).
+ */
+bool pg_msg_str_array_contains(const PgMsg *msg, const char *field, struct PgStr value);
+
+/**
  * Number of entries in a `sessions` message.
  */
 size_t pg_msg_sessions_count(const PgMsg *msg);

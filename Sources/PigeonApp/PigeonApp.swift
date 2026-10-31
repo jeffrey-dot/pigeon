@@ -49,6 +49,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var staleByHost: [String: Set<UInt32>] = [:]
     /// `hello_ack.instance` per host; `since` is only meaningful to that same process.
     private var instanceByHost: [String: String] = [:]
+    /// Hosts that send every pane's `status` without an attach (`status_all`, protocol §5):
+    /// the sidebar then follows background sessions without joining their size vote.
+    private var statusAllHosts: Set<String> = []
     private var recovering: [String: Int] = [:]
     private let hostAgent = HostAgent()
     /// Set by "Stop Session Host…" so the dropped socket is not taken for a crash.
@@ -648,6 +651,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         seqByHost[host] = nil
         staleByHost[host] = nil
         instanceByHost[host] = nil
+        statusAllHosts.remove(host)
     }
 
     private static func defaultSocketPath() -> String {
@@ -722,7 +726,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Wire.set(message, str: "client", "pigeon-mac")
             // `delta` sends only the rows that changed: a keystroke costs ~2 KB instead of a
             // full screen (~100 KB on a large pane), which is what makes ssh feel slow.
-            Wire.set(message, strings: "features", ["scrollback", "delta"])
+            Wire.set(message, strings: "features", ["scrollback", "delta", "status_all"])
         }, type: PG_MSG_HELLO)
     }
 
@@ -764,6 +768,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // ride along — every session click re-attaches.
             Wire.set(message, bool: "history", false)
         }, type: PG_MSG_ATTACH)
+    }
+
+    /// The sidebar shows every session's agent. A host with `status_all` already sends those;
+    /// an older one only reports panes this window attached, so each session's active pane
+    /// is attached (which also counts this window in that session's size vote).
+    private func watchStatuses() {
+        guard !statusAllHosts.contains(activeHost) else { return }
+        for row in rows.values { sendAttach(row.activePane) }
     }
 
     /// `scroll` takes a delta: negative looks back, `0` is the live screen (protocol §3.3).
@@ -1252,6 +1264,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 seqByHost[activeHost] = nil
             }
             instanceByHost[activeHost] = instance
+            if Wire.contains(message, strings: "features", "status_all") {
+                statusAllHosts.insert(activeHost)
+            } else {
+                statusAllHosts.remove(activeHost)
+            }
             // Tell the host what we are drawing with, so programs inside the panes can pick
             // their light or dark theme (`OSC 4/10/11`).
             sendAppearance()
@@ -1416,7 +1433,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // A background host keeps its sessions and status; it must not steal the window.
         guard visible else {
-            for row in rows.values { sendAttach(row.activePane) }
+            watchStatuses()
             refreshSidebar()
             return
         }
@@ -1428,9 +1445,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if selectedSession == nil || rows[selectedSession!] == nil {
             selectedSession = rows.keys.sorted().first
         }
-        // Watch the active pane of *every* session: the sidebar shows their
-        // status even when they are not selected.
-        for row in rows.values { sendAttach(row.activePane) }
+        watchStatuses()
         if let selectedSession, let row = rows[selectedSession] {
             focusedPane = row.activePane
             // Force the selected session's panes: `attach` is what makes the host follow this

@@ -2,8 +2,9 @@
 //! client would; `abi.rs` covers the same behaviour through the C face.
 
 use pigeon_core::api::{
-    encode_frame, layout_focus, layout_rects, layout_splits, snapshot_of, Axis, Config, Core,
-    Message, Node, PgError, Scroll, SplitAxis, SplitNode, StatusState, WireCell, WireCursor,
+    encode_frame, layout_focus, layout_rects, layout_splits, offers_feature, snapshot_of, Axis,
+    Config, Core, Message, Node, PgError, Scroll, SplitAxis, SplitNode, StatusState, WireCell,
+    WireCursor, PROTO_VERSION,
 };
 
 fn core_with_pane(cols: u16, rows: u16) -> (Core, u32) {
@@ -136,7 +137,7 @@ fn layout_message_geometry_comes_from_the_core() {
 #[test]
 fn message_helpers_refuse_the_wrong_message_type() {
     let hello = Message::Hello {
-        proto: pigeon_core::api::PROTO_VERSION,
+        proto: PROTO_VERSION,
         client: "test".to_owned(),
         features: Vec::new(),
     };
@@ -201,4 +202,21 @@ fn wire_snapshot_with_a_short_row_is_refused() {
     assert_eq!(snapshot_of(&message).err(), Some(PgError::InvalidArg));
     let message = wire_snapshot(3, 2, vec![vec![wire_cell('a'); 3]]);
     assert_eq!(snapshot_of(&message).err(), Some(PgError::InvalidArg));
+}
+
+#[test]
+fn a_hello_ack_says_which_features_the_host_offers() {
+    let ack = Message::HelloAck {
+        proto: PROTO_VERSION,
+        server: "pigeon-host test".into(),
+        features: vec!["delta".into(), "status_all".into()],
+        host_id: "h".into(),
+        client_id: 1,
+        instance: None,
+    };
+    assert_eq!(offers_feature(&ack, "status_all"), Ok(true));
+    assert_eq!(offers_feature(&ack, "zstd"), Ok(false));
+    // Only a hello_ack carries the negotiated set.
+    let other = Message::Pong { ts: 1 };
+    assert_eq!(offers_feature(&other, "delta"), Err(PgError::InvalidArg));
 }
