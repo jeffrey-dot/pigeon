@@ -10,7 +10,7 @@ use pigeon_core::session::{PaneMeta, SessionState};
 use pigeon_core::term::Palette;
 
 use crate::cmd::{send_or_queue, Cmd};
-use crate::event::Event;
+use crate::event::{encode, Event};
 
 /// One session, with a channel to each pane's task as the pane handle.
 pub type Session = SessionState<mpsc::Sender<Cmd>>;
@@ -97,10 +97,9 @@ pub fn apply_layout(session_id: u32, session: &Session, events: &broadcast::Send
             send_or_queue(sender, Cmd::Resize(cols, rows));
         }
     }
-    let _ = events.send(Event::Layout {
-        session_id,
-        message: session.layout_message(session_id),
-    });
+    if let Some(frame) = encode(&session.layout_message(session_id)) {
+        let _ = events.send(Event::Layout { session_id, frame });
+    }
     broadcast_size(session_id, session, events);
 }
 
@@ -116,9 +115,8 @@ pub fn broadcast_size(session_id: u32, session: &Session, events: &broadcast::Se
         );
     }
     for message in session.size_states() {
-        let _ = events.send(Event::SizeState {
-            session_id,
-            message,
-        });
+        if let Some(frame) = encode(&message) {
+            let _ = events.send(Event::SizeState { session_id, frame });
+        }
     }
 }

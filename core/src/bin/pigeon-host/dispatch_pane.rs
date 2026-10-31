@@ -7,7 +7,7 @@ use pigeon_core::session::SizePolicy;
 use crate::client_state::ClientState;
 use crate::cmd::Cmd;
 use crate::dispatch::no_such_pane;
-use crate::event::Event;
+use crate::event::{encode, Event};
 use crate::host_state::{broadcast_size, session_of, HostState, Session};
 use crate::pane_actor::spawn_pane;
 use crate::pane_query::{catch_up, latest_status, scroll as scroll_pane, sender_of, snapshot_of};
@@ -94,10 +94,9 @@ pub async fn attach(
         session.vote.join(state.client_id, policy, current);
         // The tree follows the snapshot, so a reconnecting window redraws
         // the same split geometry and learns who owns the size.
-        let _ = host.events.send(Event::Layout {
-            session_id,
-            message: session.layout_message(session_id),
-        });
+        if let Some(frame) = encode(&session.layout_message(session_id)) {
+            let _ = host.events.send(Event::Layout { session_id, frame });
+        }
         broadcast_size(session_id, session, &host.events);
     }
     // `latest_status` takes the sessions lock again.

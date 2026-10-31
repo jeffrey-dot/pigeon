@@ -1,35 +1,31 @@
 //! What a connection gets after it fell behind the event bus.
 //!
-//! Events reach a client through a bounded `broadcast` channel; a client that reads too
-//! slowly (a stalled ssh link, a window busy elsewhere) loses the oldest ones. Deltas can
-//! be lost safely because a snapshot replaces them, but a lost `layout`, `status` or
-//! `pane_exited` would leave the window wrong until something else changes. So instead of
-//! replaying, the host re-sends the current state of everything this connection follows.
-
-use tokio::io::{AsyncWrite, WriteHalf};
+//! Events reach a client task through a bounded `broadcast` channel. The task only queues
+//! them (see `outbound`), so it falls behind only when it is starved itself; then it loses
+//! the oldest events. Deltas can be lost safely because a snapshot replaces them, but a
+//! lost `layout`, `status` or `pane_exited` would leave the window wrong until something
+//! else changes. So instead of replaying, the host re-queues the current state of
+//! everything this connection follows.
 
 use pigeon_core::proto::Message;
 
-use crate::client::send;
 use crate::client_state::ClientState;
 use crate::handshake;
 use crate::host_state::HostState;
-use crate::pane_query::{current_status, snapshot_of};
+use crate::outbound::Outbound;
+use crate::pane_query::current_status;
 
-pub async fn resync<S>(
+pub async fn resync(
     host: &HostState,
     state: &ClientState,
-    writer: &mut WriteHalf<S>,
-) -> Result<(), String>
-where
-    S: AsyncWrite + Unpin,
-{
+    outbound: &Outbound,
+) -> Result<(), String> {
     if !state.greeted {
         // Nothing was negotiated yet, so nothing was sent that could be stale.
         return Ok(());
     }
     // Titles and the session set first: the client places panes by this list.
-    send(writer, &handshake::sessions(host).await).await?;
+    outbound.send(&handshake::sessions(host).await)?;
 
     let (layout, sizes, panes) = {
         let map = host.sessions.lock().await;
@@ -56,15 +52,15 @@ where
     // A followed session that is gone is not re-announced: the session list above already
     // says it is gone, and `state.session` keeps pointing at it long after the close.
     if let Some(layout) = layout {
-        send(writer, &layout).await?;
+        outbound.send(&layout)?;
     }
     for size in &sizes {
-        send(writer, size).await?;
+        outbound.send(size)?;
     }
     // `idle` included: a lost clear must replace what the window last showed.
     for &pane_id in &panes {
         if let Some(status) = current_status(&host.sessions, pane_id).await {
-            send(writer, &status).await?;
+            outbound.send(&status)?;
         }
     }
 
@@ -72,7 +68,7 @@ where
     watched.sort_unstable();
     for pane_id in watched {
         if let Some(code) = host.exit_code(pane_id) {
-            send(writer, &Message::PaneExited { pane_id, code }).await?;
+            outbound.send(&Message::PaneExited { pane_id, code })?;
             continue;
         }
         // A scrolled-back window is reading history and gets the live screen when it
@@ -80,9 +76,7 @@ where
         if state.scrolled_back(pane_id) {
             continue;
         }
-        if let Some(snapshot) = snapshot_of(&host.sessions, pane_id, false).await {
-            send(writer, &snapshot).await?;
-        }
+        outbound.snapshot(pane_id);
     }
     Ok(())
 }

@@ -1,10 +1,11 @@
-//! One connection: decode frames into `dispatch`, and forward the host's events this
-//! connection cares about.
+//! One connection: decode frames into `dispatch`, and queue the host's events this
+//! connection cares about for its writer (`outbound`).
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, WriteHalf};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 use tokio::sync::broadcast::error::RecvError;
+use tokio::task::JoinHandle;
 
 use pigeon_core::error::PgError;
 use pigeon_core::proto::{self, Message};
@@ -14,7 +15,8 @@ use crate::dispatch::dispatch;
 use crate::event::Event;
 use crate::handshake;
 use crate::host_state::HostState;
-use crate::pane_query::{latest_status, pending_statuses, snapshot_of};
+use crate::outbound::Outbound;
+use crate::pane_query::{latest_status, pending_statuses};
 use crate::resync::resync;
 
 /// Connection ids the host hands out in `hello_ack` (protocol §3.1).
@@ -25,18 +27,33 @@ where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let client_id = NEXT_CLIENT.fetch_add(1, Ordering::Relaxed);
-    let result = client_loop(stream, &host, client_id).await;
+    let (reader, writer) = tokio::io::split(stream);
+    let (outbound, mut writer_task) = Outbound::start(writer, host.sessions.clone());
+    let result = client_loop(reader, &host, client_id, &outbound, &mut writer_task).await;
+    match &result {
+        // A clean end may still have frames queued (a final `error`): let them out.
+        Ok(()) => outbound.finish(writer_task).await,
+        // Too slow, or the socket broke: nothing queued is worth waiting for.
+        Err(_) => writer_task.abort(),
+    }
     // A closed window must stop counting towards the session's size policy, or
     // `smallest` would stay pinned to a box nobody can see any more.
     host.forget_client(client_id).await;
     result
 }
 
-async fn client_loop<S>(stream: S, host: &HostState, client_id: u32) -> Result<(), String>
+/// The reading half: frames and events in, everything out through `outbound`. Nothing here
+/// waits for the socket to be writable.
+async fn client_loop<R>(
+    mut reader: R,
+    host: &HostState,
+    client_id: u32,
+    outbound: &Outbound,
+    writer_task: &mut JoinHandle<Result<(), String>>,
+) -> Result<(), String>
 where
-    S: AsyncRead + AsyncWrite + Unpin,
+    R: AsyncRead + Unpin,
 {
-    let (mut reader, mut writer) = tokio::io::split(stream);
     let mut inbox = Vec::new();
     let mut subscribed = host.events.subscribe();
     let mut state = ClientState::new(client_id);
@@ -48,13 +65,13 @@ where
                 if count == 0 {
                     return Ok(());
                 }
-                if !drain_inbox(&mut inbox, host, &mut state, &mut writer).await? {
+                if !drain_inbox(&mut inbox, host, &mut state, outbound).await? {
                     return Ok(());
                 }
             }
             event = subscribed.recv() => {
                 match event {
-                    Ok(event) => forward(event, host, &state, &mut writer).await?,
+                    Ok(event) => forward(event, host, &state, outbound).await?,
                     Err(RecvError::Lagged(missed)) => {
                         if std::env::var_os("PIGEON_DEBUG").is_some() {
                             eprintln!("pigeon-host: client {client_id} lagged by {missed} events");
@@ -62,11 +79,18 @@ where
                         // What is still queued predates the state about to be sent: skip it,
                         // so nothing older than the resync reaches the window after it.
                         subscribed = subscribed.resubscribe();
-                        resync(host, &state, &mut writer).await?;
+                        resync(host, &state, outbound).await?;
                     }
                     // The host holds a sender for as long as it runs.
                     Err(RecvError::Closed) => return Ok(()),
                 }
+            }
+            // The writer only stops on its own when the socket broke.
+            written = &mut *writer_task => {
+                return match written {
+                    Ok(result) => result.and(Err("connection closed while writing".into())),
+                    Err(error) => Err(format!("writer: {error}")),
+                };
             }
         }
     }
@@ -74,15 +98,12 @@ where
 
 /// Handles every whole frame in `inbox`. Returns `false` when the connection must close
 /// (a frame that does not decode at all).
-async fn drain_inbox<S>(
+async fn drain_inbox(
     inbox: &mut Vec<u8>,
     host: &HostState,
     state: &mut ClientState,
-    writer: &mut WriteHalf<S>,
-) -> Result<bool, String>
-where
-    S: AsyncWrite + Unpin,
-{
+    outbound: &Outbound,
+) -> Result<bool, String> {
     loop {
         match proto::decode_frame(inbox) {
             Ok(Some((message, used))) => {
@@ -91,17 +112,17 @@ where
                     eprintln!("pigeon-host: <- {}", message.name());
                 }
                 if let Some(reply) = dispatch(message, host, state).await {
-                    reply_to(reply, host, state, writer).await?;
+                    reply_to(reply, host, state, outbound).await?;
                 }
                 // Outside the reply branch: a replay has no single reply.
                 for frame in std::mem::take(&mut state.outbox) {
-                    send(writer, &frame).await?;
+                    outbound.send(&frame)?;
                 }
             }
             Ok(None) => return Ok(true),
             Err(PgError::Unsupported) => {
                 let t_of = type_tag(inbox).unwrap_or_default();
-                send(writer, &Message::Unsupported { t_of }).await?;
+                outbound.send(&Message::Unsupported { t_of })?;
                 inbox.clear();
             }
             Err(error) => {
@@ -111,94 +132,78 @@ where
                     detail,
                     id: None,
                 };
-                send(writer, &message).await?;
+                outbound.send(&message)?;
                 return Ok(false);
             }
         }
     }
 }
 
-/// Sends a request's reply plus what protocol says must follow it.
-async fn reply_to<S>(
+/// Queues a request's reply plus what protocol says must follow it.
+async fn reply_to(
     reply: Message,
     host: &HostState,
     state: &ClientState,
-    writer: &mut WriteHalf<S>,
-) -> Result<(), String>
-where
-    S: AsyncWrite + Unpin,
-{
+    outbound: &Outbound,
+) -> Result<(), String> {
     let handshake = matches!(reply, Message::HelloAck { .. });
     let attached_pane = match &reply {
         Message::Snapshot { pane_id, .. } => Some(*pane_id),
         _ => None,
     };
-    send(writer, &reply).await?;
+    outbound.send(&reply)?;
     if let Some(pane_id) = attached_pane {
         if let Some(status) = latest_status(&host.sessions, pane_id).await {
-            send(writer, &status).await?;
+            outbound.send(&status)?;
         }
     }
     // Protocol §3.2: the session list follows the ack.
     if handshake {
-        send(writer, &handshake::sessions(host).await).await?;
+        outbound.send(&handshake::sessions(host).await)?;
         if state.status_all {
             for status in pending_statuses(&host.sessions).await {
-                send(writer, &status).await?;
+                outbound.send(&status)?;
             }
         }
     }
     Ok(())
 }
 
-/// Passes one host event on, if this connection follows what it is about.
-async fn forward<S>(
+/// Queues one host event, if this connection follows what it is about.
+async fn forward(
     event: Event,
     host: &HostState,
     state: &ClientState,
-    writer: &mut WriteHalf<S>,
-) -> Result<(), String>
-where
-    S: AsyncWrite + Unpin,
-{
+    outbound: &Outbound,
+) -> Result<(), String> {
     match event {
         // Follow the session even after its last watched pane is gone, so closing the
         // active pane still redraws the tree.
-        Event::Layout {
-            session_id,
-            message,
-        }
-        | Event::SizeState {
-            session_id,
-            message,
-        } => {
+        Event::Layout { session_id, frame } | Event::SizeState { session_id, frame } => {
             if state.session == Some(session_id) {
-                send(writer, &message).await?;
+                outbound.control(frame)?;
             }
         }
         Event::Exited { pane_id, code } => {
             if state.watched.contains_key(&pane_id) {
-                send(writer, &Message::PaneExited { pane_id, code }).await?;
+                outbound.send(&Message::PaneExited { pane_id, code })?;
             }
         }
-        Event::Status { pane_id, message } => {
+        Event::Status { pane_id, frame } => {
             if state.status_all || state.watched.contains_key(&pane_id) {
-                send(writer, &message).await?;
+                outbound.control(frame)?;
             }
         }
         Event::SessionsChanged => {
             // Like the original `dispatch(Sessions)`: before `hello` a client gets an error.
-            send(writer, &sessions_or_error(host, state).await).await?;
+            outbound.send(&sessions_or_error(host, state).await)?;
         }
         Event::Resized { pane_id } => {
-            if !state.watched.contains_key(&pane_id) || state.scrolled_back(pane_id) {
-                return Ok(());
-            }
-            if let Some(snapshot) = snapshot_of(&host.sessions, pane_id, false).await {
-                send(writer, &snapshot).await?;
+            if state.watched.contains_key(&pane_id) && !state.scrolled_back(pane_id) {
+                outbound.snapshot(pane_id);
             }
         }
-        Event::Delta { pane_id, message } => {
+        Event::Delta { pane_id, frame } => {
             let Some(delta_ok) = state.watched.get(&pane_id).copied() else {
                 return Ok(());
             };
@@ -208,9 +213,10 @@ where
                 return Ok(());
             }
             if delta_ok {
-                send(writer, &message).await?;
-            } else if let Some(snapshot) = snapshot_of(&host.sessions, pane_id, false).await {
-                send(writer, &snapshot).await?;
+                outbound.delta(pane_id, frame)?;
+            } else {
+                // Taken when the writer gets there, so a burst costs one snapshot.
+                outbound.snapshot(pane_id);
             }
         }
     }
@@ -227,20 +233,6 @@ async fn sessions_or_error(host: &HostState, state: &ClientState) -> Message {
             id: None,
         }
     }
-}
-
-pub async fn send<S>(writer: &mut WriteHalf<S>, message: &Message) -> Result<(), String>
-where
-    S: AsyncWrite + Unpin,
-{
-    let frame = proto::encode_frame(message).map_err(|error| format!("encode: {error}"))?;
-    writer
-        .write_all(&frame)
-        .await
-        .map_err(|error| error.to_string())?;
-    // tokio's stdout is buffered; without this a `--stdio` client would wait for a frame
-    // that is still sitting in the writer.
-    writer.flush().await.map_err(|error| error.to_string())
 }
 
 /// The `t` of a frame this build cannot decode, for the `unsupported` reply.

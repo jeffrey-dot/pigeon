@@ -7,7 +7,7 @@ use pigeon_core::session::empty_layout_message;
 
 use crate::cmd::{send_or_queue, Cmd};
 use crate::dispatch::no_such_pane;
-use crate::event::Event;
+use crate::event::{encode, Event};
 use crate::host_state::{apply_layout, broadcast_size, session_of, HostState};
 use crate::pane_actor::spawn_pane;
 
@@ -141,10 +141,9 @@ pub async fn close(host: &HostState, pane_id: u32) -> Option<Message> {
     }
     let _ = session.layout.close(pane_id);
     if session.layout.is_empty() {
-        let _ = host.events.send(Event::Layout {
-            session_id,
-            message: empty_layout_message(session_id),
-        });
+        if let Some(frame) = encode(&empty_layout_message(session_id)) {
+            let _ = host.events.send(Event::Layout { session_id, frame });
+        }
         map.remove(&session_id);
     } else {
         apply_layout(session_id, session, &host.events);

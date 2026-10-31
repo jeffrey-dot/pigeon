@@ -2453,3 +2453,226 @@ fn a_lagging_client_gets_the_current_state_back() {
         _ => false,
     });
 }
+
+/// What a delta-taking window draws: the last snapshot with every later delta applied in
+/// `seq` order, exactly as protocol §3.3 tells a client to.
+struct Screen {
+    seq: u32,
+    grid: Vec<Vec<proto::Cell>>,
+    cursor: proto::Cursor,
+    alt: bool,
+}
+
+impl Screen {
+    /// Applies one frame for `pane`; a gap in `seq` fails the test (the queue must never
+    /// leave one).
+    fn apply(screen: &mut Option<Self>, pane: u32, message: &Message) {
+        match message {
+            Message::Snapshot {
+                pane_id,
+                seq,
+                screen: grid,
+                cursor,
+                alt,
+                ..
+            } if *pane_id == pane => {
+                *screen = Some(Self {
+                    seq: *seq,
+                    grid: grid.clone(),
+                    cursor: *cursor,
+                    alt: *alt,
+                });
+            }
+            Message::Delta {
+                pane_id,
+                seq,
+                rows,
+                cursor,
+                alt,
+                ..
+            } if *pane_id == pane => {
+                let Some(current) = screen.as_mut() else {
+                    panic!("a delta before any snapshot");
+                };
+                if *seq <= current.seq {
+                    return;
+                }
+                assert_eq!(*seq, current.seq + 1, "deltas must stay contiguous");
+                current.seq = *seq;
+                for row in rows {
+                    current.grid[usize::from(row.y)] = row.cells.clone();
+                }
+                if let Some(cursor) = cursor {
+                    current.cursor = *cursor;
+                }
+                if let Some(alt) = alt {
+                    current.alt = *alt;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn text(&self) -> String {
+        rows_text(&self.grid)
+    }
+}
+
+/// A raw delta client that attaches `pane`, reads through the attach and then stops
+/// reading; returns it with the screen it has drawn so far.
+fn stalled_delta_client(socket: &str, pane: u32) -> (UnixStream, Option<Screen>) {
+    let mut slow = UnixStream::connect(socket).expect("connect");
+    for message in [
+        Message::Hello {
+            proto: proto::PROTO_VERSION,
+            client: "host-test-slow".into(),
+            features: vec!["delta".into()],
+        },
+        Message::Attach {
+            id: 2,
+            pane_id: pane,
+            size_policy: None,
+            history: Some(false),
+            since: None,
+        },
+    ] {
+        slow.write_all(&proto::encode_frame(&message).expect("encode"))
+            .expect("write");
+    }
+    let mut screen = None;
+    loop {
+        let message = read_frame(&mut slow);
+        Screen::apply(&mut screen, pane, &message);
+        if matches!(message, Message::Layout { .. }) && screen.is_some() {
+            return (slow, screen);
+        }
+    }
+}
+
+/// A window behind a stalled link: the pane floods far more output than any socket buffer
+/// holds while the window reads nothing. When it reads again, `seq` has no gap, the status
+/// set mid-flood still arrives, and the screen it ends up drawing equals a fresh attach.
+#[test]
+fn a_stalled_client_catches_up_to_the_same_screen_and_keeps_the_status() {
+    let _serial = one_at_a_time();
+    let host = start_host();
+    let mut worker = Client::connect(&host.socket);
+    hello(&mut worker);
+    let pane = attach_first(&mut worker);
+    let (slow, mut screen) = stalled_delta_client(&host.socket, pane);
+
+    worker.send(&Message::Keys {
+        pane_id: pane,
+        bytes: b"seq 1 60000; printf '\\033]7501;state=working:app=flood\\007'; seq 1 60000; echo flood-done\r"
+            .to_vec(),
+    });
+    worker.wait_for(|m| matches!(m, Message::Status { state, .. } if state == "working"));
+    wait_for_text(&mut worker, "flood-done");
+    let fresh = stable_snapshot(&mut worker, pane);
+    let (_, _, fresh_alt, fresh_cursor, _, fresh_grid) = comparable(&fresh);
+
+    let reader = slow.try_clone().expect("clone the socket for reading");
+    let mut slow = Client::new(Box::new(reader), Box::new(slow));
+    let mut saw_status = false;
+    let deadline = Instant::now() + Duration::from_secs(45);
+    loop {
+        assert!(
+            Instant::now() < deadline,
+            "the stalled window never caught up; it shows:\n{}",
+            screen.as_ref().map(Screen::text).unwrap_or_default()
+        );
+        let message = slow.wait_for(|m| {
+            matches!(
+                m,
+                Message::Snapshot { .. } | Message::Delta { .. } | Message::Status { .. }
+            )
+        });
+        if matches!(&message, Message::Status { pane_id, state, .. } if *pane_id == pane && state == "working")
+        {
+            saw_status = true;
+        }
+        Screen::apply(&mut screen, pane, &message);
+        let caught_up = screen.as_ref().is_some_and(|s| {
+            s.grid == fresh_grid && s.cursor == fresh_cursor && s.alt == fresh_alt
+        });
+        if caught_up && saw_status {
+            break;
+        }
+    }
+}
+
+/// Control messages queued behind a stalled socket come out in the order they happened,
+/// none missing, with a flood of screen updates interleaved.
+#[test]
+fn control_messages_keep_their_order_behind_a_stalled_socket() {
+    let _serial = one_at_a_time();
+    let host = start_host();
+    let mut worker = Client::connect(&host.socket);
+    hello(&mut worker);
+    let first = attach_first(&mut worker);
+    let (_second, layout) = split(&mut worker, first, proto::SplitAxis::Vertical, 0.5, 2);
+    let split_id = splits_of(tree_of(&layout))[0].0;
+    let (slow, _) = stalled_delta_client(&host.socket, first);
+
+    worker.send(&Message::Keys {
+        pane_id: first,
+        bytes: b"seq 1 40000; printf '\\033]7501;state=working\\007'; seq 1 40000; printf '\\033]7501;state=blocked:kind=question\\007'\r"
+            .to_vec(),
+    });
+    let ratios: Vec<f32> = (0..40).map(|step| 0.2 + 0.01 * step as f32).collect();
+    for &ratio in &ratios {
+        worker.send(&Message::ResizeSplit {
+            id: 80,
+            split_id,
+            ratio,
+        });
+    }
+    let last = ratios[ratios.len() - 1];
+    wait_for_layout(&mut worker, |m| {
+        splits_of(tree_of(m))
+            .first()
+            .is_some_and(|(_, _, ratio)| (*ratio - last).abs() < 1e-4)
+    });
+    worker.wait_for(|m| matches!(m, Message::Status { state, .. } if state == "blocked"));
+
+    let reader = slow.try_clone().expect("clone the socket for reading");
+    let mut slow = Client::new(Box::new(reader), Box::new(slow));
+    let mut seen_ratios: Vec<f32> = Vec::new();
+    let mut seen_states: Vec<String> = Vec::new();
+    loop {
+        let message =
+            slow.wait_for(|m| matches!(m, Message::Layout { .. } | Message::Status { .. }));
+        match &message {
+            Message::Layout { tree, .. } => {
+                if let Some((_, _, ratio)) = splits_of(tree).first() {
+                    seen_ratios.push(*ratio);
+                }
+            }
+            Message::Status { state, .. } => seen_states.push(state.clone()),
+            _ => unreachable!(),
+        }
+        let done = seen_ratios
+            .last()
+            .is_some_and(|ratio| (ratio - last).abs() < 1e-4)
+            && seen_states.last().is_some_and(|state| state == "blocked");
+        if done {
+            break;
+        }
+    }
+    // Every resize the worker made, in order, after the 0.5 the attach announced.
+    let after_attach: Vec<f32> = seen_ratios
+        .iter()
+        .copied()
+        .skip_while(|ratio| (ratio - 0.5).abs() < 1e-4)
+        .collect();
+    assert_eq!(after_attach.len(), ratios.len(), "{seen_ratios:?}");
+    for (seen, want) in after_attach.iter().zip(&ratios) {
+        assert!((seen - want).abs() < 1e-4, "{seen_ratios:?}");
+    }
+    let working = seen_states.iter().position(|state| state == "working");
+    let blocked = seen_states.iter().position(|state| state == "blocked");
+    assert!(
+        matches!((working, blocked), (Some(w), Some(b)) if w < b),
+        "{seen_states:?}"
+    );
+}

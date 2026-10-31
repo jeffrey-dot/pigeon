@@ -14,7 +14,7 @@ use pigeon_core::session::{PaneMeta, PaneState};
 use pigeon_core::term::Palette;
 
 use crate::cmd::Cmd;
-use crate::event::Event;
+use crate::event::{encode, Event};
 use crate::host_state::{Exits, HostState, Meta};
 
 const SCROLLBACK: usize = 10_000;
@@ -270,8 +270,9 @@ impl PaneActor {
         let revision = self.pane.status().revision();
         if revision != self.last_revision {
             self.last_revision = revision;
-            let message = self.pane.status_message();
-            let _ = self.events.send(Event::Status { pane_id, message });
+            if let Some(frame) = encode(&self.pane.status_message()) {
+                let _ = self.events.send(Event::Status { pane_id, frame });
+            }
         }
         let replies = self.pane.take_replies();
         if !replies.is_empty() {
@@ -299,10 +300,12 @@ impl PaneActor {
     fn flush_now(&mut self) {
         self.dirty = false;
         self.last_flush = Instant::now();
-        if let Some(message) = self.pane.delta_message() {
+        // Encoded even with nobody watching: the backlog that `attach.since` replays from
+        // already keeps the message, and an idle pane produces no deltas.
+        if let Some(frame) = self.pane.delta_message().as_ref().and_then(encode) {
             let _ = self.events.send(Event::Delta {
                 pane_id: self.pane.pane_id,
-                message,
+                frame,
             });
         }
     }
