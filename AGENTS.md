@@ -85,7 +85,7 @@ pigeon/
 │   │   ├── status/               # OSC 7501 解析与记录生命周期
 │   │   ├── session/              # session/window/pane 模型
 │   │   └── proto/                # 分帧 + CBOR 编解码（协议的唯一实现）
-│   ├── src/bin/pigeon-host.rs    # 会话宿主：PTY / unix socket / 多客户端（3–8MB 硬指标）
+│   ├── src/bin/pigeon-host/      # 会话宿主：cli / transport / client / dispatch / pane_actor（3–8MB 硬指标）
 │   └── tests/                    # abi（C 外形）+ api（Rust 外形）+ host（真实 PTY 端到端）
 └── Sources/
     ├── PigeonCore/               # C 头封装（module map + 类型映射，不实现语义）
@@ -113,7 +113,7 @@ pigeon/
 `Net/{HostClient,Wire}.swift`、`Sidebar/{SidebarModel,Grouping}.swift`。
 
 后两个之前存在的 Swift 模块（`PigeonShared` / `PigeonHost`）已取消：协议与宿主现在只存在于 `core/src/proto/`
-与 `core/src/bin/pigeon-host.rs`。理由：宿主必须是 3–8MB 静态单文件（`docs/remote.md`），Swift 运行时做不到；
+与 `core/src/bin/pigeon-host/`。理由：宿主必须是 3–8MB 静态单文件（`docs/remote.md`），Swift 运行时做不到；
 而协议只留一处实现，客户端通过 C ABI 编解码（见 `docs/protocol.md` §9）。
 
 ### 新增代码放哪里（判定表）
