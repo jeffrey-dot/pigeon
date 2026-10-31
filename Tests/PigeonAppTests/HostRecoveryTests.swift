@@ -13,7 +13,7 @@ final class HostRecoveryTests: XCTestCase {
     func testReconnectingNamesTheAttemptButOffersNoButton() {
         let state = HostRecovery.State.reconnecting(attempt: 2)
         let banner = HostRecovery.banner(for: state)
-        XCTAssertEqual(banner, "Session host is not reachable — reconnecting (2/3)…")
+        XCTAssertEqual(banner, "Connection lost. Reconnecting…")
         XCTAssertNil(HostRecovery.action(for: state), "a retry is already in flight")
     }
 
@@ -48,8 +48,24 @@ final class HostRecoveryTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(window, 30, "must outlast the 30 s outage it is for")
     }
 
-    func testTheHelpTextNamesTheRealCommand() {
-        XCTAssertTrue(HostRecovery.startCommand.contains("--bin pigeon-host"))
+    /// Help text reaches every user: no developer commands, no internal names.
+    func testHelpTextSpeaksToUsersNotDevelopers() {
+        let help = HostRecovery.remoteHelp(host: "example.com", reason: "Can't connect to example.com")
+        XCTAssertTrue(help.contains("example.com with SSH"), help)
+        for text in [help, HostRecovery.refusal(reason: "version", machine: "This Mac")] {
+            for jargon in ["pigeon-host", "cargo", "`", "session host"] {
+                XCTAssertFalse(text.contains(jargon), "\(jargon) in: \(text)")
+            }
+        }
+    }
+
+    func testARefusalSaysWhatToDo() {
+        XCTAssertEqual(
+            HostRecovery.refusal(reason: "version", machine: "box"),
+            "box is running a different version of Pigeon. Update Pigeon, then click Retry.")
+        XCTAssertEqual(
+            HostRecovery.refusal(reason: "made-up", machine: "box"),
+            "box didn't accept this connection.", "an unknown reason still reads as a sentence")
     }
 
     func testLauncherPrefersTheExplicitPathThenTheWorkingDirectory() {

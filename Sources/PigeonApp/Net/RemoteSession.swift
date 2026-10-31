@@ -23,8 +23,10 @@ final class RemoteSession {
         var client: HostClient?
         /// The ssh process a degraded session talks through (its stdin/stdout are the pty).
         var process: Process?
-        /// One line for the user: which way in, and why not the better one.
+        /// One line for the user: what this connection can and cannot do.
         var note: String
+        /// Why the better transports failed, for the log (never shown: it is plumbing).
+        var detail: String = ""
     }
 
     let host: String
@@ -113,8 +115,9 @@ final class RemoteSession {
             transport: .degraded,
             client: nil,
             process: process,
-            note: "\(host) has no usable pigeon-host (\(why.joined(separator: "; "))) — "
-                + "this session ends with the window")
+            note: "Couldn't set up Pigeon on \(host), so this is a plain SSH session. "
+                + "It ends when you close the window.",
+            detail: why.joined(separator: "; "))
     }
 
     /// A host to push: the one for the remote's own platform, if we have it built.

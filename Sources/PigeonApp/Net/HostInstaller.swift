@@ -51,7 +51,8 @@ public struct HostInstaller {
             case let .unsupportedPlatform(platform): return "no pigeon-host build for \(platform)"
             case let .noArtifact(platform): return "no local pigeon-host binary for \(platform)"
             case let .rejected(detail): return "remote refused the install: \(detail)"
-            case let .noHost(detail): return "no pigeon-host on the remote: \(detail)"
+            // The detail is plumbing (missing builds, refused forwards): logged, not shown.
+            case .noHost: return "Couldn't set up Pigeon on the server"
             case let .unreachable(host, detail):
                 return detail.isEmpty ? "Can't connect to \(host)" : "Can't connect to \(host): \(detail)"
             }

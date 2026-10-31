@@ -25,8 +25,9 @@ public enum HostRecovery {
         switch state {
         case .connected:
             return nil
-        case let .reconnecting(attempt):
-            return "Session host is not reachable — reconnecting (\(attempt)/\(attempts))…"
+        case .reconnecting:
+            // No "n of m": the local and remote budgets differ, and the count is not news.
+            return "Connection lost. Reconnecting…"
         case let .stopped(detail):
             return detail
         }
@@ -71,6 +72,21 @@ public enum HostRecovery {
         return drawn
     }
 
-    /// The command line shown when no host binary can be found to start automatically.
-    public static let startCommand = "cargo run --manifest-path core/Cargo.toml --bin pigeon-host"
+    /// What to check when a server cannot be reached, in words that need no setup knowledge.
+    public static func remoteHelp(host: String, reason: String) -> String {
+        "\(reason)\nMake sure you're online and can sign in to \(host) with SSH, then click Retry."
+    }
+
+    /// A refused `hello` (`docs/protocol.md` §2), said as what the user can do about it.
+    public static func refusal(reason: String, machine: String) -> String {
+        switch reason {
+        case "version":
+            return "\(machine) is running a different version of Pigeon. "
+                + "Update Pigeon, then click Retry."
+        case "busy":
+            return "\(machine) is busy. Try again in a moment."
+        default:
+            return "\(machine) didn't accept this connection."
+        }
+    }
 }

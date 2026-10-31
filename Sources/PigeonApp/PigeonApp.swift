@@ -20,7 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var heartbeatTimer: Timer?
     private var recovering: [String: Int] = [:]
     private let hostAgent = HostAgent()
-    /// Set by "Stop Session Host…" so the dropped socket is not taken for a crash.
+    /// Set by "End All Sessions on This Mac…" so the dropped socket is not taken for a crash.
     private var stoppedByUser = false
     /// The host whose layout is on screen; every host stays connected in the background.
     private var activeHost = "local"
@@ -132,7 +132,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // their sessions side by side, not one at a time.
         activeHost = hosts.current ?? "local"
         if !connectHost() {
-            hostLost(host: "local", "No session host is running.")
+            hostLost(host: "local", "Pigeon's background service isn't running.")
         }
         for host in hosts.hosts {
             startRemote(host)
@@ -292,7 +292,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let appMenu = NSMenu()
         // Quitting leaves the host and its sessions running; ending them is its own command.
         let stopHost = NSMenuItem(
-            title: "Stop Session Host…", action: #selector(stopLocalHost(_:)), keyEquivalent: "")
+            title: "End All Sessions on This Mac…", action: #selector(stopLocalHost(_:)), keyEquivalent: "")
         stopHost.target = self
         appMenu.addItem(stopHost)
         appMenu.addItem(.separator())
@@ -401,7 +401,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.debugLog("cannot reach \(host): \(error)")
                     if host == self.activeHost {
                         self.show(hostStatus: .stopped(
-                            detail: "\(error)\nCheck `ssh \(host)`, then Retry."))
+                            detail: HostRecovery.remoteHelp(host: host, reason: "\(error)")))
                     }
                 }
             }
@@ -409,7 +409,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func apply(_ outcome: RemoteSession.Outcome, host: String) {
-        debugLog("remote transport=\(outcome.transport.rawValue) host=\(host)")
+        debugLog("remote transport=\(outcome.transport.rawValue) host=\(host) \(outcome.detail)")
         connectingHost = nil
         refreshSidebar()
         if let client = outcome.client {
@@ -485,7 +485,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         client.onClose = { [weak self] in
             DispatchQueue.main.async {
-                self?.hostLost(host: host, "The session host closed the connection.")
+                self?.hostLost(host: host, "The connection was closed.")
             }
         }
         clients[host] = client
@@ -536,7 +536,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 debugLog("host \(host) silent for \(Int(Heartbeat.timeout))s: reconnecting")
                 connections[host]?.heartbeat = nil
                 client.close()
-                hostLost(host: host, "The connection to the session host stopped responding.")
+                hostLost(host: host, "The connection stopped responding.")
             }
         }
     }
@@ -548,7 +548,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if host == "local", stoppedByUser {
             stoppedByUser = false
             if host == activeHost {
-                showStopped("Session host stopped. Retry starts a new one.")
+                showStopped("All sessions on this Mac were ended. Retry starts new ones.")
             }
             refreshSidebar()
             return
@@ -608,7 +608,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 DispatchQueue.main.async { [weak self] in self?.apply(outcome, host: host) }
             } catch {
                 DispatchQueue.main.async { [weak self] in
-                    self?.recover(host: host, reason: "\(reason) (\(error))")
+                    self?.debugLog("reconnect to \(host) failed: \(error)")
+                    self?.recover(host: host, reason: Self.userReason(reason, error))
                 }
             }
         }
@@ -616,7 +617,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// The host starts like a `tmux` server (`pigeon-host --detach`): its own process group,
     /// nothing registered with the system, so it outlives this window without macOS listing
-    /// it as a background item. It lives until "Stop Session Host…" or logout.
+    /// it as a background item. It lives until "End All Sessions on This Mac…" or logout.
     private func startLocalHost() {
         guard let path = HostLauncher.find(candidates: HostLauncher.candidates()) else {
             debugLog("no pigeon-host binary found")
@@ -635,11 +636,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showStopped(_ reason: String) {
         if activeHost != "local" {
-            show(hostStatus: .stopped(
-                detail: "\(reason)\nCheck `ssh \(activeHost)`, then Retry."))
+            show(hostStatus: .stopped(detail: HostRecovery.remoteHelp(host: activeHost, reason: reason)))
             return
         }
-        show(hostStatus: .stopped(detail: "\(reason)\nStart it with: \(HostRecovery.startCommand)"))
+        show(hostStatus: .stopped(detail: "\(reason)\nClick Retry to start it again."))
+    }
+
+    /// "Can't connect" is worth showing as is; any other probe failure is plumbing the user
+    /// cannot act on, so they get the plain reason and the details go to the log.
+    private static func userReason(_ reason: String, _ error: Error) -> String {
+        if case HostInstaller.Failure.unreachable = error { return "\(error)" }
+        return reason
     }
 
     private func show(hostStatus state: HostRecovery.State) {
@@ -658,7 +665,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         if !connectHost() {
-            recover(host: "local", reason: "No session host is running.")
+            recover(host: "local", reason: "Pigeon's background service isn't running.")
         }
     }
 
@@ -985,15 +992,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func stopLocalHost(_ sender: Any?) {
         let alert = NSAlert()
-        alert.messageText = "Stop the session host?"
+        alert.messageText = "End all sessions on this Mac?"
         alert.informativeText =
             "Every session on this Mac ends, including programs still running in them."
-        alert.addButton(withTitle: "Stop Host")
+        alert.addButton(withTitle: "End All")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         guard let client = clients["local"] else {
             let failure = NSAlert()
-            failure.messageText = "The session host is not running"
+            failure.messageText = "No sessions are running on this Mac"
             failure.runModal()
             return
         }
@@ -1009,11 +1016,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func connectToHost(_ sender: Any?) {
         let alert = NSAlert()
-        alert.messageText = "Connect to host"
+        alert.messageText = "Connect to a Server"
         alert.informativeText =
-            "An ssh destination, e.g. `arch`. pigeon-host is installed there on first use."
+            "Enter a server you can sign in to with SSH, like user@example.com or a name "
+            + "from your SSH config. Pigeon sets itself up there the first time, so your "
+            + "sessions keep running after you close the window."
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
-        field.placeholderString = "user@host"
+        field.placeholderString = "user@example.com"
         alert.accessoryView = field
         alert.addButton(withTitle: "Connect")
         alert.addButton(withTitle: "Cancel")
@@ -1073,7 +1082,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if clients[host] == nil {
             if host == "local" {
                 if !connectHost() {
-                    hostLost(host: "local", "No session host is running.")
+                    hostLost(host: "local", "Pigeon's background service isn't running.")
                 }
             } else {
                 startRemote(host, select: true)
@@ -1364,13 +1373,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             closeSession(host: activeHost, session: id)
         case PG_MSG_HELLO_ERROR:
             // Retrying a refused handshake only repeats it, so stop and explain.
-            refusedReason =
-                "The host refused this client (\(Wire.string(message, "reason")): \(Wire.string(message, "detail")))."
+            let host = activeHost
+            debugLog("hello refused: \(Wire.string(message, "reason")) \(Wire.string(message, "detail"))")
+            refusedReason = HostRecovery.refusal(
+                reason: Wire.string(message, "reason"),
+                machine: host == "local" ? "This Mac" : host)
             // `close()` is the quiet hang-up (no `onClose`), so report the refusal here.
             client?.close()
-            let host = activeHost
             DispatchQueue.main.async { [weak self] in
-                self?.hostLost(host: host, "The host refused this client.")
+                self?.hostLost(host: host, "The connection was refused.")
             }
         case PG_MSG_ERROR:
             NSLog("pigeon: \(Wire.string(message, "code")): \(Wire.string(message, "detail"))")

@@ -77,7 +77,7 @@ final class StatusPulseTests: XCTestCase {
 final class RestoredSessionTests: XCTestCase {
     func testARestoredSessionSaysSoInTheRowAndTheHeader() {
         let session = SidebarSession(id: 1, title: "zsh", group: "w", status: .working, restored: true)
-        XCTAssertEqual(SidebarModel.detailLine(for: session), "Ended · restored after host restart")
+        XCTAssertEqual(SidebarModel.detailLine(for: session), "Ended · last screen before restart")
         XCTAssertTrue(SidebarModel.headerBadge(for: session).hasPrefix("Ended"))
     }
 

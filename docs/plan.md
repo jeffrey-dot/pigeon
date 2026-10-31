@@ -144,13 +144,13 @@ tmux attach（前台，一个普通程序）
 **本机是不是装了两个应用？** 不是。`pigeon-host` 打包在 `Pigeon.app/Contents/Helpers/` 里，
 随 app 一起签名/公证/升级；Dock 里只有一个图标、/Applications 里只有一个 app。
 运行时 `ps` 会看到两个进程（`Pigeon` + `pigeon-host`）——和 Chrome 的 helper、VSCode 的后端进程一样。
-关窗口 / `⌘Q` / 窗口崩溃 = 窗口进程退出、`pigeon-host` 继续；结束全部会话走单独的菜单项 `Stop Session Host…`（会确认）。
+关窗口 / `⌘Q` / 窗口崩溃 = 窗口进程退出、`pigeon-host` 继续；结束全部会话走单独的菜单项 `End All Sessions on This Mac…`（会确认）。
 本机宿主像 tmux server 一样启动（issue #2）：连不上 socket 时，客户端跑 `pigeon-host --detach`，
 它在**新的进程组**里拉起宿主、等 socket 能连上再返回。宿主因此不是窗口的子进程，`⌘Q`、崩溃、`kill -9` 窗口都带不走它。
 **不向系统注册任何东西**（不写 LaunchAgent、没有登录项），所以 macOS 不会提示“可在后台运行”；
 代价是不随登录自启、崩溃不自动拉回，下次打开窗口时再拉起（上次的屏幕由状态文件恢复成“已结束”的会话）。
 旧版本注册过的 `~/Library/LaunchAgents/dev.pigeon.host.plist` 在启动时删掉（宿主还在跑就不 `bootout`，免得带走会话）。
-`Stop Session Host…` 发协议消息 `shutdown`：结束所有会话、删掉 socket 与状态文件，宿主退出。
+`End All Sessions on This Mac…` 发协议消息 `shutdown`：结束所有会话、删掉 socket 与状态文件，宿主退出。
 日志写 `~/.config/pigeon/host.log`（追加）。
 不需要 root，不开网络端口，`ps` 里只看到一个 `pigeon-host`。Linux 客户端届时用 systemd user unit 做同样的事。
 

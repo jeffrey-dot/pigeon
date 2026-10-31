@@ -36,7 +36,7 @@ public enum HostLauncher {
     /// The arguments that start a host the way `tmux` starts its server: `--detach` puts it
     /// in its own process group and returns once it answers, so the window quitting, crashing
     /// or being killed never takes the sessions along. Nothing is registered with the system
-    /// (no launchd job, no login item): the host lives until "Stop Session Host…" or logout.
+    /// (no launchd job, no login item): the host lives until "End All Sessions on This Mac…" or logout.
     public static func detachArguments(socket: String, shell: String?, log: String) -> [String] {
         var arguments = ["--detach", "--socket", socket, "--log", log]
         if let shell, !shell.isEmpty { arguments += ["--shell", shell] }

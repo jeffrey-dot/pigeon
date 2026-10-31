@@ -24,7 +24,7 @@ final class RemoteSessionTests: XCTestCase {
         XCTAssertEqual(outcome.transport, .degraded)
         XCTAssertNil(outcome.client, "there is no protocol peer to talk to")
         XCTAssertTrue(outcome.process === spawned)
-        XCTAssertTrue(outcome.note.contains("this session ends with the window"), outcome.note)
+        XCTAssertTrue(outcome.note.contains("It ends when you close the window"), outcome.note)
         XCTAssertTrue(outcome.note.contains("far"))
     }
 
@@ -274,7 +274,7 @@ final class RemoteSessionTests: XCTestCase {
             }
         )
         XCTAssertThrowsError(try session.connect(allowHost: false, allowDegraded: false)) { error in
-            XCTAssertTrue("\(error)".contains("no pigeon-host"), "got \(error)")
+            XCTAssertTrue("\(error)".contains("Couldn't set up Pigeon"), "got \(error)")
         }
     }
 
@@ -288,7 +288,7 @@ final class RemoteSessionTests: XCTestCase {
         defer { session.close() }
         let outcome = try session.connect(allowHost: false)
         XCTAssertEqual(outcome.transport, .degraded, outcome.note)
-        XCTAssertTrue(outcome.note.contains("ends with the window"), outcome.note)
+        XCTAssertTrue(outcome.note.contains("ends when you close the window"), outcome.note)
         XCTAssertTrue(outcome.note.contains(host), outcome.note)
         let process = try XCTUnwrap(outcome.process)
         XCTAssertTrue(process.isRunning, "plain ssh is up and holding the session")
