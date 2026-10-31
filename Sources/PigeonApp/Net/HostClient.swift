@@ -22,6 +22,16 @@ final class HostClient {
     private let writeFD: Int32
     private let source: DispatchSourceRead
     private var inbox = Data()
+    /// Frames are written here, never on the caller's (main) thread: a slow ssh link would
+    /// otherwise stall typing, scrolling and drawing while `write` waits for room.
+    private let writer = DispatchQueue(label: "pigeon.host-client.write", qos: .userInteractive)
+    /// Bytes queued but not yet written, guarded by `lock`. A link that stops draining for
+    /// good must not grow memory without bound, so past `maxQueued` the connection is
+    /// dropped and the reconnect path re-attaches with a fresh snapshot.
+    private let lock = NSLock()
+    private var queued = 0
+    private var failed = false
+    static let maxQueued = 32 << 20
 
     /// Receives an owned message; the callee must `Wire.free` it.
     var onMessage: ((OpaquePointer) -> Void)?
@@ -75,10 +85,41 @@ final class HostClient {
             NSLog("pigeon: refusing to send an incomplete message type=\(Wire.type(message).rawValue)")
             return
         }
-        guard !Self.writeAll(writeFD, frame) else { return }
-        // A frame that did not go out whole leaves the stream torn: drop the connection
-        // so the reconnect path takes over, instead of sending the rest of a frame later.
-        NSLog("pigeon: write failed (\(String(cString: strerror(errno)))); closing")
+        lock.lock()
+        let refuse = failed || queued + frame.count > Self.maxQueued
+        if refuse, !failed {
+            failed = true
+            lock.unlock()
+            NSLog("pigeon: \(queued) bytes waiting for a host that is not reading; closing")
+            fail()
+            return
+        }
+        if !refuse { queued += frame.count }
+        lock.unlock()
+        guard !refuse else { return }
+        writer.async { [self] in
+            let ok = Self.writeAll(writeFD, frame)
+            lock.lock()
+            queued -= frame.count
+            // A frame that did not go out whole leaves the stream torn: drop the connection
+            // so the reconnect path takes over, instead of sending the rest of a frame later.
+            let first = !ok && !failed
+            if !ok { failed = true }
+            lock.unlock()
+            if first {
+                NSLog("pigeon: write failed (\(String(cString: strerror(errno)))); closing")
+                fail()
+            }
+        }
+    }
+
+    /// Blocks until every frame queued so far has been written (or the link failed). For
+    /// short-lived callers that exit right after sending, and for tests.
+    func flushWrites() {
+        writer.sync {}
+    }
+
+    private func fail() {
         onClose?()
         close()
     }

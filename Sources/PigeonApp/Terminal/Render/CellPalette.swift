@@ -11,7 +11,21 @@ struct CellPalette: Equatable, Sendable {
     var foreground: UInt32
     var background: UInt32
 
+    /// One palette per appearance name: resolving walks 16 `bestMatch` calls and two dynamic
+    /// colours, and every posted frame asks.
+    nonisolated(unsafe) private static var cache: [NSAppearance.Name: CellPalette] = [:]
+    private static let cacheLock = NSLock()
+
     static func resolve(for appearance: NSAppearance) -> CellPalette {
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        if let hit = cache[appearance.name] { return hit }
+        let palette = build(for: appearance)
+        cache[appearance.name] = palette
+        return palette
+    }
+
+    private static func build(for appearance: NSAppearance) -> CellPalette {
         CellPalette(
             ansi: TerminalPalette.hexValues(appearance: appearance),
             foreground: TerminalPalette.hex(SidebarTheme.terminalForeground, appearance: appearance),

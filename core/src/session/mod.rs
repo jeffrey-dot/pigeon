@@ -165,10 +165,8 @@ impl PaneState {
     /// The screen scrolled `offset` lines into the history, and the offset the terminal
     /// actually applied (clamped to the history there is).
     pub fn scroll_message(&mut self, offset: usize) -> (Message, usize) {
-        let snapshot = self.term.snapshot();
-        let total = snapshot.history.len();
+        let (view, total) = self.term.scrolled_snapshot(offset);
         let applied = offset.min(total);
-        let view = snapshot.scrolled(applied);
         let mut message = message_from_snapshot(self.pane_id, self.seq, &view, false, self.term.modes());
         // The client draws its scroll indicator from these two numbers; they are only
         // meaningful on a `scroll` answer, so they stay out of every other snapshot.

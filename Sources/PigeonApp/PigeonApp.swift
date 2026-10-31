@@ -165,6 +165,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
+    /// Writes leave on a background queue; a quit right after `close_pane` must not drop it.
+    func applicationWillTerminate(_ notification: Notification) {
+        for client in clients.values { client.flushWrites() }
+    }
+
     // MARK: - window
 
     private func buildWindow() {
@@ -913,7 +918,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             remainingSessions: remaining, creatingSession: pendingSelectSession != nil)
         else { return }
         debugLog("last session closed: quitting")
-        // Next turn, so the `close_pane` frames written above are on their way first.
+        // `applicationWillTerminate` waits for the queued `close_pane` frames to be written.
         DispatchQueue.main.async { NSApp.terminate(nil) }
     }
 

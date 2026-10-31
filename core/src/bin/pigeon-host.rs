@@ -1331,6 +1331,9 @@ fn spawn_pane(
         // When the last delta left, and whether the screen changed since.
         let mut last_flush = Instant::now() - FRAME;
         let mut dirty = false;
+        // Input was written and its echo has not gone out yet: the first output after a
+        // keystroke skips the frame throttle, so fast typing echoes without a 16 ms wait.
+        let mut echo_due = false;
         loop {
             tokio::select! {
                 _ = sleep_until(last_flush + FRAME), if dirty => {
@@ -1345,6 +1348,7 @@ fn spawn_pane(
                     };
                     match command {
                         Cmd::Input(bytes) => {
+                            echo_due = true;
                             let _ = write_tx.send(bytes);
                         }
                         Cmd::Paste(text) => {
@@ -1441,7 +1445,8 @@ fn spawn_pane(
                     if !replies.is_empty() {
                         let _ = write_tx.send(replies);
                     }
-                    if last_flush.elapsed() >= FRAME {
+                    if echo_due || last_flush.elapsed() >= FRAME {
+                        echo_due = false;
                         dirty = false;
                         last_flush = Instant::now();
                         flush(&mut pane, &events);

@@ -213,6 +213,16 @@ pub trait Term {
         snapshot.history.clear();
         snapshot
     }
+    /// The screen scrolled back `offset` lines (clamped to the history), plus the history
+    /// length; equal to `snapshot().scrolled(offset)` without `history`. Engines override it
+    /// to convert one screen of rows instead of the whole backlog on every scroll step.
+    fn scrolled_snapshot(&self, offset: usize) -> (Snapshot, usize) {
+        let snapshot = self.snapshot();
+        let total = snapshot.history.len();
+        let mut view = snapshot.scrolled(offset);
+        view.history.clear();
+        (view, total)
+    }
     /// Row indices changed since the last call; empty when clean.
     fn take_damage(&mut self) -> Vec<u16>;
     /// Bytes the application expects on its PTY (query answers).
@@ -440,6 +450,47 @@ mod tests {
             "oldest line first, got {first:?}"
         );
         assert_eq!(snap.history[0].len(), 20, "history rows are full width");
+    }
+
+    /// `cargo test --release -- --ignored scroll_step_cost --nocapture`: one `scroll` answer on
+    /// a full 10k-line backlog, the old way (whole history) against the engine's slice.
+    #[test]
+    #[ignore]
+    fn scroll_step_cost() {
+        let mut t = AlacrittyTerm::new(200, 50, 10_000);
+        for line in 0..12_000 {
+            t.feed(format!("{line:>6} the quick brown fox jumps over the lazy dog\r\n").as_bytes());
+        }
+        let steps = 50;
+        let start = std::time::Instant::now();
+        for step in 0..steps {
+            let _ = t.snapshot().scrolled(step * 3);
+        }
+        let full = start.elapsed() / steps as u32;
+        let start = std::time::Instant::now();
+        for step in 0..steps {
+            let _ = t.scrolled_snapshot(step * 3);
+        }
+        let sliced = start.elapsed() / steps as u32;
+        eprintln!("scroll step: whole history {full:?}, one screen {sliced:?}");
+    }
+
+    #[test]
+    fn the_engines_scrolled_view_matches_slicing_the_full_history() {
+        let mut t = term();
+        for line in 1..=40 {
+            t.feed(format!("\x1b[1mline\x1b[0m {line}\r\n").as_bytes());
+        }
+        let full = t.snapshot();
+        let total = full.history.len();
+        // Every offset, including past the top of the backlog (clamped, never out of range).
+        for offset in [0, 1, 3, total - 1, total, total + 50, usize::MAX] {
+            let (fast, reported) = t.scrolled_snapshot(offset);
+            let mut slow = full.scrolled(offset);
+            slow.history.clear();
+            assert_eq!(reported, total);
+            assert_eq!(fast, slow, "offset {offset}");
+        }
     }
 
     #[test]

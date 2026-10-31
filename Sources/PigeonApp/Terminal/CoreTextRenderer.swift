@@ -12,20 +12,28 @@ enum CoreTextRenderer {
     /// system monospace rather than bundling a font file.
     static let fontName = "Hack"
 
-    static func font(bold: Bool) -> NSFont {
+    static func font(bold: Bool) -> NSFont { bold ? boldFont : regularFont }
+
+    /// Looked up once: `NSFont(name:)` walks the font registry, and every frame, mouse event
+    /// and resize asks for the cell size. `static let` is lazily and thread-safely initialized,
+    /// so the render thread's rasterizer can share it.
+    private static let regularFont = loadFont(bold: false)
+    private static let boldFont = loadFont(bold: true)
+    private static let cachedCellSize: CGSize = {
+        let advance = ("M" as NSString).size(withAttributes: [.font: regularFont])
+        // Cell height is the font size times harp's line-height ratio, not the font's own
+        // ascender/descender span: that is what gives harp's rows their airiness.
+        return CGSize(width: max(advance.width, 1), height: max(fontSize * lineHeightRatio, 1))
+    }()
+
+    private static func loadFont(bold: Bool) -> NSFont {
         if let named = NSFont(name: bold ? "\(fontName)-Bold" : fontName, size: fontSize) {
             return named
         }
         return NSFont.monospacedSystemFont(ofSize: fontSize, weight: bold ? .bold : .regular)
     }
 
-    static func cellSize() -> CGSize {
-        let font = font(bold: false)
-        let advance = ("M" as NSString).size(withAttributes: [.font: font])
-        // Cell height is the font size times harp's line-height ratio, not the font's own
-        // ascender/descender span: that is what gives harp's rows their airiness.
-        return CGSize(width: max(advance.width, 1), height: max(fontSize * lineHeightRatio, 1))
-    }
+    static func cellSize() -> CGSize { cachedCellSize }
 
     // MARK: - glyph rasterization
 

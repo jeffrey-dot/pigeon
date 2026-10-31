@@ -41,9 +41,9 @@
 - 右栏头部显示 `Working · 3m · Refactoring the renderer` / `Needs you · permission · Run cargo test?`。
 - 宿主侧：不 attach 也能收到所有会话的 status（`sessions` 里带每会话的最新状态），status-only 的客户端不参与尺寸投票。
 
-### P3 流畅
+### P3 流畅 ✅
 
-- 宿主 `scroll` 只切出一屏，不再每步转换 1 万行历史（实测 14.5ms/步）。
+- 宿主 `scroll` 只切出一屏，不再每步转换 1 万行历史（实测 14.5ms/步；现在 1 万行历史上每步 0.08ms，`scroll_step_cost`）。
 - 输入后立即 flush 一帧（打字回显不再等 16ms 节拍）。
 - 客户端主线程缓存字体度量和色板（现在每帧查 `NSFont(name:)` 和 16 次 `bestMatch`）。
 - 写 socket 移出主线程（串行队列 + 有界发件箱），慢 ssh 不再卡界面。

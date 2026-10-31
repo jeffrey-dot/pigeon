@@ -246,6 +246,24 @@ impl Term for AlacrittyTerm {
         self.picture(false)
     }
 
+    fn scrolled_snapshot(&self, offset: usize) -> (Snapshot, usize) {
+        let mut view = self.picture(false);
+        let total = (-self.term.grid().topmost_line().0).max(0) as usize;
+        let offset = offset.min(total);
+        if offset == 0 {
+            return (view, total);
+        }
+        let colors = self.term.colors();
+        // Screen line 0 is `Line(0)`; history runs to `Line(-total)`. Shifting the window up
+        // by `offset` reads exactly `rows` lines, so a step costs one screen, not 10k lines.
+        view.screen = (0..i32::from(view.rows))
+            .map(|row| self.convert_row(Line(row - offset as i32), colors))
+            .collect();
+        // The cursor belongs to the live screen; drawing it over history would lie.
+        view.cursor.visible = false;
+        (view, total)
+    }
+
     fn take_damage(&mut self) -> Vec<u16> {
         let rows: Vec<u16> = match self.term.damage() {
             TermDamage::Full => (0..self.size.lock().map(|size| size.rows).unwrap_or(24)).collect(),
