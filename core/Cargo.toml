@@ -14,10 +14,19 @@ crate-type = ["rlib", "staticlib", "cdylib"]
 [[bin]]
 name = "pigeon-host"
 path = "src/bin/pigeon-host.rs"
-required-features = ["host"]
+required-features = ["host", "internals"]
+
+# Spawns the pigeon-host binary, which needs the host feature to exist.
+[[test]]
+name = "host"
+path = "tests/host.rs"
+required-features = ["host", "internals"]
 
 [features]
-default = ["host"]
+default = ["host", "internals"]
+# Makes term/layout/status/session/proto public for pigeon-host and the
+# integration tests. Clients turn default features off and use `api` only.
+internals = []
 # Host-only dependencies: the library itself must build without a runtime or a
 # PTY, which is what keeps core/ portable and embeddable.
 host = ["dep:tokio", "dep:portable-pty"]

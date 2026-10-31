@@ -9,7 +9,7 @@ use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::time::Duration;
 
-use pigeon_core::proto::{self, Message};
+use pigeon_core::api::{self as proto, Message};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut socket = String::new();

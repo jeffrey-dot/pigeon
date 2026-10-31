@@ -18,8 +18,9 @@ use std::ptr;
 use ciborium::value::Value;
 
 use super::{ffi_call, PgAxis, PgRect, PgSnapshot, PgSplit, PgStr};
+use crate::api::{self, Axis, Message, MAX_FRAME};
 use crate::error::{PgError, PgResult};
-use crate::proto::{self, Message, MAX_FRAME};
+use crate::proto;
 
 /// The M0 subset of `docs/protocol.md` §3.
 #[repr(C)]
@@ -261,11 +262,8 @@ pub extern "C" fn pg_msg_set_bytes(
     ffi_call(false, || {
         let msg = unsafe_mut(msg)?;
         let field = field_name(field)?;
-        if data.is_null() && len > 0 {
-            return Err(PgError::InvalidArg);
-        }
-        // SAFETY: caller promises `len` readable bytes.
-        let bytes = unsafe { std::slice::from_raw_parts(data, len) }.to_vec();
+        // SAFETY: caller promises `len` readable bytes at `data`.
+        let bytes = unsafe { super::byte_slice(data, len) }?.to_vec();
         msg.fields.insert(field, Value::Bytes(bytes));
         Ok(true)
     })
@@ -418,7 +416,7 @@ pub extern "C" fn pg_msg_decode_frame(
 /// Builds an owned snapshot from a `snapshot` message; free with
 /// [`super::pg_snapshot_free`]. NULL for any other message type.
 ///
-/// Goes through [`crate::session::snapshot_from_message`], so cell widths (wide
+/// Goes through [`api::snapshot_of`], so cell widths (wide
 /// chars and their continuation) are derived exactly like everywhere else.
 #[no_mangle]
 pub extern "C" fn pg_msg_snapshot(msg: *const PgMsg) -> *mut PgSnapshot {
@@ -427,14 +425,8 @@ pub extern "C" fn pg_msg_snapshot(msg: *const PgMsg) -> *mut PgSnapshot {
         if type_of(&msg.t) != PgMsgType::PG_MSG_SNAPSHOT {
             return Err(PgError::InvalidArg);
         }
-        let message = msg.to_message()?;
-        let pane_id = match message {
-            Message::Snapshot { pane_id, .. } => pane_id,
-            _ => return Err(PgError::InvalidArg),
-        };
-        let snapshot =
-            crate::session::snapshot_from_message(&message).ok_or(PgError::InvalidArg)?;
-        Ok(super::snapshot_to_ffi(pane_id, &snapshot, true))
+        let (pane_id, snapshot) = api::snapshot_of(&msg.to_message()?)?;
+        super::snapshot_to_ffi(pane_id, &snapshot, true)
     })
 }
 
@@ -459,11 +451,8 @@ pub extern "C" fn pg_msg_encode(msg: *const PgMsg, out: *mut u8, cap: usize) -> 
 #[no_mangle]
 pub extern "C" fn pg_msg_decode(payload: *const u8, len: usize) -> *mut PgMsg {
     ffi_call(ptr::null_mut(), || {
-        if payload.is_null() && len > 0 {
-            return Err(PgError::InvalidArg);
-        }
-        // SAFETY: caller promises `len` readable bytes.
-        let bytes = unsafe { std::slice::from_raw_parts(payload, len) };
+        // SAFETY: caller promises `len` readable bytes at `payload`.
+        let bytes = unsafe { super::byte_slice(payload, len) }?;
         match proto::decode(bytes) {
             Ok(message) => Ok(Box::into_raw(Box::new(PgMsg::from_message(&message)?))),
             Err(PgError::Unsupported) => {
@@ -483,8 +472,7 @@ pub extern "C" fn pg_msg_decode(payload: *const u8, len: usize) -> *mut PgMsg {
 #[no_mangle]
 pub extern "C" fn pg_msg_layout_rects(msg: *const PgMsg, out: *mut PgRect, cap: usize) -> usize {
     ffi_call(0, || {
-        let node = layout_node(unsafe_ref(msg)?)?;
-        let rects = node.rects();
+        let rects = api::layout_rects(&layout_message(unsafe_ref(msg)?)?)?;
         if rects.is_empty() {
             return Ok(0);
         }
@@ -512,25 +500,25 @@ pub extern "C" fn pg_msg_layout_rects(msg: *const PgMsg, out: *mut PgRect, cap: 
 #[no_mangle]
 pub extern "C" fn pg_msg_layout_splits(msg: *const PgMsg, out: *mut PgSplit, cap: usize) -> usize {
     ffi_call(0, || {
-        let node = layout_node(unsafe_ref(msg)?)?;
-        let splits = node.splits();
+        let splits = api::layout_splits(&layout_message(unsafe_ref(msg)?)?)?;
         if splits.is_empty() {
             return Ok(0);
         }
         if out.is_null() || cap < splits.len() {
             return Err(PgError::Overflow);
         }
-        for (index, (id, axis, ratio, rect)) in splits.iter().enumerate() {
+        for (index, split) in splits.iter().enumerate() {
+            let rect = split.rect;
             // SAFETY: the caller promised `cap` writable entries.
             unsafe {
                 *out.add(index) = PgSplit {
                     size: std::mem::size_of::<PgSplit>() as u32,
-                    id: *id,
-                    axis: match axis {
-                        crate::layout::Axis::Vertical => PgAxis::PG_AXIS_VERTICAL,
-                        crate::layout::Axis::Horizontal => PgAxis::PG_AXIS_HORIZONTAL,
+                    id: split.id,
+                    axis: match split.axis {
+                        Axis::Vertical => PgAxis::PG_AXIS_VERTICAL,
+                        Axis::Horizontal => PgAxis::PG_AXIS_HORIZONTAL,
                     },
-                    ratio: *ratio,
+                    ratio: split.ratio,
                     x: rect.x,
                     y: rect.y,
                     w: rect.w,
@@ -561,43 +549,16 @@ pub extern "C" fn pg_msg_layout_zoom(msg: *const PgMsg) -> u32 {
 #[no_mangle]
 pub extern "C" fn pg_msg_layout_focus(msg: *const PgMsg) -> u32 {
     ffi_call(0, || {
-        let msg = unsafe_ref(msg)?;
-        if type_of(&msg.t) != PgMsgType::PG_MSG_LAYOUT {
-            return Err(PgError::InvalidArg);
-        }
-        Ok(match msg.to_message()? {
-            Message::Layout { focus, .. } => focus.unwrap_or(0),
-            _ => 0,
-        })
+        let message = layout_message(unsafe_ref(msg)?)?;
+        Ok(api::layout_focus(&message)?.unwrap_or(0))
     })
 }
 
-fn layout_node(msg: &PgMsg) -> PgResult<crate::layout::LayoutNode> {
+fn layout_message(msg: &PgMsg) -> PgResult<Message> {
     if type_of(&msg.t) != PgMsgType::PG_MSG_LAYOUT {
         return Err(PgError::InvalidArg);
     }
-    match msg.to_message()? {
-        Message::Layout { tree, .. } => Ok(from_proto_node(&tree)),
-        _ => Err(PgError::InvalidArg),
-    }
-}
-
-fn from_proto_node(node: &crate::proto::Node) -> crate::layout::LayoutNode {
-    use crate::layout::{Axis as LayoutAxis, LayoutNode};
-    use crate::proto::Node;
-    match node {
-        Node::Leaf { leaf } => LayoutNode::Leaf(*leaf),
-        Node::Split { split } => LayoutNode::Split {
-            id: split.id,
-            axis: match split.axis {
-                crate::proto::SplitAxis::Vertical => LayoutAxis::Vertical,
-                crate::proto::SplitAxis::Horizontal => LayoutAxis::Horizontal,
-            },
-            ratio: split.ratio,
-            a: Box::new(from_proto_node(&split.a)),
-            b: Box::new(from_proto_node(&split.b)),
-        },
-    }
+    msg.to_message()
 }
 
 fn encode_payload(msg: &PgMsg) -> PgResult<Vec<u8>> {
@@ -870,7 +831,8 @@ fn session_entry(msg: &PgMsg, index: usize) -> PgResult<Option<&Value>> {
 mod tests {
     use super::*;
     use crate::ffi::{
-        pg_last_error_code, pg_snapshot_free, PgErrorCode, PgMsgType, PgStatus, PG_CORE_ABI_VERSION,
+        pg_last_error_code, pg_snapshot_free, PgCell, PgCursor, PgErrorCode, PgMsgType,
+        PgScrollRegion, PgStatus, PG_CORE_ABI_VERSION,
     };
     use std::ffi::CString;
 
@@ -1045,6 +1007,116 @@ mod tests {
         assert_eq!(cell.fg, 0x00ff_0000);
         pg_snapshot_free(snap);
         pg_msg_free(decoded);
+    }
+
+    fn wire_snapshot(cols: u16, rows: u16, screen: Vec<Vec<proto::Cell>>) -> Message {
+        Message::Snapshot {
+            pane_id: 1,
+            seq: 1,
+            cols,
+            rows,
+            alt: false,
+            cursor: proto::Cursor {
+                x: 0,
+                y: 0,
+                visible: true,
+                shape: 0,
+            },
+            scroll: proto::Scroll {
+                top: 0,
+                bottom: rows.saturating_sub(1),
+            },
+            screen,
+            history: None,
+            history_len: None,
+            offset: None,
+            links: None,
+        }
+    }
+
+    fn blank_wire_cell() -> proto::Cell {
+        proto::Cell {
+            codepoint: ' ' as u32,
+            attrs: 0,
+            fg: 0,
+            bg: 0,
+            link: None,
+        }
+    }
+
+    #[test]
+    fn snapshot_with_fewer_rows_than_declared_is_refused() {
+        // rows=24 but only one row on the wire: C would index 24 rows of a
+        // one-row grid and free it with the wrong length.
+        let short = wire_snapshot(2, 24, vec![vec![blank_wire_cell(); 2]]);
+        let frame = proto::encode_frame(&short).expect("frame");
+        let mut consumed = 0usize;
+        let decoded = pg_msg_decode_frame(frame.as_ptr(), frame.len(), &mut consumed);
+        assert!(!decoded.is_null());
+
+        assert!(pg_msg_snapshot(decoded).is_null());
+        assert_eq!(pg_last_error_code(), PgErrorCode::PG_ERR_INVALID_ARG);
+        pg_msg_free(decoded);
+    }
+
+    #[test]
+    fn build_snapshot_refuses_a_grid_that_does_not_match_its_shape() {
+        let cell = PgCell {
+            size: std::mem::size_of::<PgCell>() as u32,
+            codepoint: ' ' as u32,
+            fg: 0,
+            bg: 0,
+            attrs: 0,
+            hyperlink_id: 0,
+            width: 1,
+        };
+        let cursor = PgCursor {
+            size: std::mem::size_of::<PgCursor>() as u32,
+            x: 0,
+            y: 0,
+            visible: 1,
+            shape: 0,
+        };
+        let scroll = PgScrollRegion {
+            size: std::mem::size_of::<PgScrollRegion>() as u32,
+            top: 0,
+            bottom: 1,
+        };
+        let build = |screen: Vec<Vec<PgCell>>, history: Vec<Vec<PgCell>>| {
+            crate::ffi::build_snapshot(1, 2, 2, false, cursor, scroll, screen, history)
+        };
+
+        // Too few rows, a short row, a short history row.
+        assert!(build(vec![vec![cell; 2]], vec![]).is_err());
+        assert!(build(vec![vec![cell; 2], vec![cell; 1]], vec![]).is_err());
+        assert!(build(vec![vec![cell; 2]; 2], vec![vec![cell; 3]]).is_err());
+
+        let ok = build(vec![vec![cell; 2]; 2], vec![vec![cell; 2]]).expect("well formed");
+        pg_snapshot_free(ok);
+    }
+
+    #[test]
+    fn null_with_zero_length_is_an_empty_buffer() {
+        let msg = pg_msg_new(PgMsgType::PG_MSG_KEYS);
+        assert!(pg_msg_set_bytes(
+            msg,
+            field("bytes").as_ptr(),
+            ptr::null(),
+            0
+        ));
+        assert!(!pg_msg_set_bytes(
+            msg,
+            field("bytes").as_ptr(),
+            ptr::null(),
+            1
+        ));
+        assert_eq!(pg_last_error_code(), PgErrorCode::PG_ERR_INVALID_ARG);
+        pg_msg_free(msg);
+
+        // An empty payload is not a message, but it must fail cleanly rather
+        // than trip from_raw_parts' non-null precondition.
+        assert!(pg_msg_decode(ptr::null(), 0).is_null());
+        assert_ne!(pg_last_error_code(), PgErrorCode::PG_ERR_PANIC);
     }
 
     #[test]
