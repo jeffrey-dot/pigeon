@@ -363,6 +363,8 @@ fn layout_message_exposes_rects_and_splits() {
     pigeon_core::ffi::pg_msg_free(handle);
 }
 
+// Builds the delta with the kernel's own `PaneState`, which a client build cannot see.
+#[cfg(feature = "internals")]
 #[test]
 fn delta_rows_cross_the_abi_with_cursor_and_alt() {
     use pigeon_core::ffi::{pg_delta_free, pg_msg_decode_frame, pg_msg_delta, pg_msg_free};

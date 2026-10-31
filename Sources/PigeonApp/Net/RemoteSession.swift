@@ -31,16 +31,23 @@ final class RemoteSession {
     private let installer: HostInstaller
     private let run: (String) throws -> HostInstaller.Result
     private let spawn: ([String]) throws -> Process
+    /// Finds the host build to push for a remote's `uname -sm` (tests pass their own, so the
+    /// outcome does not depend on what happens to be in `core/target`).
+    private let artifact: (String) -> URL?
     private var children: [Process] = []
 
     init(
         host: String,
         installer: HostInstaller = HostInstaller(),
         run: ((String) throws -> HostInstaller.Result)? = nil,
-        spawn: (([String]) throws -> Process)? = nil
+        spawn: (([String]) throws -> Process)? = nil,
+        artifact: ((String) -> URL?)? = nil
     ) {
         self.host = host
         self.installer = installer
+        self.artifact = artifact ?? { platform in
+            HostInstaller.artifact(for: platform, in: HostInstaller.searchDirectories())
+        }
         self.run = run ?? { script in
             try HostInstaller.sshRunner(host: host, script: script, stdin: nil)
         }
@@ -110,9 +117,7 @@ final class RemoteSession {
     private func installArtifact() throws -> URL {
         let probe = try run("uname -sm")
         let platform = probe.output.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let artifact = HostInstaller.artifact(
-            for: platform, in: HostInstaller.searchDirectories())
-        else {
+        guard let artifact = artifact(platform) else {
             throw HostInstaller.Failure.noArtifact(platform)
         }
         return artifact

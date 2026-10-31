@@ -63,7 +63,10 @@ final class RemoteSessionTests: XCTestCase {
                 try process.run()
                 started.append(process)
                 return process
-            }
+            },
+            // The installer is faked above; any existing file stands in for the Linux build,
+            // which a macOS CI runner does not have.
+            artifact: { _ in host }
         )
         let outcome = try session.connect()
         defer {

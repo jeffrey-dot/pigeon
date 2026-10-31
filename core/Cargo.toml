@@ -22,6 +22,12 @@ name = "host"
 path = "tests/host.rs"
 required-features = ["host", "internals"]
 
+# Drives `term` directly for tools/vt-parity: a kernel tool, not a client.
+[[example]]
+name = "vt-dump"
+path = "examples/vt-dump.rs"
+required-features = ["internals"]
+
 [features]
 default = ["host", "internals"]
 # Makes term/layout/status/session/proto public for pigeon-host and the
