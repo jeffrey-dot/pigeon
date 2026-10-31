@@ -144,6 +144,8 @@ enum Event {
 
 enum Cmd {
     Input(Vec<u8>),
+    /// Clipboard text; the pane decides on bracketing because only it knows the mode.
+    Paste(String),
     Resize(u16, u16),
     /// The user has seen this status record.
     Ack(u32),
@@ -1051,6 +1053,13 @@ async fn dispatch(
             note_activity(sessions, events, state.client_id, pane_id).await;
             None
         }
+        Message::Paste { pane_id, text } => {
+            if let Some(sender) = sender_of(sessions, pane_id).await {
+                let _ = sender.send(Cmd::Paste(text)).await;
+            }
+            note_activity(sessions, events, state.client_id, pane_id).await;
+            None
+        }
         Message::Scroll { pane_id, offset } => {
             let current = state.views.get(&pane_id).copied().unwrap_or(0);
             let wanted = if offset == 0 {
@@ -1310,6 +1319,9 @@ fn spawn_pane(
                     match command {
                         Cmd::Input(bytes) => {
                             let _ = write_tx.send(bytes);
+                        }
+                        Cmd::Paste(text) => {
+                            let _ = write_tx.send(pane.paste_bytes(&text));
                         }
                         Cmd::Resize(cols, rows) => {
                             pane.resize(cols, rows);

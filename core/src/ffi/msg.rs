@@ -988,6 +988,7 @@ mod tests {
             history: None,
             history_len: None,
             offset: None,
+            modes: None,
             links: None,
         };
         let frame = proto::encode_frame(&snapshot).expect("frame");
@@ -1030,6 +1031,7 @@ mod tests {
             history: None,
             history_len: None,
             offset: None,
+            modes: None,
             links: None,
         }
     }

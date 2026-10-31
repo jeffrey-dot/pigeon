@@ -266,6 +266,7 @@ fn normalized(message: &Message) -> Message {
             links,
             history_len: None,
             offset: None,
+            modes: None,
         },
         other => other,
     }

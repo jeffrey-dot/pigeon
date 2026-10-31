@@ -134,6 +134,21 @@ impl PaneState {
         }
     }
 
+    /// What a paste of `text` puts on the PTY: bracketed when the program asked for it.
+    /// The end marker inside pasted text is stripped, or a crafted clipboard could end the
+    /// paste early and have the rest run as typed commands.
+    pub fn paste_bytes(&self, text: &str) -> Vec<u8> {
+        const START: &str = "\x1b[200~";
+        const END: &str = "\x1b[201~";
+        // Pastes arrive with the platform's newlines; a terminal line ends in CR.
+        let body = text.replace("\r\n", "\r").replace('\n', "\r");
+        if self.term.modes() & crate::term::MODE_BRACKETED_PASTE == 0 {
+            return body.into_bytes();
+        }
+        let body = body.replace(END, "").replace(START, "");
+        format!("{START}{body}{END}").into_bytes()
+    }
+
     pub fn status_mut(&mut self) -> &mut StatusStore {
         &mut self.status
     }
@@ -154,7 +169,7 @@ impl PaneState {
         let total = snapshot.history.len();
         let applied = offset.min(total);
         let view = snapshot.scrolled(applied);
-        let mut message = message_from_snapshot(self.pane_id, self.seq, &view, false);
+        let mut message = message_from_snapshot(self.pane_id, self.seq, &view, false, self.term.modes());
         // The client draws its scroll indicator from these two numbers; they are only
         // meaningful on a `scroll` answer, so they stay out of every other snapshot.
         if let Message::Snapshot {
@@ -177,7 +192,7 @@ impl PaneState {
         } else {
             self.term.screen_snapshot()
         };
-        message_from_snapshot(self.pane_id, self.seq, &snapshot, with_history)
+        message_from_snapshot(self.pane_id, self.seq, &snapshot, with_history, self.term.modes())
     }
 
     /// Dirty rows since the last call, or `None` when nothing changed.
@@ -209,6 +224,7 @@ impl PaneState {
             scroll: Some(scroll_of(&snapshot)),
             links: None,
             alt: Some(snapshot.alt),
+            modes: Some(self.term.modes()),
         };
         self.backlog.push(seq, &message);
         Some(message)
@@ -230,6 +246,7 @@ fn message_from_snapshot(
     seq: u32,
     snapshot: &Snapshot,
     with_history: bool,
+    modes: u32,
 ) -> Message {
     Message::Snapshot {
         pane_id,
@@ -254,6 +271,7 @@ fn message_from_snapshot(
         // Only a `scroll` answer reports a view position; plain snapshots leave them out.
         history_len: None,
         offset: None,
+        modes: Some(modes),
     }
 }
 
@@ -519,6 +537,17 @@ mod tests {
         assert_eq!(rebuilt, alternate, "alternate screen must rebuild too");
     }
 
+    #[test]
+    fn a_paste_is_bracketed_only_when_asked_and_cannot_break_out() {
+        let mut pane = PaneState::new(1, 20, 4, 10);
+        assert_eq!(pane.paste_bytes("ls\n"), b"ls\r", "plain shells get the text, CR line ends");
+        pane.feed(b"\x1b[?2004h");
+        assert_eq!(pane.paste_bytes("a\r\nb"), b"\x1b[200~a\rb\x1b[201~");
+        // A clipboard that tries to close the paste and run a command stays inside it.
+        let hostile = "x\x1b[201~rm -rf ~\n";
+        assert_eq!(pane.paste_bytes(hostile), b"\x1b[200~xrm -rf ~\r\x1b[201~");
+    }
+
     fn rebuild(pane: &mut PaneState) -> crate::term::Snapshot {
         let original = pane.snapshot();
         let message = Message::Snapshot {
@@ -527,6 +556,7 @@ mod tests {
             cols: original.cols,
             rows: original.rows,
             alt: original.alt,
+            modes: None,
             cursor: ProtoCursor {
                 x: original.cursor.x,
                 y: original.cursor.y,

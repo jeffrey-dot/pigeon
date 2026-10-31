@@ -100,6 +100,7 @@ mod tests {
             scroll: None,
             links: None,
             alt: None,
+            modes: None,
         }
     }
 

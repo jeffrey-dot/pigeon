@@ -279,6 +279,9 @@ pub enum Message {
         /// How far back that answer is scrolled (0 = live screen).
         #[serde(skip_serializing_if = "Option::is_none")]
         offset: Option<u32>,
+        /// `term::MODE_*` bits: what the program asked of the keyboard, mouse and paste.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        modes: Option<u32>,
     },
     Delta {
         pane_id: u32,
@@ -294,6 +297,10 @@ pub enum Message {
         /// without it a delta-only client would never notice `vim` starting.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         alt: Option<bool>,
+        /// `term::MODE_*` bits, sent with every delta: `vim` turning on mouse reporting
+        /// changes what the very next click must send.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        modes: Option<u32>,
     },
     /// The client's current theme, so the host can answer `OSC 4/10/11` colour queries for
     /// the programs inside the panes. All fields are optional: a client that never sends this
@@ -310,6 +317,12 @@ pub enum Message {
         pane_id: u32,
         #[serde(with = "serde_bytes")]
         bytes: Vec<u8>,
+    },
+    /// Text from the clipboard. The host wraps it in bracketed-paste markers when the
+    /// program asked for them (`?2004`), so the client never has to track that mode.
+    Paste {
+        pane_id: u32,
+        text: String,
     },
     ResizePane {
         pane_id: u32,
@@ -405,6 +418,7 @@ impl Message {
             Self::Delta { .. } => "delta",
             Self::Appearance { .. } => "appearance",
             Self::Keys { .. } => "keys",
+            Self::Paste { .. } => "paste",
             Self::ResizePane { .. } => "resize_pane",
             Self::Scroll { .. } => "scroll",
             Self::ZoomPane { .. } => "zoom_pane",
@@ -501,6 +515,7 @@ fn is_known(tag: &str) -> bool {
             | "delta"
             | "appearance"
             | "keys"
+            | "paste"
             | "resize_pane"
             | "scroll"
             | "zoom_pane"
@@ -667,6 +682,7 @@ mod tests {
                 }]),
                 history_len: Some(1000),
                 offset: Some(5),
+                modes: Some(0b10),
             },
             Message::Delta {
                 pane_id: 1,
@@ -684,6 +700,7 @@ mod tests {
                 scroll: None,
                 links: None,
                 alt: Some(true),
+                modes: Some(0b11),
             },
             Message::Appearance {
                 fg: Some(0x0011_1111),
@@ -728,6 +745,10 @@ mod tests {
                 app: Some("claude".into()),
                 id: Some("main".into()),
                 age_ms: Some(1500),
+            },
+            Message::Paste {
+                pane_id: 1,
+                text: "ls -la\n".into(),
             },
             Message::Ping { ts: 1 },
             Message::Pong { ts: 1 },
@@ -889,6 +910,7 @@ mod tests {
             links: None,
             history_len: None,
             offset: None,
+            modes: None,
         };
         assert_eq!(encode_frame(&message), Err(PgError::Overflow));
     }

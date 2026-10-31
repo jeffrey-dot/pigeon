@@ -70,6 +70,11 @@
 | s→c | `delta` | `pane_id: u32`, `seq: u32`, `rows: [{y: u16, cells: [cell]}]` | `cursor: {x: u16, y: u16, visible: bool, shape: u8}`, `scroll: {top: u16, bottom: u16}`, `links: [{id: u32, uri: str}]`, `alt: bool` | 只含脏行；`alt` 报备用屏状态（仅收增量的客户端靠它知道 `vim` 起来了）；`cells` 长度必须等于 `cols`；`cursor`/`scroll` 的字段与 `snapshot` 同名同型 |
 | c→s | `scroll` | `pane_id: u32`, `offset: i32` | — | 负 = 往历史看（`-1` = 上滚一行）；`0` 回到底部。宿主按**每连接**记住位置，回一帧该位置的 `snapshot`（不带 `history`）；回看期间该 pane 不再推实时帧，`offset: 0` 才恢复 |
 
+- `snapshot` 与 `delta` 都带可选 `modes: u32`（`core/src/term` 的 `MODE_*` 位）：`1` 应用光标键（DECCKM `?1`）、
+  `2` 括号粘贴（`?2004`）、`4` 鼠标点击上报（`?1000`）、`8` 拖动上报（`?1002`）、`16` 全部移动上报（`?1003`）、
+  `32` SGR 鼠标格式（`?1006`）、`64` 焦点事件（`?1004`）、`128` 应用小键盘、`256` 备用屏滚轮转方向键（`?1007`）。
+  客户端据此决定方向键、鼠标与滚轮发什么；缺省 = 0。
+
 - `seq` 只由 `delta` 递增（每 pane 从 1 开始）；`snapshot` 带的是它已包含的最新 `delta` 的 `seq`，自己不占号。所以别的窗口 `attach`/`scroll` 不会在这个窗口的增量流里留下空洞。客户端收到 `seq <= last` 的增量直接丢（快照已经包含）；`seq > last + 1` → 丢掉增量、重新 `attach`。
 - **断线续传**（issue #4）：重连的客户端在 `attach.since` 里带上该 pane 屏幕上已有的最后一个 `seq`。宿主每 pane 保留最近的
   `delta`（最多 4096 帧且合计 512 Ki 格），`since` 之后的帧都还在就按顺序只补这些帧（之后接实时流），**不发快照**；
@@ -96,7 +101,7 @@
 | c→s | `appearance` | — | `fg: u32`, `bg: u32`, `ansi: [u32]`（16 个 `0xRRGGBB`） | 客户端当前主题，供宿主回答程序发出的 `OSC 4/10/11` 颜色查询。**缺省值**：客户端还没发过时，宿主用内置的 harp 深色板（`#050505` / `#ffffff` + `DARK_MODE_*` 十六色）作答；`fg`/`bg` 缺失或 `ansi` 不是 16 个时，保留上一次的答复（不 panic、不猜） |
 | c→s | `keys` | `pane_id: u32`, `bytes: bstr` | — | 已编码好的终端字节（kitty protocol 或 legacy 由客户端决定） |
 | c→s | `mouse` | `pane_id: u32`, `kind: "down"\|"up"\|"move"\|"wheel"`, `x: u16`, `y: u16`, `button: u8`, `mods: u8` | — | `mods` 位：`1` shift、`2` alt、`4` ctrl |
-| c→s | `paste` | `pane_id: u32`, `text: str` | — | 宿主负责括号粘贴包装 |
+| c→s | `paste` | `pane_id: u32`, `text: str` | — | 宿主负责括号粘贴包装：程序开了 `?2004` 才包 `ESC[200~ … ESC[201~`，并去掉正文里的起止标记（防止剪贴板内容提前结束粘贴、把后面当命令执行）；`\n`/`\r\n` 换成 `\r` |
 | s→c | `status` | `pane_id: u32`, `state: "idle"\|"working"\|"blocked"\|"done"\|"error"`, `seq: u32` | `kind: "permission"\|"question"\|"auth"`, `msg: str`, `app: str`, `id: str`, `age_ms: u64` | 来自 OSC 7501；`msg`/`app` 只当纯文本；`app` 是上报的 agent 名（`app=`），`id` 是记录 id；`age_ms` = 进入当前 `state` 已多少毫秒（宿主时钟上的时长，不是时间戳，两端时钟不必一致；同一状态重复上报不重置） |
 
 - `status` 的生命周期由内核负责：进程退出或 OSC 133A 提示符 → 丢弃 `working`/`blocked`；

@@ -267,6 +267,29 @@ impl Term for AlacrittyTerm {
         self.title.lock().ok().and_then(|slot| slot.clone())
     }
 
+    fn modes(&self) -> u32 {
+        use super::{
+            MODE_ALTERNATE_SCROLL, MODE_APP_CURSOR, MODE_APP_KEYPAD, MODE_BRACKETED_PASTE,
+            MODE_FOCUS_EVENTS, MODE_MOUSE_CLICK, MODE_MOUSE_DRAG, MODE_MOUSE_MOTION,
+            MODE_MOUSE_SGR,
+        };
+        let mode = self.term.mode();
+        [
+            (TermMode::APP_CURSOR, MODE_APP_CURSOR),
+            (TermMode::BRACKETED_PASTE, MODE_BRACKETED_PASTE),
+            (TermMode::MOUSE_REPORT_CLICK, MODE_MOUSE_CLICK),
+            (TermMode::MOUSE_DRAG, MODE_MOUSE_DRAG),
+            (TermMode::MOUSE_MOTION, MODE_MOUSE_MOTION),
+            (TermMode::SGR_MOUSE, MODE_MOUSE_SGR),
+            (TermMode::FOCUS_IN_OUT, MODE_FOCUS_EVENTS),
+            (TermMode::APP_KEYPAD, MODE_APP_KEYPAD),
+            (TermMode::ALTERNATE_SCROLL, MODE_ALTERNATE_SCROLL),
+        ]
+        .iter()
+        .filter(|(flag, _)| mode.contains(*flag))
+        .fold(0, |bits, (_, bit)| bits | bit)
+    }
+
     fn take_replies(&mut self) -> Vec<u8> {
         self.replies
             .lock()

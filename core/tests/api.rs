@@ -166,6 +166,7 @@ fn wire_snapshot(cols: u16, rows: u16, screen: Vec<Vec<WireCell>>) -> Message {
         history: None,
         history_len: None,
         offset: None,
+        modes: None,
         links: None,
     }
 }

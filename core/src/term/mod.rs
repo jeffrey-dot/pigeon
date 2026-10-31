@@ -223,7 +223,32 @@ pub trait Term {
 
     /// The palette used to answer colour queries; `None` keeps them unanswered.
     fn set_palette(&mut self, palette: Option<Palette>);
+
+    /// DEC private modes the program turned on that change what the *client* sends:
+    /// `MODE_*` bits. The host forwards them so key, mouse and paste encoding match.
+    fn modes(&self) -> u32 {
+        0
+    }
 }
+
+/// Arrow keys send `ESC O A` instead of `ESC [ A` (DECCKM, `?1`).
+pub const MODE_APP_CURSOR: u32 = 1 << 0;
+/// Wrap pastes in `ESC [200~ … ESC [201~` (`?2004`).
+pub const MODE_BRACKETED_PASTE: u32 = 1 << 1;
+/// Report button presses (`?1000`).
+pub const MODE_MOUSE_CLICK: u32 = 1 << 2;
+/// Also report motion while a button is down (`?1002`).
+pub const MODE_MOUSE_DRAG: u32 = 1 << 3;
+/// Report all motion (`?1003`).
+pub const MODE_MOUSE_MOTION: u32 = 1 << 4;
+/// Mouse reports in SGR form `ESC [< b;x;y M|m` (`?1006`).
+pub const MODE_MOUSE_SGR: u32 = 1 << 5;
+/// Send `ESC [I` / `ESC [O` on focus changes (`?1004`).
+pub const MODE_FOCUS_EVENTS: u32 = 1 << 6;
+/// Application keypad (DECKPAM).
+pub const MODE_APP_KEYPAD: u32 = 1 << 7;
+/// Wheel on the alternate screen scrolls by sending arrow keys (`?1007`, alacritty default on).
+pub const MODE_ALTERNATE_SCROLL: u32 = 1 << 8;
 
 #[cfg(test)]
 mod tests {
@@ -244,6 +269,29 @@ mod tests {
             ],
         )
         .expect("palette")
+    }
+
+    #[test]
+    fn modes_follow_what_the_program_turns_on_and_off() {
+        use super::{
+            MODE_APP_CURSOR, MODE_BRACKETED_PASTE, MODE_MOUSE_CLICK, MODE_MOUSE_DRAG,
+            MODE_MOUSE_SGR,
+        };
+        let mut term = term();
+        let clean = term.modes();
+        assert_eq!(clean & (MODE_APP_CURSOR | MODE_BRACKETED_PASTE | MODE_MOUSE_CLICK), 0);
+        // What vim / htop send on start.
+        term.feed(b"\x1b[?1h\x1b[?2004h\x1b[?1002h\x1b[?1006h");
+        let on = term.modes();
+        for bit in [MODE_APP_CURSOR, MODE_BRACKETED_PASTE, MODE_MOUSE_DRAG, MODE_MOUSE_SGR] {
+            assert_ne!(on & bit, 0, "bit {bit:#x} after enabling");
+        }
+        term.feed(b"\x1b[?1l\x1b[?2004l\x1b[?1002l\x1b[?1006l");
+        let off = term.modes();
+        assert_eq!(off & (MODE_APP_CURSOR | MODE_BRACKETED_PASTE | MODE_MOUSE_DRAG | MODE_MOUSE_SGR), 0);
+        // Garbage mode numbers change nothing.
+        term.feed(b"\x1b[?99999h");
+        assert_eq!(term.modes(), off);
     }
 
     #[test]
