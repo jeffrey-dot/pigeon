@@ -168,6 +168,12 @@ public enum SidebarModel {
         return nil
     }
 
+    /// Whether closing a session left nothing to show: no session on any connected machine,
+    /// and no `new_session` still waiting for its answer.
+    public static func shouldQuitAfterClose(remainingSessions: Int, creatingSession: Bool) -> Bool {
+        remainingSessions == 0 && !creatingSession
+    }
+
     /// The line under a row's title: app, state and age.
     public static func rowSubtitle(for session: SidebarSession, now: Date = Date()) -> String {
         subtitle(for: session, now: now, since: session.lastSeen)

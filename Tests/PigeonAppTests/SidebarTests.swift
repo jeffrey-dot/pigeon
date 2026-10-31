@@ -100,6 +100,14 @@ final class SidebarOrderingTests: XCTestCase {
         XCTAssertNil(SidebarModel.nextNeedsYou([row(7, .idle)], after: nil))
     }
 
+    func testClosingTheLastSessionQuitsUnlessOneIsBeingCreated() {
+        XCTAssertTrue(SidebarModel.shouldQuitAfterClose(remainingSessions: 0, creatingSession: false))
+        XCTAssertFalse(SidebarModel.shouldQuitAfterClose(remainingSessions: 1, creatingSession: false))
+        XCTAssertFalse(
+            SidebarModel.shouldQuitAfterClose(remainingSessions: 0, creatingSession: true),
+            "a ⌘T answer is on its way")
+    }
+
     func testRowSubtitleShowsTheActiveApplication() {
         var session = row(1, .working, app: "vim")
         session.lastSeen = Date(timeIntervalSince1970: 1_000)

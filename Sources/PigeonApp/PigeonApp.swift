@@ -849,6 +849,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if selectedSession == id { selectedSession = nil }
         refreshSidebar()
         requestSessions()
+        quitIfNoSessionsLeft()
+    }
+
+    /// Closing the last session (from the sidebar, ⌘⇧W, or its shell exiting) quits the app,
+    /// like closing a terminal's last tab. Only a close leads here: a host that drops its
+    /// connection, or one that has no sessions yet at launch, never quits pigeon.
+    private func quitIfNoSessionsLeft() {
+        let remaining = hostKeys().filter { clients[$0] != nil }
+            .reduce(0) { $0 + (rowsByHost[$1]?.count ?? 0) }
+        guard SidebarModel.shouldQuitAfterClose(
+            remainingSessions: remaining, creatingSession: pendingSelectSession != nil)
+        else { return }
+        debugLog("last session closed: quitting")
+        // Next turn, so the `close_pane` frames written above are on their way first.
+        DispatchQueue.main.async { NSApp.terminate(nil) }
     }
 
     private func markRead(_ id: Int) {
@@ -1196,7 +1211,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let pane = Wire.u32(message, "pane_id")
             guard let id = rows.first(where: { $0.value.panes.contains(pane) })?.key else { break }
             debugLog("pane exited pane=\(pane) -> closing session \(id)")
-            closeSession(id)
+            // `id` is the host's own session number; `closeSession(_:)` wants a sidebar id.
+            closeSession(host: activeHost, session: id)
         case PG_MSG_HELLO_ERROR:
             // Retrying a refused handshake only repeats it, so stop and explain.
             refusedReason =
