@@ -133,7 +133,9 @@ macOS 的 `cc` 会被当成链接器并拒继 musl 的 `-static`，所以必须�
 
 ## 5. 安全
 
-- 只经 `ssh`；`pigeon-host` **只监听 unix socket**（`$XDG_RUNTIME_DIR/pigeon.sock`，回退 `/tmp/pigeon-<uid>.sock`，权限 0700）。
+- 只经 `ssh`；`pigeon-host` **只监听 unix socket**，权限 0700：装在 `~/.pigeon/host/` 下的远端宿主用
+  `~/.pigeon/state/pigeon.sock`（`$XDG_RUNTIME_DIR` 会在用户最后一个登录会话结束时被 systemd 删掉，宿主就成了孤儿）；
+  其它情况（本机、开发构建）用 `$XDG_RUNTIME_DIR/pigeon.sock`，回退 `/tmp/pigeon-<uid>.sock`。
 - `--proxy` 只转发协议帧：不接受任意命令、不做 shell 展开。
 - `--remote-install` / `--no-remote-install` 永不静默安装；打印完整命令与哈希；不修改远端 shell 配置。
 - 认证/密钥/known_hosts 全部交给系统 `ssh`；pigeon 不读、不缓存任何凭据。

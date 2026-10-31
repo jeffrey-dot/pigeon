@@ -1,6 +1,6 @@
 //! Command line: where the socket lives, which shell to spawn, how clients reach us.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// How clients reach this host (docs/remote.md §2).
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -62,11 +62,33 @@ pub fn parse(mut args: impl Iterator<Item = String>) -> Result<Command, String> 
     Ok(Command::Run(options))
 }
 
-/// `$XDG_RUNTIME_DIR/pigeon.sock`, else `/tmp/pigeon-<uid>.sock` (protocol §1).
+/// Where the socket lives (protocol §1, `docs/remote.md` §2):
 ///
+/// - a host installed by the client (`~/.pigeon/host/<version>/pigeon-host`) uses
+///   `~/.pigeon/state/pigeon.sock`. `$XDG_RUNTIME_DIR` is removed by systemd when the last
+///   login session ends, which would orphan a host that is meant to outlive the ssh link;
+/// - otherwise `$XDG_RUNTIME_DIR/pigeon.sock`, else `/tmp/pigeon-<uid>.sock`.
+fn default_socket_path() -> PathBuf {
+    let executable = std::env::current_exe().ok();
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    if let Some(state) = state_dir_for(executable.as_deref(), home.as_deref()) {
+        return state.join("pigeon.sock");
+    }
+    runtime_socket_path()
+}
+
+/// `~/.pigeon/state` when `executable` sits under `~/.pigeon/host/`; `None` otherwise (a
+/// development build, a host on this Mac). Pure, so the rule is unit-tested.
+pub fn state_dir_for(executable: Option<&Path>, home: Option<&Path>) -> Option<PathBuf> {
+    let root = home?.join(".pigeon");
+    executable?
+        .starts_with(root.join("host"))
+        .then(|| root.join("state"))
+}
+
 /// shortcut: the uid comes from `id -u` because `getuid` needs `unsafe`, which
 /// is banned outside `ffi.rs`; swap to a safe syscall wrapper when one is added.
-fn default_socket_path() -> PathBuf {
+fn runtime_socket_path() -> PathBuf {
     if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
         return PathBuf::from(dir).join("pigeon.sock");
     }
@@ -79,4 +101,38 @@ fn default_socket_path() -> PathBuf {
         .filter(|text| !text.is_empty())
         .unwrap_or_else(|| "0".to_owned());
     PathBuf::from(format!("/tmp/pigeon-{uid}.sock"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::state_dir_for;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn an_installed_remote_host_keeps_its_socket_under_dot_pigeon() {
+        let home = Path::new("/home/ada");
+        let exe = Path::new("/home/ada/.pigeon/host/0.1.0/pigeon-host");
+        assert_eq!(
+            state_dir_for(Some(exe), Some(home)),
+            Some(PathBuf::from("/home/ada/.pigeon/state"))
+        );
+    }
+
+    #[test]
+    fn any_other_binary_keeps_the_runtime_dir() {
+        let home = Path::new("/home/ada");
+        for exe in [
+            "/Users/ada/dev/pigeon/core/target/release/pigeon-host",
+            "/home/ada/.pigeon/hostile/pigeon-host",
+            "/home/ada/.pigeonx/host/pigeon-host",
+        ] {
+            assert_eq!(
+                state_dir_for(Some(Path::new(exe)), Some(home)),
+                None,
+                "{exe}"
+            );
+        }
+        assert_eq!(state_dir_for(None, Some(home)), None);
+        assert_eq!(state_dir_for(Some(Path::new("/x")), None), None);
+    }
 }

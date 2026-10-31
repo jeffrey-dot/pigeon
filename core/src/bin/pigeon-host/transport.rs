@@ -63,6 +63,12 @@ async fn bind_private(socket: &Path) -> Result<UnixListener, String> {
         let _ = std::fs::remove_file(socket);
     }
     let parent = socket.parent().unwrap_or_else(|| Path::new("."));
+    // `~/.pigeon/state` on a fresh install: create it private, never loosen one that exists.
+    if !parent.exists() {
+        std::fs::create_dir_all(parent).map_err(|error| format!("mkdir {parent:?}: {error}"))?;
+        std::fs::set_permissions(parent, Permissions::from_mode(0o700))
+            .map_err(|error| format!("chmod {parent:?}: {error}"))?;
+    }
     let staging = parent.join(format!(".pigeon-bind-{}", std::process::id()));
     std::fs::create_dir(&staging).map_err(|error| format!("mkdir {staging:?}: {error}"))?;
     std::fs::set_permissions(&staging, Permissions::from_mode(0o700))
