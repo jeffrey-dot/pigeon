@@ -94,6 +94,10 @@ final class RemoteSession {
                         note: "ssh -L to \(host) — sessions keep running there")
                 }
                 why.append("ssh -L was refused or did not open \(socket)")
+            } catch let failure as HostInstaller.Failure {
+                // Plain ssh cannot reach a machine the probe could not: say so, not "no host".
+                if case .unreachable = failure { throw failure }
+                why.append("\(failure)")
             } catch {
                 why.append("\(error)")
             }
@@ -116,6 +120,9 @@ final class RemoteSession {
     /// A host to push: the one for the remote's own platform, if we have it built.
     private func installArtifact() throws -> URL {
         let probe = try run("uname -sm")
+        if probe.unreachable {
+            throw HostInstaller.Failure.unreachable(host: host, detail: probe.reason)
+        }
         let platform = probe.output.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let artifact = artifact(platform) else {
             throw HostInstaller.Failure.noArtifact(platform)

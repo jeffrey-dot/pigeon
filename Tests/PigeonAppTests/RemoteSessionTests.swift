@@ -223,6 +223,45 @@ final class RemoteSessionTests: XCTestCase {
 
     /// The reconnect path must not fall back to plain ssh: that would replace a persistent
     /// session with one that dies with the window, silently.
+    /// ssh's own failure (exit 255) means the machine was never reached: say exactly that,
+    /// and do not open a plain ssh window that would fail the same way.
+    func testAnUnreachableMachineSaysItCannotConnect() {
+        var spawned = false
+        let session = RemoteSession(
+            host: "far",
+            run: { _ in
+                HostInstaller.Result(
+                    status: 255, output: "",
+                    error: "kex_exchange_identification: Connection closed by remote host\n"
+                        + "Connection closed by 198.18.0.54 port 17263\n")
+            },
+            spawn: { _ in
+                spawned = true
+                return Process()
+            },
+            artifact: { _ in nil }
+        )
+        XCTAssertThrowsError(try session.connect()) { error in
+            XCTAssertEqual(
+                "\(error)", "Can't connect to far: Connection closed by 198.18.0.54 port 17263")
+        }
+        XCTAssertFalse(spawned, "no degraded ssh to a machine ssh cannot reach")
+    }
+
+    /// A remote command failing (any code but 255) is not a connection problem: the machine
+    /// answered, so plain ssh still works.
+    func testAFailingRemoteCommandStillDegrades() throws {
+        let session = RemoteSession(
+            host: "far",
+            run: { _ in HostInstaller.Result(status: 127, output: "", error: "uname: not found") },
+            spawn: { _ in Process() },
+            artifact: { _ in nil }
+        )
+        let outcome = try session.connect()
+        XCTAssertEqual(outcome.transport, .degraded)
+        XCTAssertFalse(outcome.note.contains("Can't connect"), outcome.note)
+    }
+
     func testDegradingCanBeRefusedOutright() {
         let session = RemoteSession(
             host: "far",

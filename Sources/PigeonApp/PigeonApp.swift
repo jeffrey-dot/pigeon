@@ -395,9 +395,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 DispatchQueue.main.async { [weak self] in self?.apply(outcome, host: host) }
             } catch {
                 DispatchQueue.main.async { [weak self] in
-                    self?.connectingHost = nil
-                    self?.refreshSidebar()
-                    self?.debugLog("cannot reach \(host): \(error)")
+                    guard let self else { return }
+                    self.connectingHost = nil
+                    self.refreshSidebar()
+                    self.debugLog("cannot reach \(host): \(error)")
+                    if host == self.activeHost {
+                        self.show(hostStatus: .stopped(
+                            detail: "\(error)\nCheck `ssh \(host)`, then Retry."))
+                    }
                 }
             }
         }

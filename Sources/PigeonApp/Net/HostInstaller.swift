@@ -24,6 +24,15 @@ public struct HostInstaller {
         /// Where the shell put its complaints; also where the remote hash mismatch lands.
         public var error: String
         public var ok: Bool { status == 0 }
+        /// ssh exits 255 for its own errors (DNS, refused, closed, auth); a remote command's
+        /// failure has any other code.
+        public var unreachable: Bool { status == 255 }
+        /// ssh's last word on why: its final non-empty stderr line.
+        public var reason: String {
+            error.split(whereSeparator: \.isNewline)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .last { !$0.isEmpty } ?? ""
+        }
     }
 
     public enum Failure: Error, CustomStringConvertible {
@@ -33,6 +42,8 @@ public struct HostInstaller {
         case rejected(String)
         /// The remote could not be reached as a `pigeon-host` at all (degraded mode refused).
         case noHost(String)
+        /// ssh itself failed (exit 255): the machine was never reached, so no fallback can help.
+        case unreachable(host: String, detail: String)
 
         public var description: String {
             switch self {
@@ -41,6 +52,8 @@ public struct HostInstaller {
             case let .noArtifact(platform): return "no local pigeon-host binary for \(platform)"
             case let .rejected(detail): return "remote refused the install: \(detail)"
             case let .noHost(detail): return "no pigeon-host on the remote: \(detail)"
+            case let .unreachable(host, detail):
+                return detail.isEmpty ? "Can't connect to \(host)" : "Can't connect to \(host): \(detail)"
             }
         }
     }
