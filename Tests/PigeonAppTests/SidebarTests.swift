@@ -348,6 +348,8 @@ final class GitRootTests: XCTestCase {
         XCTAssertEqual(GitRoot.find(cwd: nested.path), root.path)
         XCTAssertNil(GitRoot.find(cwd: FileManager.default.temporaryDirectory.path))
         XCTAssertNil(GitRoot.find(cwd: ""))
+        // The same path on a remote host is not this disk's repository.
+        XCTAssertNil(GitRoot.find(cwd: nested.path, onThisMac: false))
         try? FileManager.default.removeItem(at: root)
     }
 }

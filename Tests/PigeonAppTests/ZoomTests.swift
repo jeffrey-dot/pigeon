@@ -48,4 +48,24 @@ final class ZoomTests: XCTestCase {
         XCTAssertEqual(model.zoom, 0)
         XCTAssertFalse(model.panes.contains { SplitContainerView.hides(pane: $0.id, zoom: model.zoom) })
     }
+
+    func testWhileZoomedClicksAndDividersBelongToTheZoomedPaneOnly() {
+        let divider = LayoutModel.Divider(
+            splitID: 7, axis: PG_AXIS_VERTICAL, ratio: 0.5, box: CGRect(x: 0, y: 0, width: 1, height: 1))
+        let panes = [
+            // The zoomed pane covers the window; its sibling keeps its old place underneath.
+            LayoutModel.Pane(id: 1, rect: CGRect(x: 0, y: 0, width: 0.5, height: 1)),
+            LayoutModel.Pane(id: 2, rect: CGRect(x: 0, y: 0, width: 1, height: 1)),
+        ]
+        let zoomed = LayoutModel(panes: panes, dividers: [divider], focus: 2, zoom: 2)
+        XCTAssertEqual(zoomed.pane(at: CGPoint(x: 0.2, y: 0.5))?.id, 2)
+        XCTAssertNil(zoomed.divider(at: CGPoint(x: 0.5, y: 0.5), tolerance: 0.01))
+        XCTAssertTrue(zoomed.visibleDividers.isEmpty)
+
+        let normal = LayoutModel(panes: panes, dividers: [divider], focus: 1)
+        XCTAssertEqual(normal.divider(at: CGPoint(x: 0.5, y: 0.5), tolerance: 0.01)?.splitID, 7)
+        // A zoom on a pane the layout does not hold (a stale frame) hits nothing.
+        let stale = LayoutModel(panes: panes, dividers: [divider], focus: 1, zoom: 9)
+        XCTAssertNil(stale.pane(at: CGPoint(x: 0.2, y: 0.5)))
+    }
 }

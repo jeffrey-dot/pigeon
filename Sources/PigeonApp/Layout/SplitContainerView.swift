@@ -104,7 +104,7 @@ final class SplitContainerView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         NSColor(calibratedWhite: 0.25, alpha: 1).setFill()
-        for divider in model.dividers {
+        for divider in model.visibleDividers {
             switch divider.axis {
             case PG_AXIS_VERTICAL:
                 let x = (divider.box.minX + divider.box.width * divider.ratio) * bounds.width
@@ -152,7 +152,7 @@ final class SplitContainerView: NSView {
 
     override func mouseDragged(with event: NSEvent) {
         guard let splitID = draggingSplit,
-              let divider = model.dividers.first(where: { $0.splitID == splitID })
+              let divider = model.visibleDividers.first(where: { $0.splitID == splitID })
         else { return }
         onResizeSplit?(splitID, model.proposedRatio(divider, at: normalized(event)))
     }

@@ -85,7 +85,7 @@ struct LayoutModel: Equatable {
 
     /// The divider within `tolerance` of a normalized point, if any.
     func divider(at point: CGPoint, tolerance: Double) -> Divider? {
-        dividers.first { divider in
+        visibleDividers.first { divider in
             switch divider.axis {
             case PG_AXIS_VERTICAL:
                 let x = divider.box.minX + divider.box.width * divider.ratio
@@ -101,8 +101,15 @@ struct LayoutModel: Equatable {
 
     /// The pane under a normalized point.
     func pane(at point: CGPoint) -> Pane? {
-        panes.first { $0.rect.contains(point) }
+        // Zoomed: the siblings keep their rects (for unzoom) but are hidden under the zoomed
+        // pane, so a click must not focus one of them.
+        if zoom != 0 { return panes.first { $0.id == zoom && $0.rect.contains(point) } }
+        return panes.first { $0.rect.contains(point) }
     }
+
+    /// Dividers that are on screen: none while a pane fills the window, so they are neither
+    /// drawn over it nor dragged through it.
+    var visibleDividers: [Divider] { zoom != 0 ? [] : dividers }
 
     /// Ratio a drag would produce, in normalized box coordinates.
     func proposedRatio(_ divider: Divider, at point: CGPoint) -> Double {

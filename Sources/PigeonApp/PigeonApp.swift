@@ -676,7 +676,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func hostKey(_ host: String?) -> String { host ?? "local" }
 
-    /// Sessions of different hosts both start at 1, so the sidebar id carries the host.
+    /// Sessions of different hosts both start at 1, so the sidebar id carries the host. Stable
+    /// because hosts are only ever appended to `hosts.hosts` (nothing removes or reorders
+    /// them); a "forget host" action must switch to string keys first.
     private func rowId(host: String, session: Int) -> Int {
         let keys = hostKeys()
         let index = keys.firstIndex(of: host).map { $0 + 1 } ?? keys.count + 1
@@ -1420,7 +1422,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 group: Grouping.pinnedGroup(
                     existing: previous?.group,
                     cwd: Wire.string(info.cwd),
-                    gitRoot: GitRoot.find(cwd: Wire.string(info.cwd))),
+                    gitRoot: GitRoot.find(cwd: Wire.string(info.cwd), onThisMac: activeHost == "local")),
                 agent: previous?.agent ?? .none
             )
         }

@@ -185,27 +185,24 @@ final class RemoteSession {
 
     /// A cheap "is this really a pigeon host" question; the protocol makes it safe to ask.
     private func handshake(_ client: HostClient) -> Bool {
-        let ready = DispatchSemaphore(value: 0)
-        let answered = UnsafeMutablePointer<Bool>.allocate(capacity: 1)
-        answered.initialize(to: false)
-        defer { answered.deinitialize(count: 1); answered.deallocate() }
-
+        let probe = HandshakeProbe()
+        // The callbacks run on the client's read queue and may fire after the wait timed
+        // out, so they hold the probe (a reference), never stack or freed memory.
         client.onMessage = { message in
             defer { Wire.free(message) }
-            if Wire.type(message) == PG_MSG_HELLO_ACK {
-                answered.pointee = true
-                ready.signal()
-            }
+            if Wire.type(message) == PG_MSG_HELLO_ACK { probe.finish(answered: true) }
         }
-        client.onClose = { ready.signal() }
+        client.onClose = { probe.finish(answered: false) }
         guard let hello = Wire.make(PG_MSG_HELLO) else { return false }
         Wire.set(hello, u32: "proto", 0x0100)
         Wire.set(hello, str: "client", "pigeon-mac")
         Wire.set(hello, strings: "features", ["scrollback", "delta", "status_all"])
         client.send(hello)
         Wire.free(hello)
-        _ = ready.wait(timeout: .now() + 5)
-        return answered.pointee
+        let answered = probe.wait(seconds: 5)
+        client.onMessage = nil
+        client.onClose = nil
+        return answered
     }
 
     func close() {
