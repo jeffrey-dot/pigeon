@@ -4,28 +4,7 @@ import PigeonCore
 /// Wires the window to a `pigeon-host`: sidebar on the left, split container on
 /// the right, and the protocol messages that keep both in sync.
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private struct Row {
-        var id: Int
-        var panes: [UInt32]
-        var cwd: String
-        var activePane: UInt32
-        var app: String
-        var title: String
-        var status: SidebarSession.Status
-        var seq: UInt32
-        var unread: Int
-        var lastSeen: Date
-        /// Who owns the size when more than one window watches this session (protocol §6).
-        var sizeSource: String = ""
-        var clients: Int = 1
-        /// Where the session lives; `local` for the host on this machine.
-        var host: String = "local"
-        /// The user's group, fixed when the session first appeared (`Grouping.pinnedGroup`):
-        /// a `cd` later must not reshuffle the sidebar.
-        var group: String = ""
-        /// The agent's own report (name, task, since when), from the last `status`.
-        var agent: AgentInfo = .none
-    }
+    private typealias Row = SessionRow
 
     private var window: NSWindow!
     private var splitView: NSSplitView!
@@ -96,6 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var selfTestRunning = false
     /// The last row the sidebar asked to select (a `Machines` row uses a negative id).
     private var lastSelectedId: Int?
+    private var sessionRefs = SessionRefs()
 
     private var selectedSession: Int? {
         get { connection.selectedSession }
@@ -508,11 +488,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             hostStatus.hide()
         }
         // The handshake goes to this host, so point the send helpers at it for a moment.
-        let previous = activeHost
-        activeHost = host
-        sendHello()
-        sendAppearance()
-        activeHost = previous
+        onHost(host) {
+            sendHello()
+            sendAppearance()
+        }
         refreshSidebar()
     }
 
@@ -699,26 +678,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func hostKey(_ host: String?) -> String { host ?? "local" }
 
-    /// Sessions of different hosts both start at 1, so the sidebar id carries the host. Stable
-    /// because hosts are only ever appended to `hosts.hosts` (nothing removes or reorders
-    /// them); a "forget host" action must switch to string keys first.
+    /// The sidebar's Int id for a session (`SessionRefs`): stable for the run whatever the
+    /// host list does, so adding or forgetting a machine never renames another's rows.
     private func rowId(host: String, session: Int) -> Int {
-        let keys = hostKeys()
-        let index = keys.firstIndex(of: host).map { $0 + 1 } ?? keys.count + 1
-        return index * 100_000 + session
+        sessionRefs.id(for: SessionRef(host: host, session: session))
     }
 
     private func splitRowId(_ id: Int) -> (host: String, session: Int)? {
-        guard id > 0 else { return nil }
-        let keys = hostKeys()
-        let index = id / 100_000 - 1
-        guard keys.indices.contains(index) else { return nil }
-        return (keys[index], id % 100_000)
+        sessionRefs.ref(for: id).map { ($0.host, $0.session) }
     }
 
     /// Unread counts are persisted per host; local keeps the old key so existing state works.
     private func unreadKey(host: String, session: Int) -> String {
-        host == "local" ? String(session) : "\(host):\(session)"
+        SessionRef(host: host, session: session).key
     }
 
     private func requestID() -> UInt32 {
@@ -918,9 +890,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Closing a session on a specific host (the pane-exited path knows which one).
     private func closeSession(host: String, session: Int) {
-        let previous = activeHost
-        activeHost = host
-        defer { activeHost = previous }
+        onHost(host) { closeSessionOnActiveHost(session) }
+    }
+
+    private func closeSessionOnActiveHost(_ session: Int) {
+        let host = activeHost
         let id = session
         guard let row = rows[id] else { return }
         for pane in row.panes { sendClosePane(pane) }
@@ -949,9 +923,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func markRead(_ id: Int) {
         guard let (host, session) = splitRowId(id) else { return }
-        let previous = activeHost
-        activeHost = host
-        defer { activeHost = previous }
+        onHost(host) { markReadOnActiveHost(session) }
+    }
+
+    private func markReadOnActiveHost(_ session: Int) {
+        let host = activeHost
         guard var row = rows[session] else { return }
         row.unread = 0
         rows[session] = row
@@ -981,7 +957,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if ProcessInfo.processInfo.environment["PIGEON_DEBUG"] != nil {
             FileHandle.standardError.write(Data("pigeon: sidebar reorder \(order)\n".utf8))
         }
-        state.order = order
+        // Persisted as `SessionRef` keys: the run's Int ids mean nothing next launch.
+        state.order = order.compactMap { sessionRefs.ref(for: $0)?.key }
         store.save(state)
         refreshSidebar()
     }
@@ -1045,6 +1022,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hosts.current = key == "local" ? nil : key
         hostsStore.save(hosts)
         activate(host: key)
+    }
+
+    /// Runs `body` with every per-host accessor (`rows`, `connection`, the send helpers)
+    /// pointed at `host`, then points them back, however `body` returns. While a background
+    /// host is in scope `swappedFrom` names the visible one, and sidebar redraws wait for it.
+    private func onHost(_ host: String, _ body: () -> Void) {
+        let previous = activeHost
+        let previousSwap = swappedFrom
+        activeHost = host
+        if host != previous { swappedFrom = previousSwap ?? previous }
+        body()
+        activeHost = previous
+        swappedFrom = previousSwap
+        // Drawn only once the visible host is back: the sidebar selection and the header
+        // describe what the window shows, never a background machine's state.
+        if swappedFrom == nil, sidebarDirty {
+            sidebarDirty = false
+            refreshSidebar()
+        }
     }
 
     /// Shows `host`'s terminal, connecting it if it is not up yet.
@@ -1170,15 +1166,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return sessions
     }
 
-    /// The row's name: the program the host picked (`vim`, `zsh`), never a shell prompt —
-    /// the machine and directory are already on the row's group heading.
-    private func appName(info: PgSessionInfo, previous: Row?) -> String {
-        guard info.active_pane != 0 else { return previous?.app ?? "shell" }
-        let program = Wire.string(info.active_program)
-        if !program.isEmpty { return program }
-        return Wire.string(info.active_title)
-    }
-
     /// "Jeffrey's MacBook Air"; looked up once because the lookup can touch the resolver.
     private lazy var localMachineName: String = Host.current().localizedName ?? ""
 
@@ -1188,7 +1175,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             sidebarDirty = true
             return
         }
-        let raw = SidebarModel.sections(sidebarSessions(), order: state.order)
+        let order = state.order.compactMap(SessionRef.init(key:)).map { sessionRefs.id(for: $0) }
+        let raw = SidebarModel.sections(sidebarSessions(), order: order)
         let sections = raw.map { section in
             // The heading is the user's group name; it must not gain markers or directory names
             // as the session moves around. The machine is its own heading above it.
@@ -1271,18 +1259,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func handle(_ message: OpaquePointer, host: String) {
         connections[host]?.heartbeat?.heard(at: Date())
         let visible = host == activeHost
-        let previous = activeHost
-        activeHost = host
-        swappedFrom = visible ? nil : previous
-        handleActive(message, visible: visible)
-        activeHost = previous
-        swappedFrom = nil
-        // Drawn only once the visible host is back: the sidebar selection and the header
-        // describe what the window shows, never a background machine's state.
-        if sidebarDirty {
-            sidebarDirty = false
-            refreshSidebar()
-        }
+        onHost(host) { handleActive(message, visible: visible) }
     }
 
     private func handleActive(_ message: OpaquePointer, visible: Bool) {
@@ -1409,7 +1386,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func applySessions(_ message: OpaquePointer, visible: Bool) {
         let count = pg_msg_sessions_count(message)
         debugLog("sessions from active=\(activeHost) count=\(count)")
-        var updated: [Int: Row] = [:]
+        var listed: [SessionReducer.Listed] = []
         for index in 0..<count {
             var info = PgSessionInfo()
             guard pg_msg_session_at(message, index, &info), info.pane_count > 0 else { continue }
@@ -1418,29 +1395,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 pg_msg_session_panes(message, index, buffer.baseAddress, buffer.count)
             }
             guard written > 0 else { continue }
-            let id = Int(info.session_id)
-            let previous = rows[id]
-            updated[id] = Row(
-                id: id,
+            let program = Wire.string(info.active_program)
+            listed.append(SessionReducer.Listed(
+                id: Int(info.session_id),
                 panes: Array(panes.prefix(written)),
                 cwd: Wire.string(info.cwd),
-                activePane: info.active_pane != 0 ? info.active_pane : (previous?.activePane ?? panes[0]),
-                app: appName(info: info, previous: previous),
-                title: "session \(id)",
-                status: previous?.status ?? .idle,
-                seq: previous?.seq ?? 0,
-                unread: previous?.unread ?? state.unread[unreadKey(host: activeHost, session: id)] ?? 0,
-                lastSeen: previous?.lastSeen ?? Date(),
-                sizeSource: previous?.sizeSource ?? "",
-                clients: previous?.clients ?? 1,
-                host: activeHost,
-                group: Grouping.pinnedGroup(
-                    existing: previous?.group,
-                    cwd: Wire.string(info.cwd),
-                    gitRoot: GitRoot.find(cwd: Wire.string(info.cwd), onThisMac: activeHost == "local")),
-                agent: previous?.agent ?? .none
-            )
+                activePane: info.active_pane,
+                program: program.isEmpty ? Wire.string(info.active_title) : program))
         }
+        let host = activeHost
+        let saved = state.unread
+        let updated = SessionReducer.merge(
+            listed, into: rows, host: host, now: Date(),
+            unread: { saved[$0.key] ?? 0 },
+            gitRoot: { GitRoot.find(cwd: $0, onThisMac: host == "local") })
         rows = updated
         if ProcessInfo.processInfo.environment["PIGEON_DEBUG"] != nil {
             let apps = rows.values.map { "\($0.id):\($0.app)" }.sorted().joined(separator: " ")
@@ -1679,27 +1647,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func applyStatus(_ message: OpaquePointer) {
-        let pane = Wire.u32(message, "pane_id")
-        guard let id = rows.first(where: { $0.value.panes.contains(pane) })?.key,
-              var row = rows[id] else { return }
-        if let status = SidebarModel.status(from: Wire.string(message, "state")) {
-            row.status = status
-        }
-        row.seq = Wire.u32(message, "seq")
-        row.agent = AgentInfo(message: message)
-        row.lastSeen = row.agent.since
+        let report = SessionReducer.Report(
+            pane: Wire.u32(message, "pane_id"),
+            status: SidebarModel.status(from: Wire.string(message, "state")),
+            seq: Wire.u32(message, "seq"),
+            agent: AgentInfo(message: message))
         // Only the session on screen counts as seen: a background host's own selection is
         // not something the user is looking at.
-        let onScreen = swappedFrom == nil && selectedSession == id
-        // `docs/ui.md` §5: only done/error become unread; blocked is its own orange mark.
-        if !onScreen, row.status == .done || row.status == .error {
-            row.unread += 1
-            state.unread[unreadKey(host: activeHost, session: id)] = row.unread
-            store.save(state)
-        }
-        rows[id] = row
-        if onScreen, row.status == .done || row.status == .error {
-            sendAck(row.activePane, row.seq)
+        let effects = SessionReducer.apply(
+            report, to: &rows, host: activeHost, selected: selectedSession,
+            onScreen: swappedFrom == nil)
+        for effect in effects {
+            switch effect {
+            case let .ack(pane, seq):
+                sendAck(pane, seq)
+            case let .saveUnread(ref, count):
+                state.unread[ref.key] = count
+                store.save(state)
+            }
         }
         refreshSidebar()
     }

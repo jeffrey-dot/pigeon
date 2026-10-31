@@ -4,7 +4,8 @@ import Foundation
 /// (`AGENTS.md` forbids `~/Library` for app state).
 struct SidebarState: Codable, Equatable {
     var collapsed: [String] = []
-    var order: [Int] = []
+    /// Manual row order as `SessionRef.key`s (`"3"`, `"devbox:2"`).
+    var order: [String] = []
     /// Session id (as text, JSON keys are strings) → user title.
     var renamed: [String: String] = [:]
     /// Session id → unread count, so a reopen keeps the dots.
@@ -13,6 +14,30 @@ struct SidebarState: Codable, Equatable {
     var renamedGroups: [String: String] = [:]
 
     var collapsedSet: Set<String> { Set(collapsed) }
+
+    init() {}
+
+    private enum CodingKeys: String, CodingKey {
+        case collapsed, order, renamed, unread, renamedGroups
+    }
+
+    /// Tolerant: a missing key keeps its default, and an `order` older builds wrote (packed
+    /// Int ids, `host index * 100_000 + session`) is mapped back to keys for this Mac and
+    /// dropped for remote hosts, whose index could have meant any machine.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        collapsed = (try? container.decodeIfPresent([String].self, forKey: .collapsed)) ?? []
+        renamed = (try? container.decodeIfPresent([String: String].self, forKey: .renamed)) ?? [:]
+        unread = (try? container.decodeIfPresent([String: Int].self, forKey: .unread)) ?? [:]
+        renamedGroups = (try? container.decodeIfPresent([String: String].self, forKey: .renamedGroups)) ?? [:]
+        if let keys = try? container.decodeIfPresent([String].self, forKey: .order) {
+            order = keys
+        } else if let packed = try? container.decodeIfPresent([Int].self, forKey: .order) {
+            order = packed.compactMap { id in
+                id / 100_000 == 1 && id % 100_000 > 0 ? String(id % 100_000) : nil
+            }
+        }
+    }
 }
 
 final class SidebarStore {

@@ -319,7 +319,7 @@ final class SidebarStoreTests: XCTestCase {
         let store = SidebarStore(url: url)
         var state = SidebarState()
         state.collapsed = ["pigeon"]
-        state.order = [3, 1, 2]
+        state.order = ["3", "1", "devbox:2"]
         state.renamed["3"] = "deploy"
         state.renamedGroups["pigeon"] = "pigeon-core"
         store.save(state)
@@ -329,6 +329,14 @@ final class SidebarStoreTests: XCTestCase {
         XCTAssertTrue(SidebarStore.defaultURL.path.hasPrefix(
             FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config/pigeon").path
         ))
+    }
+
+    func testAnOrderFromAnOlderBuildKeepsThisMacsRows() throws {
+        // Packed ids: 100_003 is this Mac's session 3, 200_002 a remote host's session 2.
+        try Data(#"{"collapsed":["x"],"order":[100003,200002,100001,7]}"#.utf8).write(to: url)
+        let state = SidebarStore(url: url).load()
+        XCTAssertEqual(state.order, ["3", "1"])
+        XCTAssertEqual(state.collapsed, ["x"], "other fields survive the migration")
     }
 
     func testCorruptFileFallsBackToDefaults() {
