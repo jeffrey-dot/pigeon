@@ -1274,6 +1274,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 container.paneView(pane)?.setScrollPosition(
                     total: Int(Wire.u32(message, "history_len")),
                     offset: Int(Wire.u32(message, "offset")))
+                container.paneView(pane)?.modes = Wire.u32(message, "modes")
             } else if let frame = Wire.frame(message) {
                 pendingSnapshots[pane] = frame
             }
@@ -1338,6 +1339,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let expected = drawn + 1
         if delta.pointee.seq == expected, view.apply(delta: delta) {
             frameSeq[pane] = delta.pointee.seq
+            // Every delta carries the modes; a host too old to send them leaves them alone.
+            let unreported = UInt32.max
+            let modes = Wire.u32(message, "modes", fallback: unreported)
+            if modes != unreported { view.modes = modes }
             return
         }
         debugLog("delta pane=\(pane) seq=\(delta.pointee.seq) expected=\(expected): re-attach")
@@ -1669,6 +1674,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 container.paneView(pane)?.setScrollPosition(
                     total: Int(Wire.u32(decoded, "history_len")),
                     offset: Int(Wire.u32(decoded, "offset")))
+                container.paneView(pane)?.modes = Wire.u32(decoded, "modes")
                 pendingSnapshots.removeValue(forKey: pane)
             }
         }

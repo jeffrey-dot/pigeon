@@ -26,6 +26,8 @@ final class PaneView: NSView {
     private(set) var cells: [Cell] = []
     /// The alternate screen keeps no scrollback: vim/htop/less own the whole screen.
     private(set) var alt = false
+    /// `MODE_*` bits the program turned on (`docs/protocol.md` §3.3): arrows, mouse, paste.
+    var modes: UInt32 = 0
     /// Lines the user wants to look back (positive) or forward (negative). The host owns the
     /// history and answers with the shifted screen (`scroll`, protocol §3.3), so a ten
     /// thousand line backlog never travels over the wire.
@@ -112,6 +114,17 @@ final class PaneView: NSView {
     }
 
     override func scrollWheel(with event: NSEvent) {
+        if alt {
+            // The alternate screen has no history; the wheel belongs to the program.
+            let (lines, remainder) = Self.wheelLines(
+                deltaY: event.scrollingDeltaY,
+                precise: event.hasPreciseScrollingDeltas,
+                cellHeight: CoreTextRenderer.cellSize().height,
+                remainder: wheelRemainder)
+            wheelRemainder = remainder
+            _ = wheelOnAlternateScreen(event, lines: lines)
+            return
+        }
         let (lines, remainder) = Self.scrollRequest(
             alt: alt,
             deltaY: event.scrollingDeltaY,
@@ -305,15 +318,45 @@ final class PaneView: NSView {
     /// starts a selection of its own.
     override func mouseDown(with event: NSEvent) {
         nextResponder?.mouseDown(with: event)
+        if reportsMouse(event) {
+            clearSelection()
+            report(.left, .press, event)
+            return
+        }
         beginSelection(with: event)
     }
 
     override func mouseDragged(with event: NSEvent) {
+        if reportsMouse(event) {
+            report(.left, .drag, event)
+            return
+        }
         extendSelection(with: event)
     }
 
     override func mouseUp(with event: NSEvent) {
         nextResponder?.mouseUp(with: event)
+        if reportsMouse(event) { report(.left, .release, event) }
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        guard reportsMouse(event) else { return super.rightMouseDown(with: event) }
+        report(.right, .press, event)
+    }
+
+    override func rightMouseUp(with event: NSEvent) {
+        guard reportsMouse(event) else { return super.rightMouseUp(with: event) }
+        report(.right, .release, event)
+    }
+
+    override func otherMouseDown(with event: NSEvent) {
+        guard reportsMouse(event) else { return super.otherMouseDown(with: event) }
+        report(.middle, .press, event)
+    }
+
+    override func otherMouseUp(with event: NSEvent) {
+        guard reportsMouse(event) else { return super.otherMouseUp(with: event) }
+        report(.middle, .release, event)
     }
 
     override func keyDown(with event: NSEvent) {
@@ -323,7 +366,8 @@ final class PaneView: NSView {
             super.keyDown(with: event)
             return
         }
-        guard let bytes = KeyEncoder.encode(stroke) else { return }
+        guard let bytes = KeyEncoder.encode(stroke, appCursor: modes & TerminalModes.appCursor != 0)
+        else { return }
         clearSelection()
         // Typing while scrolled back snaps to the live screen, like every terminal.
         onScrollToBottom?()

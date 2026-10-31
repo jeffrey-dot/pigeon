@@ -42,21 +42,24 @@ public struct KeyStroke: Equatable {
     }
 }
 
-/// Turns a key stroke into the bytes a terminal expects (legacy encoding; the
-/// kitty keyboard protocol is a later milestone).
+/// Turns a key stroke into the bytes a terminal expects: xterm's encoding, including its
+/// modifier parameter (`CSI 1;5C` for Ctrl+→) and application cursor mode (DECCKM), which
+/// is what readline, vim and fish actually bind. The kitty keyboard protocol is later.
 public enum KeyEncoder {
-    public static func encode(_ stroke: KeyStroke) -> [UInt8]? {
+    /// `appCursor`: the program turned on DECCKM (`?1h`), so unmodified arrows, Home and
+    /// End go out as `SS3` (`ESC O A`) instead of `CSI`.
+    public static func encode(_ stroke: KeyStroke, appCursor: Bool = false) -> [UInt8]? {
         // Command chords belong to the app, not the shell.
         if stroke.command { return nil }
 
-        if let sequence = special(stroke) {
-            return stroke.option ? [0x1b] + sequence : sequence
+        if let sequence = special(stroke, appCursor: appCursor) {
+            return sequence
         }
 
         guard case let .character(character) = stroke.key else { return nil }
 
         if stroke.control, let byte = controlByte(character) {
-            return [byte]
+            return stroke.option ? [0x1b, byte] : [byte]
         }
 
         var bytes = Array(String(character).utf8)
@@ -85,38 +88,64 @@ public enum KeyEncoder {
         }
     }
 
-    private static func special(_ stroke: KeyStroke) -> [UInt8]? {
+    /// xterm's modifier parameter: 1 + shift + 2·alt + 4·ctrl; 1 means "no modifier".
+    private static func modifier(_ stroke: KeyStroke) -> Int {
+        1 + (stroke.shift ? 1 : 0) + (stroke.option ? 2 : 0) + (stroke.control ? 4 : 0)
+    }
+
+    /// Cursor-style keys: `CSI 1;m X` with modifiers, else `SS3 X` / `CSI X`.
+    private static func cursorKey(_ final: Character, _ stroke: KeyStroke, appCursor: Bool) -> [UInt8] {
+        let mod = modifier(stroke)
+        if mod > 1 { return Array("\u{1b}[1;\(mod)\(final)".utf8) }
+        return Array((appCursor ? "\u{1b}O\(final)" : "\u{1b}[\(final)").utf8)
+    }
+
+    /// Tilde keys: `CSI n ~`, or `CSI n;m ~` with modifiers.
+    private static func tildeKey(_ number: Int, _ stroke: KeyStroke) -> [UInt8] {
+        let mod = modifier(stroke)
+        return Array((mod > 1 ? "\u{1b}[\(number);\(mod)~" : "\u{1b}[\(number)~").utf8)
+    }
+
+    private static func special(_ stroke: KeyStroke, appCursor: Bool) -> [UInt8]? {
+        let alt: [UInt8] = stroke.option ? [0x1b] : []
         switch stroke.key {
         case .enter:
-            return [0x0d]
+            return alt + [0x0d]
         case .tab:
-            return stroke.shift ? [0x1b, UInt8(ascii: "["), UInt8(ascii: "Z")] : [0x09]
+            return stroke.shift ? Array("\u{1b}[Z".utf8) : alt + [0x09]
         case .backspace:
-            return [0x7f]
+            // ⌥⌫ is "delete word" in readline and zsh: ESC DEL.
+            return alt + [stroke.control ? 0x08 : 0x7f]
         case .escape:
-            return [0x1b]
+            return alt + [0x1b]
         case .delete:
-            return Array("\u{1b}[3~".utf8)
+            return tildeKey(3, stroke)
         case .up:
-            return Array("\u{1b}[A".utf8)
+            return cursorKey("A", stroke, appCursor: appCursor)
         case .down:
-            return Array("\u{1b}[B".utf8)
+            return cursorKey("B", stroke, appCursor: appCursor)
         case .right:
-            return Array("\u{1b}[C".utf8)
+            return cursorKey("C", stroke, appCursor: appCursor)
         case .left:
-            return Array("\u{1b}[D".utf8)
+            return cursorKey("D", stroke, appCursor: appCursor)
         case .home:
-            return Array("\u{1b}[H".utf8)
+            return cursorKey("H", stroke, appCursor: appCursor)
         case .end:
-            return Array("\u{1b}[F".utf8)
+            return cursorKey("F", stroke, appCursor: appCursor)
         case .pageUp:
-            return Array("\u{1b}[5~".utf8)
+            return tildeKey(5, stroke)
         case .pageDown:
-            return Array("\u{1b}[6~".utf8)
+            return tildeKey(6, stroke)
         case let .function(number):
-            let codes = [11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 23, 24]
-            guard number >= 1, number <= codes.count else { return nil }
-            return Array("\u{1b}[\(codes[number - 1])~".utf8)
+            if (1...4).contains(number) {
+                // F1–F4 are SS3 P/Q/R/S, or `CSI 1;m P` once modified.
+                let final = Character(Unicode.Scalar(UInt8(ascii: "P") + UInt8(number - 1)))
+                let mod = modifier(stroke)
+                return Array((mod > 1 ? "\u{1b}[1;\(mod)\(final)" : "\u{1b}O\(final)").utf8)
+            }
+            let codes = [15, 17, 18, 19, 20, 21, 23, 24]
+            guard number >= 5, number <= 12 else { return nil }
+            return tildeKey(codes[number - 5], stroke)
         case .character:
             return nil
         }
