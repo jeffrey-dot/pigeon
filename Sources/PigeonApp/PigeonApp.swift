@@ -36,24 +36,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// One live connection per machine (`docs/remote.md` §4). `"local"` is this Mac.
     private var clients: [String: HostClient] = [:]
     private var remotes: [String: RemoteSession] = [:]
-    private var rowsByHost: [String: [Int: Row]] = [:]
-    private var focusedByHost: [String: UInt32] = [:]
-    private var seenByHost: [String: Set<UInt32>] = [:]
-    private var requestedByHost: [String: Set<UInt32>] = [:]
-    private var pendingByHost: [String: [UInt32: Data]] = [:]
-    /// Last frame `seq` drawn per pane: a `delta` must be exactly the next one, otherwise a
-    /// frame went missing and the pane re-attaches for a snapshot (protocol §3.3).
-    private var seqByHost: [String: [UInt32: UInt32]] = [:]
-    /// Panes still showing what a dropped connection drew: their next `attach` carries
-    /// `since` so the host replays only the missed deltas (issue #4).
-    private var staleByHost: [String: Set<UInt32>] = [:]
-    /// `hello_ack.instance` per host; `since` is only meaningful to that same process.
-    private var instanceByHost: [String: String] = [:]
-    /// Hosts that send every pane's `status` without an attach (`status_all`, protocol §5):
-    /// the sidebar then follows background sessions without joining their size vote.
-    private var statusAllHosts: Set<String> = []
-    /// Per connected host: when it was last heard from (`Heartbeat`), ticked by `heartbeatTimer`.
-    private var heartbeats: [String: Heartbeat] = [:]
+    /// Per-machine state (`HostConnection`): rows, screens on display, seq, liveness.
+    private var connections: [String: HostConnection<Row>] = [:]
     private var heartbeatTimer: Timer?
     private var recovering: [String: Int] = [:]
     private let hostAgent = HostAgent()
@@ -72,29 +56,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         get { remotes[activeHost] }
         set { remotes[activeHost] = newValue }
     }
+    /// The active host's connection state; reading a host never seen yields an empty one.
+    private var connection: HostConnection<Row> {
+        get { connections[activeHost] ?? HostConnection() }
+        set { connections[activeHost] = newValue }
+    }
     private var rows: [Int: Row] {
-        get { rowsByHost[activeHost] ?? [:] }
-        set { rowsByHost[activeHost] = newValue }
+        get { connection.rows }
+        set { connection.rows = newValue }
     }
     private var focusedPane: UInt32? {
-        get { focusedByHost[activeHost] }
-        set { focusedByHost[activeHost] = newValue }
+        get { connection.focusedPane }
+        set { connection.focusedPane = newValue }
     }
     private var haveSnapshot: Set<UInt32> {
-        get { seenByHost[activeHost] ?? [] }
-        set { seenByHost[activeHost] = newValue }
+        get { connection.seen }
+        set { connection.seen = newValue }
     }
     private var requested: Set<UInt32> {
-        get { requestedByHost[activeHost] ?? [] }
-        set { requestedByHost[activeHost] = newValue }
+        get { connection.requested }
+        set { connection.requested = newValue }
     }
     private var pendingSnapshots: [UInt32: Data] {
-        get { pendingByHost[activeHost] ?? [:] }
-        set { pendingByHost[activeHost] = newValue }
+        get { connection.pending }
+        set { connection.pending = newValue }
     }
     private var frameSeq: [UInt32: UInt32] {
-        get { seqByHost[activeHost] ?? [:] }
-        set { seqByHost[activeHost] = newValue }
+        get { connection.seq }
+        set { connection.seq = newValue }
     }
     /// Mode C keeps the VT state here (no host on the far side).
     private var localSession: LocalSession?
@@ -108,10 +97,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// The last row the sidebar asked to select (a `Machines` row uses a negative id).
     private var lastSelectedId: Int?
 
-    private var selectedByHost: [String: Int] = [:]
     private var selectedSession: Int? {
-        get { selectedByHost[activeHost] }
-        set { selectedByHost[activeHost] = newValue }
+        get { connection.selectedSession }
+        set { connection.selectedSession = newValue }
     }
     private var nextRequest: UInt32 = 1
     /// Sessions per host, and which host is the one on screen. Every host keeps its own
@@ -511,13 +499,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         clients[host] = client
-        heartbeats[host] = Heartbeat(now: Date())
         startHeartbeat()
         recovering[host] = 0
         // A reconnect keeps the screens on display; every pane drawn so far re-attaches,
         // asking only for what it missed.
-        staleByHost[host] = seenByHost[host] ?? []
-        requestedByHost[host] = nil
+        connections[host, default: HostConnection()].reconnected(now: Date())
         if host == activeHost {
             hostStatus.hide()
         }
@@ -544,10 +530,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func tickHeartbeats() {
         let now = Date()
-        for host in Array(heartbeats.keys) {
-            guard var beat = heartbeats[host], let client = clients[host] else { continue }
+        for host in Array(connections.keys) {
+            guard var beat = connections[host]?.heartbeat, let client = clients[host] else { continue }
             let action = beat.tick(at: now)
-            heartbeats[host] = beat
+            connections[host]?.heartbeat = beat
             switch action {
             case .none:
                 break
@@ -559,7 +545,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Wire.free(ping)
             case .dead:
                 debugLog("host \(host) silent for \(Int(Heartbeat.timeout))s: reconnecting")
-                heartbeats[host] = nil
+                connections[host]?.heartbeat = nil
                 client.close()
                 hostLost(host: host, "The connection to the session host stopped responding.")
             }
@@ -569,7 +555,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// One host dropped: retry *that* host on its own budget, without touching the others.
     private func hostLost(host: String, _ reason: String) {
         clients[host] = nil
-        heartbeats[host] = nil
+        connections[host]?.heartbeat = nil
         if host == "local", stoppedByUser {
             stoppedByUser = false
             if host == activeHost {
@@ -688,18 +674,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func disconnect(host: String) {
         clients[host]?.close()
         clients[host] = nil
-        heartbeats[host] = nil
         remotes[host]?.close()
         remotes[host] = nil
-        rowsByHost[host] = nil
-        focusedByHost[host] = nil
-        seenByHost[host] = nil
-        requestedByHost[host] = nil
-        pendingByHost[host] = nil
-        seqByHost[host] = nil
-        staleByHost[host] = nil
-        instanceByHost[host] = nil
-        statusAllHosts.remove(host)
+        // The selection survives a hang-up, as it did when it lived in its own table.
+        let selected = connections[host]?.selectedSession
+        connections[host] = nil
+        if let selected { connections[host] = HostConnection(selectedSession: selected) }
     }
 
     private static func defaultSocketPath() -> String {
@@ -803,11 +783,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// the window never receives the selected session's layout.
     private func sendAttach(_ pane: UInt32, force: Bool = false) {
         guard pane != 0 else { return }
-        let stale = staleByHost[activeHost]?.contains(pane) ?? false
+        let stale = connection.stale?.contains(pane) ?? false
         if !force, (haveSnapshot.contains(pane) && !stale) || !requested.insert(pane).inserted {
             return
         }
-        staleByHost[activeHost]?.remove(pane)
+        connection.stale?.remove(pane)
         let since = HostRecovery.resumeSeq(
             drawn: frameSeq[pane], stale: stale, onScreen: haveSnapshot.contains(pane))
         send({ message in
@@ -824,7 +804,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// an older one only reports panes this window attached, so each session's active pane
     /// is attached (which also counts this window in that session's size vote).
     private func watchStatuses() {
-        guard !statusAllHosts.contains(activeHost) else { return }
+        guard !connection.statusAll else { return }
         for row in rows.values { sendAttach(row.activePane) }
     }
 
@@ -911,7 +891,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             activate(host: host)
         }
         activeHost = host
-        guard let row = rowsByHost[host]?[session] else { return }
+        guard let row = connections[host]?.rows[session] else { return }
         debugLog("select host=\(host) id=\(session) activePane=\(row.activePane) panes=\(row.panes)")
         selectedSession = session
         focusedPane = row.activePane
@@ -958,7 +938,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// connection, or one that has no sessions yet at launch, never quits pigeon.
     private func quitIfNoSessionsLeft() {
         let remaining = hostKeys().filter { clients[$0] != nil }
-            .reduce(0) { $0 + (rowsByHost[$1]?.count ?? 0) }
+            .reduce(0) { $0 + (connections[$1]?.rows.count ?? 0) }
         guard SidebarModel.shouldQuitAfterClose(
             remainingSessions: remaining, creatingSession: pendingSelectSession != nil)
         else { return }
@@ -1091,7 +1071,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 startRemote(host, select: true)
             }
         }
-        if selectedSession == nil, let first = (rowsByHost[host] ?? [:]).keys.sorted().first {
+        if selectedSession == nil, let first = (connections[host]?.rows ?? [:]).keys.sorted().first {
             select(rowId(host: host, session: first))
         }
         refreshSidebar()
@@ -1167,7 +1147,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Sessions of every *connected* host, grouped under `host / project`. An offline host
         // simply disappears from the sidebar; its sessions come back when it reconnects.
         for key in hostKeys() where clients[key] != nil {
-            let hostRows = (rowsByHost[key] ?? [:]).values.sorted { $0.id < $1.id }
+            let hostRows = (connections[key]?.rows ?? [:]).values.sorted { $0.id < $1.id }
             for row in hostRows {
                 sessions.append(
                     SidebarSession(
@@ -1219,7 +1199,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if ProcessInfo.processInfo.environment["PIGEON_DEBUG"] != nil {
             let needs = SidebarModel.needsYou(sidebarSessions())
             let perHost = hostKeys()
-                .map { "\($0):\(rowsByHost[$0]?.count ?? -1)" }
+                .map { "\($0):\(connections[$0]?.rows.count ?? -1)" }
                 .joined(separator: ",")
             debugLog(
                 "sidebar active=\(activeHost) perHost=\(perHost) sessions=\(rows.count) needs=\(needs) "
@@ -1289,7 +1269,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Routes one host's message through the handlers, which read and write "the active
     /// host" state; the window itself only follows the visible host.
     private func handle(_ message: OpaquePointer, host: String) {
-        heartbeats[host]?.heard(at: Date())
+        connections[host]?.heartbeat?.heard(at: Date())
         let visible = host == activeHost
         let previous = activeHost
         activeHost = host
@@ -1309,17 +1289,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch Wire.type(message) {
         case PG_MSG_HELLO_ACK:
             let instance = Wire.string(message, "instance")
-            if instanceByHost[activeHost] != instance {
-                // A restarted host numbers its frames from scratch.
-                staleByHost[activeHost] = nil
-                seqByHost[activeHost] = nil
-            }
-            instanceByHost[activeHost] = instance
-            if Wire.contains(message, strings: "features", "status_all") {
-                statusAllHosts.insert(activeHost)
-            } else {
-                statusAllHosts.remove(activeHost)
-            }
+            connection.instanceChanged(to: instance)
+            connection.statusAll = Wire.contains(message, strings: "features", "status_all")
             // Tell the host what we are drawing with, so programs inside the panes can pick
             // their light or dark theme (`OSC 4/10/11`).
             sendAppearance()
