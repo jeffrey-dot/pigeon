@@ -98,7 +98,7 @@
 
 | 方向 | 消息 | 必选字段 | 可选字段 | 说明 |
 |---|---|---|---|---|
-| c→s | `appearance` | — | `fg: u32`, `bg: u32`, `ansi: [u32]`（16 个 `0xRRGGBB`） | 客户端当前主题，供宿主回答程序发出的 `OSC 4/10/11` 颜色查询。**缺省值**：客户端还没发过时，宿主用内置的 harp 深色板（`#050505` / `#ffffff` + `DARK_MODE_*` 十六色）作答；`fg`/`bg` 缺失或 `ansi` 不是 16 个时，保留上一次的答复（不 panic、不猜） |
+| c→s | `appearance` | — | `fg: u32`, `bg: u32`, `ansi: [u32]`（16 个 `0xRRGGBB`） | 客户端当前主题，供宿主回答程序发出的 `OSC 4/10/11` 颜色查询。**缺省值**：客户端还没发过时，宿主用内置的深色板（底 `#0E0F11` / 字 `#E6E6E6` + harp 的 `DARK_MODE_*` 十六色）作答；`fg`/`bg` 缺失或 `ansi` 不是 16 个时，保留上一次的答复（不 panic、不猜） |
 | c→s | `keys` | `pane_id: u32`, `bytes: bstr` | — | 已编码好的终端字节（kitty protocol 或 legacy 由客户端决定） |
 | c→s | `mouse` | `pane_id: u32`, `kind: "down"\|"up"\|"move"\|"wheel"`, `x: u16`, `y: u16`, `button: u8`, `mods: u8` | — | `mods` 位：`1` shift、`2` alt、`4` ctrl |
 | c→s | `paste` | `pane_id: u32`, `text: str` | — | 宿主负责括号粘贴包装：程序开了 `?2004` 才包 `ESC[200~ … ESC[201~`，并去掉正文里的起止标记（防止剪贴板内容提前结束粘贴、把后面当命令执行）；`\n`/`\r\n` 换成 `\r` |

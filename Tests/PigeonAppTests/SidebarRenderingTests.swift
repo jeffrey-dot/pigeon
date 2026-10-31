@@ -47,8 +47,8 @@ final class SidebarRenderingTests: XCTestCase {
         }
         XCTAssertEqual(rgb(.aqua).0, 0xff) // theme background light
         XCTAssertEqual(rgb(.aqua).2, 0xff)
-        XCTAssertEqual(rgb(.darkAqua).0, 0x05) // theme background dark
-        XCTAssertEqual(rgb(.darkAqua).2, 0x05)
+        XCTAssertEqual(rgb(.darkAqua).0, 0x0e) // card dark (#0E0F11)
+        XCTAssertEqual(rgb(.darkAqua).2, 0x11)
     }
 
     /// Cells without an explicit colour take the theme's foreground/background, resolved for
@@ -58,8 +58,8 @@ final class SidebarRenderingTests: XCTestCase {
         let dark = CellPalette.resolve(for: NSAppearance(named: .darkAqua)!)
         XCTAssertEqual(light.foreground, 0x0011_1111) // #111111
         XCTAssertEqual(light.background, 0x00ff_ffff) // #ffffff
-        XCTAssertEqual(dark.foreground, 0x00ff_ffff) // #ffffff
-        XCTAssertEqual(dark.background, 0x0005_0505) // #050505
+        XCTAssertEqual(dark.foreground, 0x00e6_e6e6) // #E6E6E6
+        XCTAssertEqual(dark.background, 0x000e_0f11) // #0E0F11
     }
 
     func testTheSidebarSurfaceFollowsTheAppearanceOnTheSameView() {
@@ -70,7 +70,7 @@ final class SidebarRenderingTests: XCTestCase {
         // in SidebarThemeTests, here we only care that the two branches are both live.
         XCTAssertEqual(light.0, 0xe8, accuracy: 2) // SIDEBAR light
         XCTAssertEqual(light.2, 0xeb, accuracy: 2)
-        XCTAssertEqual(dark.0, 0x23, accuracy: 2) // SIDEBAR dark
-        XCTAssertEqual(dark.2, 0x26, accuracy: 2)
+        XCTAssertEqual(dark.0, 0x16, accuracy: 2) // SIDEBAR dark (#16171A)
+        XCTAssertEqual(dark.2, 0x1a, accuracy: 2)
     }
 }

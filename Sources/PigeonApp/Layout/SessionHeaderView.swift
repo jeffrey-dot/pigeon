@@ -39,7 +39,7 @@ final class SessionHeaderView: NSView {
         path.font = .systemFont(ofSize: SidebarMetrics.cardPathSize)
         path.textColor = SidebarTheme.gray
         path.lineBreakMode = .byTruncatingHead
-        state.font = .systemFont(ofSize: SidebarMetrics.cardStateSize)
+        state.font = .monospacedDigitSystemFont(ofSize: SidebarMetrics.cardStateSize, weight: .regular)
         state.textColor = SidebarTheme.gray
         state.alignment = .right
 

@@ -42,6 +42,8 @@ enum SidebarMetrics {
     static let rowIconSize: CGFloat = 24
     static let rowIconGap: CGFloat = 8
     static let statusBadgeSize: CGFloat = 13
+    /// Selection, hover and status changes: short enough to feel immediate.
+    static let motion: CFTimeInterval = 0.12
     static let statusBadgeRing: CGFloat = 2
     /// The hover `×` chip harp shows in place of the time (`VT` `row_close`, 18pt / radius 5).
     static let rowCloseSize: CGFloat = 18

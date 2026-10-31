@@ -56,7 +56,7 @@
 - 宿主：`pigeon-host.rs` 拆成 cli / transport / client / dispatch / pane_actor；`Session` 与尺寸策略下沉到 `core/src/session/`；
   每客户端出站队列（事件只编码一次，慢客户端只留每 pane 最新 delta，Layout/Status/Exited 不丢）。
 
-### P5 视觉
+### P5 视觉 ✅
 
 - 深色：卡片 `#0E0F11`、侧栏 `#16171A`，正文 `#E6E6E6`；唯一强调色琥珀 `#F0B35C` 只给 needs you。
 - 浅色：黄/青调到对白底至少 3:1。

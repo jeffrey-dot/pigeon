@@ -47,7 +47,8 @@ final class SidebarRowCellView: NSTableCellView {
         title.font = .systemFont(ofSize: SidebarMetrics.rowTitleSize, weight: unread ? .semibold : .regular)
         title.textColor = SidebarTheme.ink
         age.stringValue = SidebarModel.ageText(for: session)
-        age.font = .systemFont(ofSize: SidebarMetrics.rowTimeSize)
+        // Tabular figures: `9m` → `10m` must not shift the column.
+        age.font = .monospacedDigitSystemFont(ofSize: SidebarMetrics.rowTimeSize, weight: .regular)
         age.textColor = session.status == .blocked ? SidebarTheme.needsAccent : SidebarTheme.gray
 
         // Program-controlled text: a plain label, one line, never parsed (AGENTS.md §8).

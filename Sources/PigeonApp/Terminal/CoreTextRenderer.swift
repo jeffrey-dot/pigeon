@@ -4,13 +4,11 @@ import CoreText
 /// Font metrics and glyph rasterization for the Metal grid renderer. The only file allowed
 /// to import CoreText; the grid itself is drawn on the GPU (`MetalGridRenderer`).
 enum CoreTextRenderer {
-    static let fontSize: CGFloat = 13
-    /// harp's terminal line-height ratio (`DEFAULT_UI_LINE_HEIGHT_RATIO` in
-    /// `crates/warpui_core/src/elements/gui/text.rs:33`, used as the terminal default).
-    static let lineHeightRatio: CGFloat = 1.2
-    /// harp ships "Hack" (`app/src/settings/font.rs:11`); when it is not installed we keep the
-    /// system monospace rather than bundling a font file.
-    static let fontName = "Hack"
+    /// Read once at launch (`~/.config/pigeon/config.toml`, `FontConfig`): metrics are cached
+    /// below, so a change applies on the next launch.
+    static let config = FontConfig.load()
+    static var fontSize: CGFloat { CGFloat(config.size) }
+    static var lineHeightRatio: CGFloat { CGFloat(config.lineHeight) }
 
     static func font(bold: Bool) -> NSFont { bold ? boldFont : regularFont }
 
@@ -21,16 +19,19 @@ enum CoreTextRenderer {
     private static let boldFont = loadFont(bold: true)
     private static let cachedCellSize: CGSize = {
         let advance = ("M" as NSString).size(withAttributes: [.font: regularFont])
-        // Cell height is the font size times harp's line-height ratio, not the font's own
-        // ascender/descender span: that is what gives harp's rows their airiness.
+        // Cell height is the font size times the line-height ratio, not the font's own
+        // ascender/descender span: that is what gives the rows their airiness.
         return CGSize(width: max(advance.width, 1), height: max(fontSize * lineHeightRatio, 1))
     }()
 
+    /// The configured family when it is installed, otherwise the system monospace (SF Mono).
     private static func loadFont(bold: Bool) -> NSFont {
-        if let named = NSFont(name: bold ? "\(fontName)-Bold" : fontName, size: fontSize) {
-            return named
-        }
-        return NSFont.monospacedSystemFont(ofSize: fontSize, weight: bold ? .bold : .regular)
+        let weight: NSFont.Weight = bold ? .bold : .regular
+        guard !config.family.isEmpty,
+              let named = NSFont(name: config.family, size: fontSize)
+        else { return NSFont.monospacedSystemFont(ofSize: fontSize, weight: weight) }
+        guard bold else { return named }
+        return NSFontManager.shared.convert(named, toHaveTrait: .boldFontMask)
     }
 
     static func cellSize() -> CGSize { cachedCellSize }

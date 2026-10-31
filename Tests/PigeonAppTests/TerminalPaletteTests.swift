@@ -10,7 +10,8 @@ final class TerminalPaletteTests: XCTestCase {
         let light = NSAppearance(named: .aqua)!
         XCTAssertEqual(TerminalPalette.hex(0, appearance: light), 0x212121)
         XCTAssertEqual(TerminalPalette.hex(1, appearance: light), 0xC30771)
-        XCTAssertEqual(TerminalPalette.hex(3, appearance: light), 0xA89C14)
+        // Yellow is pigeon's own: harp's `#A89C14` is under 3:1 on white.
+        XCTAssertEqual(TerminalPalette.hex(3, appearance: light), 0x8A7F00)
         XCTAssertEqual(TerminalPalette.hex(9, appearance: light), 0xFB007A) // bright red
         XCTAssertEqual(TerminalPalette.hex(13, appearance: light), 0x6855DE) // bright magenta
     }
@@ -22,6 +23,16 @@ final class TerminalPaletteTests: XCTestCase {
         XCTAssertEqual(TerminalPalette.hex(3, appearance: dark), 0xFEFDC2)
         XCTAssertEqual(TerminalPalette.hex(8, appearance: dark), 0x8E8E8E)
         XCTAssertEqual(TerminalPalette.hex(15, appearance: dark), 0xFEFFFF)
+    }
+
+    /// Every chromatic light-mode colour reads on the white card (non-text UI contrast, 3:1);
+    /// black and the two whites are exempt (they are the theme's ink and paper).
+    func testLightColoursClearThreeToOneOnWhite() {
+        let light = NSAppearance(named: .aqua)!
+        for index in [1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14] {
+            let color = TerminalPalette.color(index, appearance: light)!
+            XCTAssertGreaterThanOrEqual(contrast(color, .white), 3, "ANSI \(index)")
+        }
     }
 
     func testCubeIndicesStayWithTheRenderer() {
@@ -91,12 +102,14 @@ final class TerminalPaletteTests: XCTestCase {
         let dark = NSAppearance(named: .darkAqua)!
         XCTAssertEqual(TerminalPalette.hex(SidebarTheme.terminalBackground, appearance: light), 0xFFFFFF)
         XCTAssertEqual(TerminalPalette.hex(SidebarTheme.terminalForeground, appearance: light), 0x111111)
-        XCTAssertEqual(TerminalPalette.hex(SidebarTheme.terminalBackground, appearance: dark), 0x050505)
-        XCTAssertEqual(TerminalPalette.hex(SidebarTheme.terminalForeground, appearance: dark), 0xFFFFFF)
+        XCTAssertEqual(TerminalPalette.hex(SidebarTheme.terminalBackground, appearance: dark), 0x0E0F11)
+        XCTAssertEqual(TerminalPalette.hex(SidebarTheme.terminalForeground, appearance: dark), 0xE6E6E6)
     }
 
-    func testCellHeightUsesHarpLineHeightRatio() {
-        // 13pt × 1.2 = 15.6; the cell width still comes from the "M" advance.
-        XCTAssertEqual(CoreTextRenderer.cellSize().height, 15.6, accuracy: 0.01)
+    func testCellHeightUsesTheConfiguredLineHeight() {
+        // Default 13pt × 1.25; the cell width still comes from the "M" advance.
+        let config = CoreTextRenderer.config
+        XCTAssertEqual(
+            CoreTextRenderer.cellSize().height, CGFloat(config.size * config.lineHeight), accuracy: 0.01)
     }
 }

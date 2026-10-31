@@ -1902,7 +1902,7 @@ fn a_pane_asks_for_its_background_and_the_host_answers() {
             .to_vec(),
     });
     // No `appearance` was sent: the host answers with its built-in harp dark theme.
-    wait_for_pane_text(&mut client, pane_id, "rgb:0505/0505/0505");
+    wait_for_pane_text(&mut client, pane_id, "rgb:0e0e/0f0f/1111");
 }
 
 /// The host's `appearance` path: a message reaches panes that already exist, an unusable one
@@ -1945,7 +1945,7 @@ fn appearance_reaches_existing_panes_and_a_malformed_one_keeps_the_previous() {
         pane_id,
         bytes: query(),
     });
-    wait_for_pane_text(&mut client, pane_id, "rgb:0505/0505/0505");
+    wait_for_pane_text(&mut client, pane_id, "rgb:0e0e/0f0f/1111");
 
     // 2) a light appearance reaches the pane that already exists.
     client.send(&Message::Appearance {
@@ -1979,7 +1979,7 @@ fn appearance_reaches_existing_panes_and_a_malformed_one_keeps_the_previous() {
     let text = screen_text(&latest);
     assert!(text.contains("rgb:ffff/ffff/ffff"), "kept palette: {text}");
     assert!(
-        !text.contains("rgb:0505/0505/0505"),
+        !text.contains("rgb:0e0e/0f0f/1111"),
         "a malformed appearance must not reset the palette: {text}"
     );
 

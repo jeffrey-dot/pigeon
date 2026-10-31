@@ -8,12 +8,14 @@ import AppKit
 /// light mode readable: xterm's bright yellow/cyan on a white background is not.
 enum TerminalPalette {
     /// `LIGHT_MODE_NORMAL_COLORS` (`default_themes.rs:32-41`).
+    /// Yellow and cyan are darkened from harp's (`#A89C14`, `#20A5BA`) to clear 3:1 on white.
     private static let lightNormal: [UInt32] = [
-        0x212121, 0xC30771, 0x10A778, 0xA89C14, 0x008EC4, 0x523C79, 0x20A5BA, 0xE0E0E0,
+        0x212121, 0xC30771, 0x10A778, 0x8A7F00, 0x008EC4, 0x523C79, 0x15828F, 0xE0E0E0,
     ]
     /// `LIGHT_MODE_BRIGHT_COLORS` (`default_themes.rs:42-51`).
+    /// Bright yellow/cyan/green likewise (`#F3E430`, `#4FB8CC`, `#5FD7AF` were ~1.2–2:1).
     private static let lightBright: [UInt32] = [
-        0x212121, 0xFB007A, 0x5FD7AF, 0xF3E430, 0x20BBFC, 0x6855DE, 0x4FB8CC, 0xF1F1F1,
+        0x212121, 0xFB007A, 0x1E9E77, 0x9A8C00, 0x1A8FC4, 0x6855DE, 0x1F8A9A, 0xF1F1F1,
     ]
     /// `DARK_MODE_NORMAL_COLORS` (`default_themes.rs:11-20`).
     private static let darkNormal: [UInt32] = [

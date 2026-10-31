@@ -13,6 +13,23 @@ final class SidebarRowView: NSTableRowView {
         didSet { needsDisplay = true }
     }
 
+    override var isSelected: Bool {
+        didSet { if isSelected != oldValue { fadeNextDraw() } }
+    }
+
+    /// Selection and hover changes cross-fade over `SidebarMetrics.motion` instead of snapping.
+    /// The transition animates the layer's next redraw, so the drawing code stays as is.
+    private func fadeNextDraw() {
+        wantsLayer = true
+        needsDisplay = true
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        let fade = CATransition()
+        fade.type = .fade
+        fade.duration = SidebarMetrics.motion
+        fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        layer?.add(fade, forKey: "fade")
+    }
+
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let tracking { removeTrackingArea(tracking) }
@@ -27,12 +44,12 @@ final class SidebarRowView: NSTableRowView {
 
     override func mouseEntered(with event: NSEvent) {
         hovered = true
-        needsDisplay = true
+        fadeNextDraw()
     }
 
     override func mouseExited(with event: NSEvent) {
         hovered = false
-        needsDisplay = true
+        fadeNextDraw()
     }
 
     override func drawBackground(in dirtyRect: NSRect) {

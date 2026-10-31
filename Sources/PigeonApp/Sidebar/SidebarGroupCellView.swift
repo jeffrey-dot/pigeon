@@ -30,9 +30,9 @@ final class SidebarGroupCellView: NSTableCellView {
     private func build() {
         name.font = .systemFont(ofSize: SidebarMetrics.sectionTitleSize, weight: .semibold)
         name.textColor = SidebarTheme.sectionName
-        count.font = .systemFont(ofSize: SidebarMetrics.sectionCountSize)
+        count.font = .monospacedDigitSystemFont(ofSize: SidebarMetrics.sectionCountSize, weight: .regular)
         count.textColor = SidebarTheme.sectionCount
-        needs.font = .systemFont(ofSize: SidebarMetrics.needsLabelSize)
+        needs.font = .monospacedDigitSystemFont(ofSize: SidebarMetrics.needsLabelSize, weight: .regular)
         needs.textColor = SidebarTheme.needsText
 
         add.isBordered = false
