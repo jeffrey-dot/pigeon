@@ -2207,3 +2207,67 @@ fn reconnect_with_since_replays_only_the_missed_deltas() {
         "a foreign seq means a snapshot"
     );
 }
+
+/// A second host on the same socket (a stray `pigeon-host`, a `--stdio` start racing a
+/// running one) must leave the live host and its sessions alone instead of unlinking the
+/// socket out from under them.
+#[test]
+fn a_second_host_does_not_steal_a_live_socket() {
+    let _serial = one_at_a_time();
+    let host = start_host();
+    let mut client = Client::connect(&host.socket);
+    hello(&mut client);
+    let pane = attach_first(&mut client);
+
+    let mut second = Command::new(env!("CARGO_BIN_EXE_pigeon-host"))
+        .args(["--socket", &host.socket, "--shell", "/bin/sh"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn second pigeon-host");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let exited = loop {
+        if let Some(status) = second.try_wait().expect("wait") {
+            break Some(status);
+        }
+        if Instant::now() > deadline {
+            let _ = second.kill();
+            let _ = second.wait();
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert!(
+        exited.is_some(),
+        "the second host must give up, not take over"
+    );
+
+    // The first host still answers on the same path, with the same pane.
+    let mut again = Client::connect(&host.socket);
+    hello(&mut again);
+    again.send(&Message::Attach {
+        id: 900,
+        pane_id: pane,
+        size_policy: None,
+        history: None,
+        since: None,
+    });
+    let reply = again.wait_for(|m| matches!(m, Message::Snapshot { .. } | Message::Error { .. }));
+    assert!(
+        matches!(reply, Message::Snapshot { .. }),
+        "the live host keeps its panes: {reply:?}"
+    );
+}
+
+#[test]
+fn the_socket_is_private_from_the_moment_it_exists() {
+    use std::os::unix::fs::PermissionsExt;
+    let _serial = one_at_a_time();
+    let host = start_host();
+    let mode = std::fs::metadata(&host.socket)
+        .expect("socket")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(mode & 0o077, 0, "group/other must have no access: {mode:o}");
+}

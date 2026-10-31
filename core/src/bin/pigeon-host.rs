@@ -242,13 +242,7 @@ async fn run() -> Result<(), String> {
         return proxy(&socket, &shell).await;
     }
 
-    if std::fs::metadata(&socket).is_ok_and(|meta| meta.file_type().is_socket()) {
-        let _ = std::fs::remove_file(&socket);
-    }
-    let listener =
-        UnixListener::bind(&socket).map_err(|error| format!("bind {socket:?}: {error}"))?;
-    std::fs::set_permissions(&socket, Permissions::from_mode(0o700))
-        .map_err(|error| format!("chmod {socket:?}: {error}"))?;
+    let listener = bind_private(&socket).await?;
     eprintln!("pigeon-host listening on {}", socket.display());
 
     if transport == Transport::Stdio {
@@ -288,6 +282,40 @@ async fn run() -> Result<(), String> {
             }
         });
     }
+}
+
+/// Takes over `socket` only if nobody answers on it: a live host keeps its socket and its
+/// sessions, and this process exits instead (a stray start, a `--stdio` racing one).
+///
+/// The socket must never be reachable by other users, not even between `bind` and `chmod`.
+/// Changing the umask needs `unsafe`, so the socket is bound inside a fresh 0700 directory
+/// (unreachable for anyone else), chmodded there, and only then renamed into place.
+async fn bind_private(socket: &std::path::Path) -> Result<UnixListener, String> {
+    if std::fs::metadata(socket).is_ok_and(|meta| meta.file_type().is_socket()) {
+        if UnixStream::connect(socket).await.is_ok() {
+            return Err(format!("another pigeon-host is already serving {socket:?}"));
+        }
+        // Nobody listening: a crashed host left its socket behind.
+        let _ = std::fs::remove_file(socket);
+    }
+    let parent = socket.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let staging = parent.join(format!(".pigeon-bind-{}", std::process::id()));
+    std::fs::create_dir(&staging).map_err(|error| format!("mkdir {staging:?}: {error}"))?;
+    std::fs::set_permissions(&staging, Permissions::from_mode(0o700))
+        .map_err(|error| format!("chmod {staging:?}: {error}"))?;
+    let temporary = staging.join("pigeon.sock");
+    let bound = (|| {
+        let listener = UnixListener::bind(&temporary)
+            .map_err(|error| format!("bind {temporary:?}: {error}"))?;
+        std::fs::set_permissions(&temporary, Permissions::from_mode(0o700))
+            .map_err(|error| format!("chmod {temporary:?}: {error}"))?;
+        std::fs::rename(&temporary, socket)
+            .map_err(|error| format!("rename to {socket:?}: {error}"))?;
+        Ok(listener)
+    })();
+    let _ = std::fs::remove_file(&temporary);
+    let _ = std::fs::remove_dir(&staging);
+    bound
 }
 
 #[derive(Default)]
@@ -562,6 +590,21 @@ fn to_proto_tree(node: LayoutNode) -> Node {
     }
 }
 
+/// Hands `command` to a pane without blocking the caller (which holds the sessions lock)
+/// and without losing it: a full queue gets the command from a task that waits its turn.
+/// A lost `Resize` leaves the PTY at the wrong size, a lost `Kill` an orphaned process.
+fn send_or_queue(sender: &mpsc::Sender<Cmd>, command: Cmd) {
+    match sender.try_send(command) {
+        Ok(()) | Err(mpsc::error::TrySendError::Closed(_)) => {}
+        Err(mpsc::error::TrySendError::Full(command)) => {
+            let sender = sender.clone();
+            tokio::spawn(async move {
+                let _ = sender.send(command).await;
+            });
+        }
+    }
+}
+
 /// One pane's box in cells: its share of the session box, clamped to the minimums the
 /// VM needs (a 1×0 grid is not a terminal).
 fn pane_size(session: &Session, rect: &pigeon_core::layout::Rect) -> (u16, u16) {
@@ -575,8 +618,7 @@ fn apply_layout(session_id: u32, session: &mut Session, events: &broadcast::Send
     for (pane_id, rect) in session.layout.rects() {
         let (cols, rows) = pane_size(session, &rect);
         if let Some(sender) = session.panes.get(&pane_id) {
-            // try_send: never block while holding the sessions lock.
-            let _ = sender.try_send(Cmd::Resize(cols, rows));
+            send_or_queue(sender, Cmd::Resize(cols, rows));
         }
     }
     let _ = events.send(Event::Layout {
@@ -1129,7 +1171,7 @@ async fn dispatch(
             let session_id = session_of(&map, pane_id)?;
             let session = map.get_mut(&session_id)?;
             if let Some(sender) = session.panes.remove(&pane_id) {
-                let _ = sender.try_send(Cmd::Kill);
+                send_or_queue(&sender, Cmd::Kill);
             }
             let _ = session.layout.close(pane_id);
             if session.layout.is_empty() {
