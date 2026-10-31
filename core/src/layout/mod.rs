@@ -8,6 +8,8 @@
 
 use crate::error::{PgError, PgResult};
 
+mod restore;
+
 pub type PaneId = u32;
 pub type SplitId = u32;
 

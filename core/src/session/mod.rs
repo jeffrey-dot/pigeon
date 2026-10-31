@@ -6,6 +6,7 @@
 
 mod backlog;
 mod pane_meta;
+mod saved_state;
 mod session_state;
 mod size_policy;
 mod size_vote;
@@ -15,6 +16,8 @@ pub use backlog::Backlog;
 // (a client build) nothing in the library refers to them.
 #[cfg_attr(not(feature = "internals"), allow(unused_imports))]
 pub use pane_meta::PaneMeta;
+#[cfg_attr(not(feature = "internals"), allow(unused_imports))]
+pub use saved_state::{SavedPane, SavedSession, SavedState, MAX_SAVED_STATE, SAVED_STATE_VERSION};
 #[cfg_attr(not(feature = "internals"), allow(unused_imports))]
 pub use session_state::{empty_layout_message, SessionState};
 #[cfg_attr(not(feature = "internals"), allow(unused_imports))]
