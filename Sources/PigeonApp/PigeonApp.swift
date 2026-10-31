@@ -52,6 +52,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Hosts that send every pane's `status` without an attach (`status_all`, protocol §5):
     /// the sidebar then follows background sessions without joining their size vote.
     private var statusAllHosts: Set<String> = []
+    /// Per connected host: when it was last heard from (`Heartbeat`), ticked by `heartbeatTimer`.
+    private var heartbeats: [String: Heartbeat] = [:]
+    private var heartbeatTimer: Timer?
     private var recovering: [String: Int] = [:]
     private let hostAgent = HostAgent()
     /// Set by "Stop Session Host…" so the dropped socket is not taken for a crash.
@@ -508,6 +511,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         clients[host] = client
+        heartbeats[host] = Heartbeat(now: Date())
+        startHeartbeat()
         recovering[host] = 0
         // A reconnect keeps the screens on display; every pane drawn so far re-attaches,
         // asking only for what it missed.
@@ -525,9 +530,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshSidebar()
     }
 
+    /// A link that went silent gets a `ping`; one silent past the timeout is closed, which
+    /// runs the normal reconnect path (`onClose` → `hostLost`).
+    private func startHeartbeat() {
+        guard heartbeatTimer == nil else { return }
+        let timer = Timer(timeInterval: 5, repeats: true) { [weak self] _ in
+            self?.tickHeartbeats()
+        }
+        timer.tolerance = 1
+        RunLoop.main.add(timer, forMode: .common)
+        heartbeatTimer = timer
+    }
+
+    private func tickHeartbeats() {
+        let now = Date()
+        for host in Array(heartbeats.keys) {
+            guard var beat = heartbeats[host], let client = clients[host] else { continue }
+            let action = beat.tick(at: now)
+            heartbeats[host] = beat
+            switch action {
+            case .none:
+                break
+            case .ping:
+                guard let ping = Wire.make(PG_MSG_PING) else { break }
+                // Only echoed back; CBOR integers widen, so a u32 decodes as the host's u64.
+                Wire.set(ping, u32: "ts", UInt32(truncatingIfNeeded: Int(now.timeIntervalSince1970)))
+                client.send(ping)
+                Wire.free(ping)
+            case .dead:
+                debugLog("host \(host) silent for \(Int(Heartbeat.timeout))s: reconnecting")
+                heartbeats[host] = nil
+                client.close()
+                hostLost(host: host, "The connection to the session host stopped responding.")
+            }
+        }
+    }
+
     /// One host dropped: retry *that* host on its own budget, without touching the others.
     private func hostLost(host: String, _ reason: String) {
         clients[host] = nil
+        heartbeats[host] = nil
         if host == "local", stoppedByUser {
             stoppedByUser = false
             if host == activeHost {
@@ -646,6 +688,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func disconnect(host: String) {
         clients[host]?.close()
         clients[host] = nil
+        heartbeats[host] = nil
         remotes[host]?.close()
         remotes[host] = nil
         rowsByHost[host] = nil
@@ -1246,6 +1289,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Routes one host's message through the handlers, which read and write "the active
     /// host" state; the window itself only follows the visible host.
     private func handle(_ message: OpaquePointer, host: String) {
+        heartbeats[host]?.heard(at: Date())
         let visible = host == activeHost
         let previous = activeHost
         activeHost = host
