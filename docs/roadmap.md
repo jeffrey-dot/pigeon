@@ -27,9 +27,9 @@
 
 ### P1 终端基本功（“好用”的底线）
 
-1. **选择 + 复制粘贴**：拖选 / 双击选词 / 三击选行，⌘C/⌘V/⌘A，Edit 菜单；粘贴走 bracketed paste。
-2. **输入法**：`PaneView` 实现 `NSTextInputClient`（marked text、候选窗定位），中文/日文/emoji 面板可用；⌥ 作 Meta 可配置。
-3. **终端模式上 ABI**：快照/增量带 `modes`（DECCKM、鼠标上报、bracketed paste、焦点上报）；
+1. ✅ **选择 + 复制粘贴**：拖选 / 双击选词 / 三击选行，⌘C/⌘V/⌘A，Edit 菜单；粘贴走 bracketed paste。
+2. ✅ **输入法**：`PaneView` 实现 `NSTextInputClient`（marked text、候选窗定位），中文/日文/emoji 面板可用；⌥ 作 Meta 可配置。
+3. ✅ **终端模式上 ABI**：快照/增量带 `modes`（DECCKM、鼠标上报、bracketed paste、焦点上报）；
    客户端据此编码方向键、发 SGR 鼠标事件。
 4. **光标**：按 `shape` 画块/竖线/下划线，失焦时空心，可闪烁。
 5. **DIM 属性**、**方框字符程序绘制**（`─│┌┐└┘` 连成线）。

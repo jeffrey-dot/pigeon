@@ -60,13 +60,18 @@ extension PaneView {
                 Float(color.redComponent), Float(color.greenComponent),
                 Float(color.blueComponent), Float(color.alphaComponent) * 0.45)
         }
+        var shown = (cells: cells, cursor: cursor)
+        if let preedit, let overlay = preedit.overlay(cells: cells, cursor: cursor, cols: cols, rows: rows) {
+            shown = (overlay.cells, overlay.cursor)
+            dirty.mark(overlay.row)
+        }
         metal.layer.contentsScale = scale
         metal.layer.backgroundColor = CellPalette.color(palette.background).cgColor
         metal.post(GridFrame(
-            cells: cells,
+            cells: shown.cells,
             cols: cols,
             rows: rows,
-            cursor: cursor,
+            cursor: shown.cursor,
             palette: palette,
             metrics: CoreTextRenderer.gridMetrics(scale: scale),
             width: Int((bounds.width * scale).rounded()),

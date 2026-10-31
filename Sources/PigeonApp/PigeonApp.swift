@@ -119,6 +119,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = SidebarStore()
     private var state = SidebarState()
     private let hostsStore = HostsStore()
+    private let settingsStore = TerminalSettingsStore()
+    private lazy var settings = settingsStore.load()
     private var hosts = HostsState()
     /// Set while a remote probe runs, so the sidebar row says `connecting` rather than
     /// `offline` (docs/remote.md §4 asks for the status on the host, not only in a banner).
@@ -191,6 +193,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sidebar.onToggleSidebar = { [weak self] in self?.toggleSidebar(nil) }
 
         container = SplitContainerView(frame: frame)
+        container.optionAsMeta = settings.optionAsMeta
         container.onSplit = { [weak self] axis in self?.split(axis) }
         container.onClose = { [weak self] in self?.closeFocusedPane() }
         container.onFocus = { [weak self] pane in self?.focus(pane) }
@@ -335,6 +338,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         viewMenu.addItem(SplitContainerView.zoomMenuItem())
         viewMenu.addItem(withTitle: "Previous Pane", action: #selector(SplitContainerView.focusPrevious(_:)), keyEquivalent: "[")
         viewMenu.addItem(withTitle: "Next Pane", action: #selector(SplitContainerView.focusNext(_:)), keyEquivalent: "]")
+        viewMenu.addItem(.separator())
+        let meta = NSMenuItem(
+            title: "Use Option as Meta Key", action: #selector(toggleOptionAsMeta(_:)), keyEquivalent: "")
+        meta.target = self
+        meta.state = settings.optionAsMeta ? .on : .off
+        viewMenu.addItem(meta)
         viewItem.submenu = viewMenu
 
         let sessionItem = NSMenuItem()
@@ -1193,6 +1202,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         debugLog("appearance -> \(mode.rawValue)")
         // No explicit send here: the `effectiveAppearance` observer fires on this change too,
         // and sending twice would just duplicate the message.
+    }
+
+    @objc private func toggleOptionAsMeta(_ sender: NSMenuItem) {
+        settings.optionAsMeta.toggle()
+        settingsStore.save(settings)
+        container.optionAsMeta = settings.optionAsMeta
+        sender.state = settings.optionAsMeta ? .on : .off
     }
 
     @objc private func toggleSidebar(_ sender: Any?) {

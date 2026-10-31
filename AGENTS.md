@@ -3,7 +3,7 @@
 给编码 agent 的工作说明。人看的部分在 `README.md`，产品/架构在设计文档里（见 §11）。
 **当前状态：M2 与 M4 已落地**——`core/`（VT / OSC 7501 / 协议 / 布局 / C ABI）、`pigeon-host`（多 pane、状态流、
 `--stdio`/`--proxy` 远端传输）、AppKit 客户端（分屏、滚动回看、zoom、侧栏、未读/needs-you、远端自动安装与三档对接）；
-IME 仍是后续里程碑。验收记录见 `docs/m2-checklist.md`、`docs/m3-checklist.md`、`docs/m4-checklist.md`。
+输入法（`NSTextInputClient`，preedit 在客户端画，提交后才发给宿主）已接入。验收记录见 `docs/m2-checklist.md`、`docs/m3-checklist.md`、`docs/m4-checklist.md`。
 
 ## 1. 项目是什么
 

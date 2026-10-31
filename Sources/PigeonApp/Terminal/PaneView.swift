@@ -3,7 +3,7 @@ import PigeonCore
 
 /// The single terminal pane: shows a grid snapshot, sends keys, reports resizes.
 final class PaneView: NSView {
-    struct Cell: Sendable {
+    struct Cell: Equatable, Sendable {
         var codepoint: UInt32
         var attrs: UInt8
         var fg: UInt32
@@ -13,7 +13,7 @@ final class PaneView: NSView {
         static let blank = Cell(codepoint: 32, attrs: 0, fg: 0, bg: 0, width: 1)
     }
 
-    struct Cursor: Sendable {
+    struct Cursor: Equatable, Sendable {
         var x: Int
         var y: Int
         var visible: Bool
@@ -53,6 +53,12 @@ final class PaneView: NSView {
     /// The drag in progress or last made; `selectionActive` once it covers any text.
     var selection: TerminalSelection?
     var selectionActive = false
+    /// What the input method is composing, drawn at the cursor until it commits.
+    var preedit: Preedit?
+    /// ⌥ as Meta (`TerminalSettings.optionAsMeta`); off lets ⌥ compose characters.
+    var optionAsMeta = true
+    /// The key being handed to the input method, for `doCommand(by:)` to encode.
+    var pendingKeyEvent: NSEvent?
     var onResize: ((UInt16, UInt16) -> Void)?
     private var reported: (UInt16, UInt16) = (0, 0)
 
@@ -360,70 +366,20 @@ final class PaneView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 116, page(1) { return }
-        if event.keyCode == 121, page(-1) { return }
+        if event.keyCode == 116, !hasMarkedText(), page(1) { return }
+        if event.keyCode == 121, !hasMarkedText(), page(-1) { return }
         guard let stroke = KeyStroke(event) else {
             super.keyDown(with: event)
             return
         }
+        if routesThroughInputMethod(event, stroke: stroke) {
+            pendingKeyEvent = event
+            interpretKeyEvents([event])
+            pendingKeyEvent = nil
+            return
+        }
         guard let bytes = KeyEncoder.encode(stroke, appCursor: modes & TerminalModes.appCursor != 0)
         else { return }
-        clearSelection()
-        // Typing while scrolled back snaps to the live screen, like every terminal.
-        onScrollToBottom?()
-        onInput?(bytes)
-    }
-}
-
-extension KeyStroke {
-    /// Maps an AppKit event onto the pure [`KeyStroke`] model.
-    init?(_ event: NSEvent) {
-        let modifiers = event.modifierFlags
-        let control = modifiers.contains(.control)
-        let option = modifiers.contains(.option)
-        let shift = modifiers.contains(.shift)
-        let command = modifiers.contains(.command)
-
-        let key: KeyStroke.Key
-        switch event.keyCode {
-        case 36, 76: key = .enter
-        case 48: key = .tab
-        case 51: key = .backspace
-        case 53: key = .escape
-        case 117: key = .delete
-        case 123: key = .left
-        case 124: key = .right
-        case 125: key = .down
-        case 126: key = .up
-        case 115: key = .home
-        case 119: key = .end
-        case 116: key = .pageUp
-        case 121: key = .pageDown
-        case 122: key = .function(1)
-        case 120: key = .function(2)
-        case 99: key = .function(3)
-        case 118: key = .function(4)
-        case 96: key = .function(5)
-        case 97: key = .function(6)
-        case 98: key = .function(7)
-        case 100: key = .function(8)
-        case 101: key = .function(9)
-        case 109: key = .function(10)
-        case 103: key = .function(11)
-        case 111: key = .function(12)
-        default:
-            guard let characters = event.charactersIgnoringModifiers,
-                  let first = characters.first
-            else { return nil }
-            key = .character(first)
-        }
-
-        self.init(
-            key: key,
-            control: control,
-            option: option,
-            shift: shift,
-            command: command
-        )
+        sendBytes(bytes)
     }
 }

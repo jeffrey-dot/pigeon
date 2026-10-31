@@ -54,9 +54,15 @@ final class SplitContainerView: NSView {
         needsDisplay = true
     }
 
+    /// ⌥ as Meta for every pane, existing and future (`TerminalSettings.optionAsMeta`).
+    var optionAsMeta = true {
+        didSet { for pane in panes.values { pane.optionAsMeta = optionAsMeta } }
+    }
+
     private func makePane(_ id: UInt32) -> PaneView {
         let view = PaneView(frame: .zero)
         view.paneID = id
+        view.optionAsMeta = optionAsMeta
         view.onInput = { [weak self] bytes in self?.onPaneInput?(id, bytes) }
         view.onPaste = { [weak self] text in self?.onPanePaste?(id, text) }
         view.onResize = { [weak self] cols, rows in self?.onPaneResize?(id, cols, rows) }
