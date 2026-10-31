@@ -33,6 +33,8 @@ public struct SidebarSession: Equatable {
     public var clients: Int
     /// The machine this session lives on (`local` for the socket next to us).
     public var host: String
+    /// The agent's own report: name, task or question, and when it entered its state.
+    public var agent: AgentInfo
 
 
     public init(
@@ -47,7 +49,8 @@ public struct SidebarSession: Equatable {
         reported: Bool = false,
         sizeSource: String = "",
         clients: Int = 1,
-        host: String = "local"
+        host: String = "local",
+        agent: AgentInfo = .none
     ) {
         self.id = id
         self.title = title
@@ -61,6 +64,7 @@ public struct SidebarSession: Equatable {
         self.sizeSource = sizeSource
         self.clients = clients
         self.host = host
+        self.agent = agent
     }
 }
 
@@ -206,6 +210,39 @@ public enum SidebarModel {
             }
         }
         return nil
+    }
+
+    /// The row's second line: what the agent is doing or what it is waiting for. Only live
+    /// states get one, so a quiet sidebar stays one line per session; `nil` = single line.
+    public static func detailLine(for session: SidebarSession) -> String? {
+        let text = session.agent.message.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch session.status {
+        case .blocked:
+            if !text.isEmpty { return text }
+            return session.agent.kind.isEmpty ? "Waiting for you" : "Waiting · \(session.agent.kind)"
+        case .working:
+            return text.isEmpty ? nil : text
+        case .error:
+            return text.isEmpty ? nil : text
+        case .done, .idle:
+            return nil
+        }
+    }
+
+    /// The card header's state: `Needs you · 2m · Run tests?`; blank when the pane never
+    /// reported, because there is no state to describe.
+    public static func headerBadge(for session: SidebarSession, now: Date = Date()) -> String {
+        guard session.reported, session.status != .idle else { return "" }
+        let base = subtitle(status: session.status, since: session.lastSeen, now: now)
+        guard let line = detailLine(for: session) else { return base }
+        return "\(base) · \(line)"
+    }
+
+    /// The row's name: what the user called it, else the agent that reported, else the program.
+    public static func rowTitle(for session: SidebarSession) -> String {
+        if session.title != session.app, !session.title.isEmpty { return session.title }
+        if !session.agent.app.isEmpty { return session.agent.app }
+        return session.app
     }
 
     /// Whether closing a session left nothing to show: no session on any connected machine,

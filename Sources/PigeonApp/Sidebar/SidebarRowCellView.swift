@@ -10,7 +10,12 @@ final class SidebarRowCellView: NSTableCellView {
     private let glyph = NSImageView()
     private let badge = NSImageView()
     private let title = NSTextField(labelWithString: "")
+    /// The agent's task or question, under the title; hidden for a one-line row.
+    private let detail = NSTextField(labelWithString: "")
     private let age = NSTextField(labelWithString: "")
+    /// Title centred alone, or lifted to make room for `detail`.
+    private var titleCentered: NSLayoutConstraint!
+    private var titleRaised: NSLayoutConstraint!
     private let close = NSButton()
     private var tracking: NSTrackingArea?
 
@@ -37,12 +42,25 @@ final class SidebarRowCellView: NSTableCellView {
         glyph.contentTintColor = NSColor.black.withAlphaComponent(0.72)
 
         let unread = session.unread > 0
-        title.stringValue = session.title
+        title.stringValue = SidebarModel.rowTitle(for: session)
         title.font = .systemFont(ofSize: SidebarMetrics.rowTitleSize, weight: unread ? .semibold : .regular)
         title.textColor = SidebarTheme.ink
         age.stringValue = SidebarModel.ageText(for: session)
         age.font = .systemFont(ofSize: SidebarMetrics.rowTimeSize)
         age.textColor = session.status == .blocked ? SidebarTheme.needsAccent : SidebarTheme.gray
+
+        // Program-controlled text: a plain label, one line, never parsed (AGENTS.md §8).
+        if let line = SidebarModel.detailLine(for: session) {
+            detail.stringValue = line
+            detail.textColor = session.status == .blocked ? SidebarTheme.needsAccent : SidebarTheme.gray
+            detail.isHidden = false
+            titleCentered.isActive = false
+            titleRaised.isActive = true
+        } else {
+            detail.isHidden = true
+            titleRaised.isActive = false
+            titleCentered.isActive = true
+        }
 
         // Status on the circle's corner, the way harp draws it; no state → no badge.
         if let symbol = SidebarModel.statusSymbol(for: session) {
@@ -82,6 +100,12 @@ final class SidebarRowCellView: NSTableCellView {
             view.imageScaling = .scaleProportionallyDown
         }
         addSubview(title)
+        addSubview(detail)
+        detail.font = .systemFont(ofSize: SidebarMetrics.rowDetailSize)
+        detail.lineBreakMode = .byTruncatingTail
+        detail.maximumNumberOfLines = 1
+        detail.cell?.truncatesLastVisibleLine = true
+        title.lineBreakMode = .byTruncatingTail
         addSubview(age)
         addSubview(close)
 
@@ -94,11 +118,14 @@ final class SidebarRowCellView: NSTableCellView {
         close.layer?.cornerRadius = SidebarMetrics.rowCloseRadius
         close.layer?.backgroundColor = SidebarTheme.hover.cgColor
 
-        for view in [circle, glyph, badge, title, age, close] {
+        for view in [circle, glyph, badge, title, detail, age, close] {
             view.translatesAutoresizingMaskIntoConstraints = false
         }
         let leading = SidebarMetrics.listSidePadding + SidebarMetrics.rowInsetLeft
         let trailing = SidebarMetrics.listSidePadding + SidebarMetrics.rowInsetRight
+        titleCentered = title.centerYAnchor.constraint(equalTo: centerYAnchor)
+        titleRaised = title.bottomAnchor.constraint(equalTo: centerYAnchor, constant: 1)
+        titleCentered.isActive = true
         NSLayoutConstraint.activate([
             circle.leadingAnchor.constraint(equalTo: leadingAnchor, constant: leading),
             circle.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -115,8 +142,10 @@ final class SidebarRowCellView: NSTableCellView {
             badge.heightAnchor.constraint(equalToConstant: SidebarMetrics.statusBadgeSize),
             title.leadingAnchor.constraint(
                 equalTo: circle.trailingAnchor, constant: SidebarMetrics.rowIconGap),
-            title.centerYAnchor.constraint(equalTo: centerYAnchor),
             title.trailingAnchor.constraint(lessThanOrEqualTo: age.leadingAnchor, constant: -6),
+            detail.leadingAnchor.constraint(equalTo: title.leadingAnchor),
+            detail.topAnchor.constraint(equalTo: centerYAnchor, constant: 1),
+            detail.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -trailing),
             age.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -trailing),
             age.centerYAnchor.constraint(equalTo: centerYAnchor),
             close.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -trailing),

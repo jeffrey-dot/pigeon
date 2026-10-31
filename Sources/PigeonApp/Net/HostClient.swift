@@ -75,13 +75,36 @@ final class HostClient {
             NSLog("pigeon: refusing to send an incomplete message type=\(Wire.type(message).rawValue)")
             return
         }
-        frame.withUnsafeBytes { raw in
+        guard !Self.writeAll(writeFD, frame) else { return }
+        // A frame that did not go out whole leaves the stream torn: drop the connection
+        // so the reconnect path takes over, instead of sending the rest of a frame later.
+        NSLog("pigeon: write failed (\(String(cString: strerror(errno)))); closing")
+        onClose?()
+        close()
+    }
+
+    /// Writes every byte, retrying interrupted and would-block writes. `false` on a real
+    /// error (the peer is gone). SIGPIPE is ignored process-wide (`main.swift`), so a dead
+    /// peer shows up here as `EPIPE` instead of killing the app.
+    static func writeAll(_ fd: Int32, _ bytes: Data) -> Bool {
+        bytes.withUnsafeBytes { raw -> Bool in
+            guard let base = raw.baseAddress else { return true }
             var offset = 0
             while offset < raw.count {
-                let written = Darwin.write(writeFD, raw.baseAddress!.advanced(by: offset), raw.count - offset)
-                if written <= 0 { break }
-                offset += written
+                let written = Darwin.write(fd, base.advanced(by: offset), raw.count - offset)
+                if written > 0 {
+                    offset += written
+                    continue
+                }
+                if written < 0, errno == EINTR { continue }
+                if written < 0, errno == EAGAIN {
+                    var poller = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+                    _ = poll(&poller, 1, 1000)
+                    continue
+                }
+                return false
             }
+            return true
         }
     }
 

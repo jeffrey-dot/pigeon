@@ -23,6 +23,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         /// The user's group, fixed when the session first appeared (`Grouping.pinnedGroup`):
         /// a `cd` later must not reshuffle the sidebar.
         var group: String = ""
+        /// The agent's own report (name, task, since when), from the last `status`.
+        var agent: AgentInfo = .none
     }
 
     private var window: NSWindow!
@@ -121,6 +123,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Set while a remote probe runs, so the sidebar row says `connecting` rather than
     /// `offline` (docs/remote.md §4 asks for the status on the host, not only in a banner).
     private var connectingHost: String?
+    /// The visible host while a background host's message is being handled (`activeHost`
+    /// then points at the background one). Sidebar redraws wait until it is restored.
+    private var swappedFrom: String?
+    private var sidebarDirty = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // `PIGEON_APPEARANCE=light|dark|system` pins the app's appearance for the screenshot
@@ -499,9 +505,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             refreshSidebar()
             return
         }
-        if host == activeHost, let refused = refusedReason {
+        if let refused = refusedReason {
+            // Retrying a refused handshake only repeats it; say why and stop.
             refusedReason = nil
-            showStopped(refused)
+            if host == activeHost { showStopped(refused) }
+            refreshSidebar()
             return
         }
         recovering[host] = 0
@@ -869,18 +877,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func markRead(_ id: Int) {
         guard let (host, session) = splitRowId(id) else { return }
+        let previous = activeHost
         activeHost = host
+        defer { activeHost = previous }
         guard var row = rows[session] else { return }
         row.unread = 0
-        rows[id] = row
-        state.unread[String(id)] = 0
+        rows[session] = row
+        state.unread[unreadKey(host: host, session: session)] = 0
         store.save(state)
         sendAck(row.activePane, row.seq)
         refreshSidebar()
     }
 
     private func rename(_ id: Int, _ name: String) {
-        state.renamed[String(id)] = name
+        guard let (host, session) = splitRowId(id) else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = unreadKey(host: host, session: session)
+        // An empty name gives the row its program name back.
+        state.renamed[key] = trimmed.isEmpty ? nil : trimmed
         store.save(state)
         refreshSidebar()
     }
@@ -1065,7 +1079,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 sessions.append(
                     SidebarSession(
                         id: rowId(host: key, session: row.id),
-                        title: row.app,
+                        title: state.renamed[unreadKey(host: key, session: row.id)] ?? row.app,
                         group: row.group,
                         status: row.status,
                         unread: row.unread,
@@ -1075,7 +1089,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         reported: row.seq > 0,
                         sizeSource: row.sizeSource,
                         clients: row.clients,
-                        host: key
+                        host: key,
+                        agent: row.agent
                     ))
             }
         }
@@ -1095,6 +1110,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var localMachineName: String = Host.current().localizedName ?? ""
 
     private func refreshSidebar() {
+        // Inside a background host's message the active host is swapped; draw afterwards.
+        if swappedFrom != nil {
+            sidebarDirty = true
+            return
+        }
         let raw = SidebarModel.sections(sidebarSessions(), order: state.order)
         let sections = raw.map { section in
             // The heading is the user's group name; it must not gain markers or directory names
@@ -1134,13 +1154,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let cwd = row.cwd.isEmpty ? "" : row.cwd.replacingOccurrences(of: home, with: "~")
+        let session = sidebarSessions().first { $0.id == rowId(host: activeHost, session: row.id) }
         header.update(
-            title: row.app,
+            title: session.map(SidebarModel.rowTitle(for:)) ?? row.app,
             cwd: cwd,
             // No OSC 7501 record means no state to report: leave the badge blank.
-            badge: row.seq > 0
-                ? SidebarModel.subtitle(status: row.status, since: row.lastSeen)
-                : ""
+            badge: session.map { SidebarModel.headerBadge(for: $0) } ?? ""
         )
     }
 
@@ -1173,8 +1192,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let visible = host == activeHost
         let previous = activeHost
         activeHost = host
-        defer { activeHost = previous }
+        swappedFrom = visible ? nil : previous
         handleActive(message, visible: visible)
+        activeHost = previous
+        swappedFrom = nil
+        // Drawn only once the visible host is back: the sidebar selection and the header
+        // describe what the window shows, never a background machine's state.
+        if sidebarDirty {
+            sidebarDirty = false
+            refreshSidebar()
+        }
     }
 
     private func handleActive(_ message: OpaquePointer, visible: Bool) {
@@ -1245,18 +1272,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             refreshSidebar()
         case PG_MSG_PANE_EXITED:
             // The shell is gone (`exit`, Ctrl-D, a crash). The host keeps an exited pane until
-            // `close_pane`, so dropping the row locally is not enough — closing the session is
-            // what makes the host forget it, otherwise the next `sessions` refresh re-adds it.
+            // `close_pane`; closing just that pane lets its split siblings keep running, and
+            // the host drops the session itself once its last pane is gone.
             let pane = Wire.u32(message, "pane_id")
-            guard let id = rows.first(where: { $0.value.panes.contains(pane) })?.key else { break }
+            guard let id = rows.first(where: { $0.value.panes.contains(pane) })?.key,
+                  let row = rows[id]
+            else { break }
+            if row.panes.count > 1 {
+                debugLog("pane exited pane=\(pane) -> closing that pane of session \(id)")
+                sendClosePane(pane)
+                break
+            }
             debugLog("pane exited pane=\(pane) -> closing session \(id)")
-            // `id` is the host's own session number; `closeSession(_:)` wants a sidebar id.
             closeSession(host: activeHost, session: id)
         case PG_MSG_HELLO_ERROR:
             // Retrying a refused handshake only repeats it, so stop and explain.
             refusedReason =
                 "The host refused this client (\(Wire.string(message, "reason")): \(Wire.string(message, "detail")))."
+            // `close()` is the quiet hang-up (no `onClose`), so report the refusal here.
             client?.close()
+            let host = activeHost
+            DispatchQueue.main.async { [weak self] in
+                self?.hostLost(host: host, "The host refused this client.")
+            }
         case PG_MSG_ERROR:
             NSLog("pigeon: \(Wire.string(message, "code")): \(Wire.string(message, "detail"))")
         default:
@@ -1317,7 +1355,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 group: Grouping.pinnedGroup(
                     existing: previous?.group,
                     cwd: Wire.string(info.cwd),
-                    gitRoot: GitRoot.find(cwd: Wire.string(info.cwd)))
+                    gitRoot: GitRoot.find(cwd: Wire.string(info.cwd))),
+                agent: previous?.agent ?? .none
             )
         }
         rows = updated
@@ -1531,15 +1570,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             row.status = status
         }
         row.seq = Wire.u32(message, "seq")
-        row.lastSeen = Date()
+        row.agent = AgentInfo(message: message)
+        row.lastSeen = row.agent.since
+        // Only the session on screen counts as seen: a background host's own selection is
+        // not something the user is looking at.
+        let onScreen = swappedFrom == nil && selectedSession == id
         // `docs/ui.md` §5: only done/error become unread; blocked is its own orange mark.
-        if selectedSession != id, row.status == .done || row.status == .error {
+        if !onScreen, row.status == .done || row.status == .error {
             row.unread += 1
-            state.unread[String(id)] = row.unread
+            state.unread[unreadKey(host: activeHost, session: id)] = row.unread
             store.save(state)
         }
         rows[id] = row
-        if selectedSession == id {
+        if onScreen, row.status == .done || row.status == .error {
             sendAck(row.activePane, row.seq)
         }
         refreshSidebar()

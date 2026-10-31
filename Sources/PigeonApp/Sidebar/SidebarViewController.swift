@@ -206,8 +206,10 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
             return SidebarMetrics.machineHeaderHeight + (row == 0 ? 0 : SidebarMetrics.machineGap)
         case .group:
             return SidebarMetrics.sectionHeaderHeight + SidebarMetrics.sectionGap
-        case .session:
-            return SidebarMetrics.rowHeight
+        case let .session(session):
+            return SidebarModel.detailLine(for: session) == nil
+                ? SidebarMetrics.rowHeight
+                : SidebarMetrics.rowHeightWithDetail
         }
     }
 

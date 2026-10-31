@@ -17,6 +17,9 @@ enum SidebarMetrics {
     static let rowGap: CGFloat = 1
 
     static let rowHeight: CGFloat = 30
+    /// A row whose agent says what it is doing gets a second, smaller line.
+    static let rowHeightWithDetail: CGFloat = 44
+    static let rowDetailSize: CGFloat = 11
     static let rowRadius: CGFloat = 8
     static let rowInsetLeft: CGFloat = 12
     static let rowInsetRight: CGFloat = 8
