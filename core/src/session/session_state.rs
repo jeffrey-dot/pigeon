@@ -40,6 +40,36 @@ impl<P> SessionState<P> {
         }
     }
 
+    /// A session around an existing layout (a restored one); `shell` as in `new`.
+    pub fn from_parts(
+        layout: Layout,
+        panes: HashMap<u32, P>,
+        shell: &str,
+        cwd: String,
+        cols: u16,
+        rows: u16,
+    ) -> Self {
+        Self {
+            layout,
+            panes,
+            vote: SizeVote::default(),
+            shell: shell_label(shell),
+            cwd,
+            cols,
+            rows,
+        }
+    }
+
+    /// The cwd the session was created with.
+    pub fn cwd(&self) -> &str {
+        &self.cwd
+    }
+
+    /// The shell's basename.
+    pub fn shell(&self) -> &str {
+        &self.shell
+    }
+
     /// The session box in cells.
     pub fn size(&self) -> (u16, u16) {
         (self.cols, self.rows)

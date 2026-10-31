@@ -31,6 +31,11 @@ enum SessionReducer {
         case saveUnread(SessionRef, Int)
     }
 
+    /// `pane_exited.code` of a pane the host restored from its state file (protocol §3.2).
+    static let restoredExitCode: Int32 = -1
+
+    static func isRestored(exitCode: Int32) -> Bool { exitCode == restoredExitCode }
+
     /// Applies a `status`. `onScreen`: the user is looking at this host's selected session.
     /// Only `done`/`error` count as unread or get acked (`docs/ui.md` §5); `working` and
     /// `blocked` are the agent's live state and stay until the host clears them.
@@ -88,7 +93,8 @@ enum SessionReducer {
                 // Only a new session asks for its git root: the group is pinned after that.
                 group: old.map(\.group).flatMap { $0.isEmpty ? nil : $0 }
                     ?? Grouping.pinnedGroup(existing: nil, cwd: item.cwd, gitRoot: gitRoot(item.cwd)),
-                agent: old?.agent ?? .none)
+                agent: old?.agent ?? .none,
+                restored: (old?.restored ?? []).intersection(item.panes))
         }
         return updated
     }

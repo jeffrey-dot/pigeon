@@ -59,7 +59,7 @@
 | c→s | `unzoom` | `id: u32`, `pane_id: u32` | — | 取消放大 |
 | s→c | `layout` | `session_id: u32`, `tree: node` | `zoom: u32`, `focus: u32` | `node = {leaf: pane_id} \| {split: {id: u32, axis: "v"\|"h", ratio: f32, a: node, b: node}}`；`zoom` 是当前放大的 `pane_id`；`focus` 是宿主持有的焦点 pane（M1 新增，可选，旧客户端忽略） |
 | s→c | `size_state` | `pane_id: u32`, `cols: u16`, `rows: u16`, `source: str`, `clients: u8` | — | `source` ∈ `latest`/`smallest`/`locked`；客户端据此在侧栏标注当前尺寸来源 |
-| s→c | `pane_exited` | `pane_id: u32`, `code: i32` | — | 进程退出；pane 记录保留到 `close_pane` |
+| s→c | `pane_exited` | `pane_id: u32`, `code: i32` | — | 进程退出；pane 记录保留到 `close_pane`。`attach` 一个已经退出的 pane 时，快照后紧跟一条。`code = -1`：宿主重启后从状态文件恢复的 pane（只有最后一屏，没有进程，输入被忽略），客户端应保留它直到用户关闭 |
 
 ### 3.3 屏幕
 

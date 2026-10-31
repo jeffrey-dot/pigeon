@@ -12,10 +12,21 @@ use tokio::time::Instant;
 use crate::cli::Transport;
 use crate::client::handle_client;
 use crate::host_state::HostState;
+use crate::persist;
 
 /// Serves the socket forever, plus one stdio client with `Transport::Stdio`.
 pub async fn serve(socket: &Path, transport: Transport, host: HostState) -> Result<(), String> {
     let listener = bind_private(socket).await?;
+    // Only the host that owns the socket may read or write the state file next to it.
+    let state = persist::state_path(socket);
+    let restored = persist::restore(&host, &state).await;
+    if restored > 0 {
+        eprintln!(
+            "pigeon-host: restored {restored} session(s) from {}",
+            state.display()
+        );
+    }
+    persist::start(host.clone(), state);
     eprintln!("pigeon-host listening on {}", socket.display());
 
     if transport == Transport::Stdio {

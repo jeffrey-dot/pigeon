@@ -1159,7 +1159,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         sizeSource: row.sizeSource,
                         clients: row.clients,
                         host: key,
-                        agent: row.agent
+                        agent: row.agent,
+                        restored: !row.panes.isEmpty && row.restored.isSuperset(of: row.panes)
                     ))
             }
         }
@@ -1331,8 +1332,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // the host drops the session itself once its last pane is gone.
             let pane = Wire.u32(message, "pane_id")
             guard let id = rows.first(where: { $0.value.panes.contains(pane) })?.key,
-                  let row = rows[id]
+                  var row = rows[id]
             else { break }
+            // A pane restored from disk after a host restart (`docs/protocol.md` §3.2): its
+            // last screen stays up, read-only, until the user closes it. Only a live shell
+            // exiting closes the pane on its own.
+            if SessionReducer.isRestored(exitCode: Wire.i32(message, "code")) {
+                row.restored.insert(pane)
+                rows[id] = row
+                refreshSidebar()
+                break
+            }
             if row.panes.count > 1 {
                 debugLog("pane exited pane=\(pane) -> closing that pane of session \(id)")
                 sendClosePane(pane)

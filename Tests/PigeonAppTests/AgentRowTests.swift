@@ -73,3 +73,17 @@ final class StatusPulseTests: XCTestCase {
         XCTAssertFalse(SidebarModel.shouldPulse(from: .blocked, to: .working))
     }
 }
+
+final class RestoredSessionTests: XCTestCase {
+    func testARestoredSessionSaysSoInTheRowAndTheHeader() {
+        let session = SidebarSession(id: 1, title: "zsh", group: "w", status: .working, restored: true)
+        XCTAssertEqual(SidebarModel.detailLine(for: session), "Ended · restored after host restart")
+        XCTAssertTrue(SidebarModel.headerBadge(for: session).hasPrefix("Ended"))
+    }
+
+    func testOnlyTheRestoredExitCodeKeepsAPaneOpen() {
+        XCTAssertTrue(SessionReducer.isRestored(exitCode: -1))
+        XCTAssertFalse(SessionReducer.isRestored(exitCode: 0))
+        XCTAssertFalse(SessionReducer.isRestored(exitCode: 1))
+    }
+}

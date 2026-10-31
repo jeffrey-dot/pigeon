@@ -35,6 +35,9 @@ public struct SidebarSession: Equatable {
     public var host: String
     /// The agent's own report: name, task or question, and when it entered its state.
     public var agent: AgentInfo
+    /// Every pane was restored from disk after the host restarted: the screens are what was
+    /// there, the processes are gone.
+    public var restored: Bool
 
 
     public init(
@@ -50,7 +53,8 @@ public struct SidebarSession: Equatable {
         sizeSource: String = "",
         clients: Int = 1,
         host: String = "local",
-        agent: AgentInfo = .none
+        agent: AgentInfo = .none,
+        restored: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -65,6 +69,7 @@ public struct SidebarSession: Equatable {
         self.clients = clients
         self.host = host
         self.agent = agent
+        self.restored = restored
     }
 }
 
@@ -215,6 +220,8 @@ public enum SidebarModel {
     /// The row's second line: what the agent is doing or what it is waiting for. Only live
     /// states get one, so a quiet sidebar stays one line per session; `nil` = single line.
     public static func detailLine(for session: SidebarSession) -> String? {
+        // Said plainly, so a row from before a reboot is not mistaken for a live one.
+        if session.restored { return "Ended · restored after host restart" }
         let text = session.agent.message.trimmingCharacters(in: .whitespacesAndNewlines)
         switch session.status {
         case .blocked:
@@ -232,6 +239,7 @@ public enum SidebarModel {
     /// The card header's state: `Needs you · 2m · Run tests?`; blank when the pane never
     /// reported, because there is no state to describe.
     public static func headerBadge(for session: SidebarSession, now: Date = Date()) -> String {
+        if session.restored { return "Ended · restored after host restart · ⌘⇧W to close" }
         guard session.reported, session.status != .idle else { return "" }
         let base = subtitle(status: session.status, since: session.lastSeen, now: now)
         guard let line = detailLine(for: session) else { return base }

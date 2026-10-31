@@ -24,7 +24,7 @@ const SCROLLBACK: usize = 10_000;
 const FRAME: Duration = Duration::from_millis(16);
 
 /// Pane ids are unique for the whole process, not per session.
-static NEXT_PANE: AtomicU32 = AtomicU32::new(1);
+pub static NEXT_PANE: AtomicU32 = AtomicU32::new(1);
 
 type Master = Arc<StdMutex<Box<dyn MasterPty + Send>>>;
 

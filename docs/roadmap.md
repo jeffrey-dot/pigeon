@@ -48,21 +48,17 @@
 - 客户端主线程缓存字体度量和色板（现在每帧查 `NSFont(name:)` 和 16 次 `bestMatch`）。
 - 写 socket 移出主线程（串行队列 + 有界发件箱），慢 ssh 不再卡界面。
 
-### P4 结构重写（部分完成）
+### P4 结构重写 ✅
 
-- 客户端：每台主机一个 `HostConnection`（自带 rows/seq/焦点/重连状态机），`AppStore` 管选择与持久化状态，
-  侧栏 id 用 `SessionRef{host, session}`，取代 `activeHost` 来回切换和 `host * 100_000 + session` 编码。
-  消息处理写成纯 reducer，可单测。
+- 客户端：
   - ✅ `HostConnection`：11 张按主机分的表合成一个值，重连/换宿主进程的规则带单测。
-  - ⏳ `AppStore` / `SessionRef` / reducer 未做：`activeHost` 切换仍在；`rowId` 编码保持稳定（主机只追加不删除），
-    加“忘掉主机”之前必须先换成字符串键。
-- 宿主：`pigeon-host.rs` 拆成 cli / transport / client / dispatch / pane_actor；`Session` 与尺寸策略下沉到 `core/src/session/`；
-  每客户端出站队列（事件只编码一次，慢客户端只留每 pane 最新 delta，Layout/Status/Exited 不丢）。
-  - ✅ 拆成 `core/src/bin/pigeon-host/` 下 15 个文件（最大 309 行）；`SessionState`/`SizeVote`/`SizePolicy`/`PaneMeta` 进了库。
-  - ✅ 慢客户端在广播里落后（`Lagged`）时补发会话列表、布局、尺寸、状态、退出与快照，不再静默丢事件（有端到端测试）。
-  - ✅ 每客户端出站队列：每个连接拆成读、写两个 task，写 task 排空 `OutQueue`；广播事件只编码一次（`Arc<[u8]>`），
-    同一 pane 排着第二帧 delta 时合并成一帧发出时现取的 snapshot（`seq` 不跳号），控制消息不丢、保序；
-    队列超 64 MiB 断开该连接。慢客户端的内存只与它看的 pane 数成正比（有单测与端到端测试）。
+  - ✅ `SessionRef{host, session}` 取代 `host * 100_000 + session`；侧栏 id 由 `SessionRefs` 发放，持久化顺序存 key，旧格式加载时迁移。
+  - ✅ `SessionReducer`：`sessions` 合并与 `status` → 未读/ack 写成纯函数（输入状态，输出新状态 + 副作用），带单测。
+  - ✅ 六处手写的 `activeHost` 切换收进 `onHost(host) { }`，侧栏只在回到可见主机后重绘。
+- 宿主：
+  - ✅ 拆成 `core/src/bin/pigeon-host/` 下的模块；`SessionState`/`SizeVote`/`SizePolicy`/`PaneMeta` 进了库。
+  - ✅ 落后（`Lagged`）时补发当前状态，不丢 layout/status/exited。
+  - ✅ 每客户端出站队列：读写分离，事件只编码一次，慢客户端每 pane 只留一个待发屏幕更新（快照替换），64 MiB 上限。
 
 ### P5 视觉 ✅
 
@@ -71,13 +67,13 @@
 - 字体与字号可配置（`~/.config/pigeon/config.toml`），默认 SF Mono 13 / 行高 1.25；侧栏数字用等宽数字。
 - 动效：选中/状态变化 120ms ease-out。
 
-### P6 远端持久化增强（部分完成）
+### P6 远端持久化增强 ✅
 
 - ✅ 装在 `~/.pigeon/host/` 下的远端宿主用 `~/.pigeon/state/pigeon.sock`（0700），不依赖会在登出时被删的 `$XDG_RUNTIME_DIR`。
-- ⏸ 宿主定期把每 pane 的屏幕快照 + 元数据落盘；宿主重启后会话以“进程已结束”的只读屏幕恢复。
-  暂缓：现在 `pane_exited` 会关掉该 pane、最后一个会话关掉就退出 pigeon（用户要求的行为），恢复出来的会话会立刻被关掉。
-  要做得先定“已结束的 pane 保留屏幕、由用户关闭”的交互，再做落盘。
-- ✅ 心跳与空闲超时：客户端静默 15s 发 `ping`，45s 无应答按断线重连，半开的 ssh 连接不再永远挂着。
+- ✅ 宿主每 5s 把每个会话的布局 + 每 pane 的屏幕写到 socket 旁的 `<socket>.state`（CBOR、带版本、原子写、0600）；
+  重启后读回来：每个 pane 是一张“进程已结束”的只读屏幕（`pane_exited.code = -1`），客户端保留它、侧栏与头部标 `Ended · restored after host restart`，
+  用户关掉后下一次保存就不再带它。文件损坏/版本不对/前后不一致 → 整体不恢复，宿主照常服务。
+- ✅ 心跳与空闲超时：客户端静默 15s 发 `ping`，45s 无应答按断线重连。
 
 ## 不做
 

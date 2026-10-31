@@ -29,6 +29,8 @@ impl Drop for Host {
         let _ = self.child.kill();
         let _ = self.child.wait();
         let _ = std::fs::remove_file(&self.socket);
+        // The host saves its screens next to the socket (`persist`).
+        let _ = std::fs::remove_file(std::path::Path::new(&self.socket).with_extension("state"));
     }
 }
 
@@ -54,7 +56,17 @@ fn unique_socket() -> String {
 }
 
 fn start_host_with(program: &str) -> Host {
-    let socket = unique_socket();
+    start_host_on(&unique_socket(), program)
+}
+
+/// A quiet host on a given socket (the state-file tests prepare files next to it).
+fn start_host_with_socket(socket: &str) -> Host {
+    let quiet = script("#!/bin/sh\nexec env PS1= /bin/sh -i\n");
+    start_host_on(socket, quiet.to_str().expect("utf8"))
+}
+
+fn start_host_on(socket: &str, program: &str) -> Host {
+    let socket = socket.to_owned();
     let child = Command::new(env!("CARGO_BIN_EXE_pigeon-host"))
         .args(["--socket", &socket, "--shell", program])
         .stdout(Stdio::null())
@@ -654,6 +666,7 @@ fn proxy_mode_starts_a_host_when_none_is_running() {
         fn drop(&mut self) {
             let _ = Command::new("pkill").args(["-f", &self.0]).status();
             let _ = std::fs::remove_file(&self.0);
+            let _ = std::fs::remove_file(std::path::Path::new(&self.0).with_extension("state"));
         }
     }
     let _reap = Reap(socket.clone());
@@ -2675,4 +2688,147 @@ fn control_messages_keep_their_order_behind_a_stalled_socket() {
         matches!((working, blocked), (Some(w), Some(b)) if w < b),
         "{seen_states:?}"
     );
+}
+
+/// P6: a host that goes away (crash, reboot, upgrade) comes back showing every session's
+/// last screen. The processes are gone, so each restored pane reports `pane_exited` with
+/// code -1 and ignores input; the layout and the screens are what they were.
+#[test]
+fn a_restarted_host_shows_the_last_screens_as_ended_sessions() {
+    let _serial = one_at_a_time();
+    let quiet = script("#!/bin/sh\nexec env PS1= /bin/sh -i\n");
+    let socket = unique_socket();
+    let spawn = |socket: &str| {
+        Command::new(env!("CARGO_BIN_EXE_pigeon-host"))
+            .args(["--socket", socket, "--shell", quiet.to_str().expect("utf8")])
+            .env("PIGEON_SAVE_MS", "100")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn pigeon-host")
+    };
+    let wait_for_socket = |socket: &str| {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !std::path::Path::new(socket).exists() {
+            assert!(Instant::now() < deadline, "host never created its socket");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    };
+    let state = std::path::Path::new(&socket).with_extension("state");
+    let _ = std::fs::remove_file(&state);
+
+    let mut first = spawn(&socket);
+    wait_for_socket(&socket);
+    let mut client = Client::connect(&socket);
+    hello(&mut client);
+    let pane = attach_first(&mut client);
+    client.send(&Message::SplitPane {
+        id: 3,
+        pane_id: pane,
+        axis: proto::SplitAxis::Vertical,
+        ratio: 0.5,
+    });
+    client.wait_for(|m| {
+        matches!(
+            m,
+            Message::Layout {
+                tree: proto::Node::Split { .. },
+                ..
+            }
+        )
+    });
+    client.send(&Message::Keys {
+        pane_id: pane,
+        bytes: b"echo before-the-crash\r".to_vec(),
+    });
+    wait_for_pane_text(&mut client, pane, "before-the-crash");
+    // Two save periods, so the file has the echoed line.
+    std::thread::sleep(Duration::from_millis(400));
+    drop(client);
+    let _ = first.kill();
+    let _ = first.wait();
+    assert!(
+        state.exists(),
+        "the host saved its state next to the socket"
+    );
+    let _ = std::fs::remove_file(&socket);
+
+    let mut second = spawn(&socket);
+    wait_for_socket(&socket);
+    let mut client = Client::connect(&socket);
+    hello(&mut client);
+    let Message::Sessions { items } = client.wait_for(|m| matches!(m, Message::Sessions { .. }))
+    else {
+        unreachable!()
+    };
+    assert_eq!(items.len(), 1, "the session came back");
+    assert_eq!(items[0].panes.len(), 2, "with both halves of the split");
+    let restored = items[0].panes[0];
+    attach(&mut client, restored, None);
+    let screen =
+        client.wait_for(|m| matches!(m, Message::Snapshot { pane_id, .. } if *pane_id == restored));
+    assert!(
+        screen_text(&screen).contains("before-the-crash"),
+        "{}",
+        screen_text(&screen)
+    );
+    let exited = client
+        .wait_for(|m| matches!(m, Message::PaneExited { pane_id, .. } if *pane_id == restored));
+    assert!(matches!(exited, Message::PaneExited { code: -1, .. }));
+    let layout = client.wait_for(|m| matches!(m, Message::Layout { .. }));
+    assert!(matches!(
+        layout,
+        Message::Layout {
+            tree: proto::Node::Split { .. },
+            ..
+        }
+    ));
+
+    // Closing the restored panes ends the session for good, and the next save forgets it.
+    for pane in items[0].panes.clone() {
+        client.send(&Message::ClosePane {
+            id: 9,
+            pane_id: pane,
+        });
+    }
+    std::thread::sleep(Duration::from_millis(400));
+    let _ = second.kill();
+    let _ = second.wait();
+    let _ = std::fs::remove_file(&socket);
+    let mut third = spawn(&socket);
+    wait_for_socket(&socket);
+    let mut client = Client::connect(&socket);
+    hello(&mut client);
+    let Message::Sessions { items } = client.wait_for(|m| matches!(m, Message::Sessions { .. }))
+    else {
+        unreachable!()
+    };
+    assert!(
+        items.is_empty(),
+        "a closed restored session does not come back again"
+    );
+    let _ = third.kill();
+    let _ = third.wait();
+    let _ = std::fs::remove_file(&socket);
+    let _ = std::fs::remove_file(&state);
+}
+
+/// A state file that is not one (garbage, a crash mid-write of another build) restores
+/// nothing and the host still serves.
+#[test]
+fn a_corrupt_state_file_restores_nothing_and_the_host_still_serves() {
+    let _serial = one_at_a_time();
+    let socket = unique_socket();
+    let state = std::path::Path::new(&socket).with_extension("state");
+    std::fs::write(&state, b"\xa1\x67version\x01 truncated").expect("write");
+    let host = start_host_with_socket(&socket);
+    let mut client = Client::connect(&host.socket);
+    hello(&mut client);
+    let Message::Sessions { items } = client.wait_for(|m| matches!(m, Message::Sessions { .. }))
+    else {
+        unreachable!()
+    };
+    assert!(items.is_empty());
+    let _ = attach_first(&mut client);
+    let _ = std::fs::remove_file(&state);
 }

@@ -12,12 +12,14 @@ mod dispatch;
 mod dispatch_layout;
 mod dispatch_pane;
 mod event;
+mod frozen_pane;
 mod handshake;
 mod host_state;
 mod out_queue;
 mod outbound;
 mod pane_actor;
 mod pane_query;
+mod persist;
 mod resync;
 mod transport;
 

@@ -107,6 +107,12 @@ pub async fn attach(
             state.outbox.push(status);
         }
     }
+    // A pane whose process already ended (or that was restored from disk after a host
+    // restart) says so right after its screen: the `Exited` event went out before this
+    // client was watching.
+    if let Some(code) = host.exit_code(pane_id) {
+        state.outbox.push(Message::PaneExited { pane_id, code });
+    }
     snapshot
 }
 
