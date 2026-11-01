@@ -38,7 +38,7 @@ pub async fn restore(host: &HostState, path: &Path) -> usize {
     let saved = match SavedState::decode(&bytes) {
         Ok(saved) => saved,
         Err(error) => {
-            eprintln!("pigeon-host: not restoring {path:?}: {error:?}");
+            eprintln!("pigeon-server: not restoring {path:?}: {error:?}");
             return 0;
         }
     };
@@ -164,7 +164,7 @@ pub fn start(host: HostState, path: PathBuf) {
         loop {
             ticker.tick().await;
             if let Err(error) = save(&host, &path).await {
-                eprintln!("pigeon-host: {error}");
+                eprintln!("pigeon-server: {error}");
             }
         }
     });

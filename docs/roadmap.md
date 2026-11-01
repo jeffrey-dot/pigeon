@@ -6,7 +6,7 @@
 ## 结论
 
 架构方向是对的，**不推倒重写**：Rust 内核（`term/`、`status/`、`proto/`、`layout/`、`backlog`）和 Metal 渲染器都保留。
-要重写的是两块胶水：客户端的 `PigeonApp.swift`（1575 行，所有 bug 都在这里）和宿主的 `pigeon-host.rs`（1551 行）。
+要重写的是两块胶水：客户端的 `PigeonApp.swift`（1575 行，所有 bug 都在这里）和宿主的 `pigeon-server.rs`（1551 行）。
 真正拖后腿的不是架构，而是：**核心卖点（agent 状态）实际上看不到**，以及**终端最基本的能力缺失**（复制粘贴、输入法、鼠标）。
 
 ## 阶段与顺序
@@ -56,7 +56,7 @@
   - ✅ `SessionReducer`：`sessions` 合并与 `status` → 未读/ack 写成纯函数（输入状态，输出新状态 + 副作用），带单测。
   - ✅ 六处手写的 `activeHost` 切换收进 `onHost(host) { }`，侧栏只在回到可见主机后重绘。
 - 宿主：
-  - ✅ 拆成 `core/src/bin/pigeon-host/` 下的模块；`SessionState`/`SizeVote`/`SizePolicy`/`PaneMeta` 进了库。
+  - ✅ 拆成 `core/src/bin/pigeon-server/` 下的模块；`SessionState`/`SizeVote`/`SizePolicy`/`PaneMeta` 进了库。
   - ✅ 落后（`Lagged`）时补发当前状态，不丢 layout/status/exited。
   - ✅ 每客户端出站队列：读写分离，事件只编码一次，慢客户端每 pane 只留一个待发屏幕更新（快照替换），64 MiB 上限。
 
@@ -69,7 +69,7 @@
 
 ### P6 远端持久化增强 ✅
 
-- ✅ 装在 `~/.pigeon/host/` 下的远端宿主用 `~/.pigeon/state/pigeon.sock`（0700），不依赖会在登出时被删的 `$XDG_RUNTIME_DIR`。
+- ✅ 装在 `~/.pigeon/server/` 下的远端宿主用 `~/.pigeon/state/pigeon.sock`（0700），不依赖会在登出时被删的 `$XDG_RUNTIME_DIR`。
 - ✅ 宿主每 5s 把每个会话的布局 + 每 pane 的屏幕写到 socket 旁的 `<socket>.state`（CBOR、带版本、原子写、0600）；
   重启后读回来：每个 pane 是一张“进程已结束”的只读屏幕（`pane_exited.code = -1`），客户端保留它、侧栏与头部标 `Ended · restored after host restart`，
   用户关掉后下一次保存就不再带它。文件损坏/版本不对/前后不一致 → 整体不恢复，宿主照常服务。

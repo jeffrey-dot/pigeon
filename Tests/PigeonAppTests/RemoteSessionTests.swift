@@ -43,7 +43,7 @@ final class RemoteSessionTests: XCTestCase {
                     return HostInstaller.Result(status: 0, output: "", error: "")
                 }
                 return HostInstaller.Result(
-                    status: 0, output: "/home/u/.pigeon/host/v/pigeon-host", error: "")
+                    status: 0, output: "/home/u/.pigeon/server/v/pigeon-server", error: "")
             }, hash: { _ in String(repeating: "a", count: 64) }),
             run: { script in
                 if script.contains("uname -sm") {
@@ -436,12 +436,12 @@ final class RemoteSessionTests: XCTestCase {
     /// Builds for the local host if a dev build exists, else the test says why it skipped.
     private func localHostBinary() throws -> URL {
         let candidates = [
-            "core/target/debug/pigeon-host",
-            "core/target/release/pigeon-host",
+            "core/target/debug/pigeon-server",
+            "core/target/release/pigeon-server",
         ].map { URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent($0) }
         for candidate in candidates where FileManager.default.isExecutableFile(atPath: candidate.path) {
             return candidate
         }
-        throw XCTSkip("build pigeon-host first (cargo build --bin pigeon-host)")
+        throw XCTSkip("build pigeon-server first (cargo build --bin pigeon-server)")
     }
 }

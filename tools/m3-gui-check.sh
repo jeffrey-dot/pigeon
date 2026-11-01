@@ -4,13 +4,13 @@
 # session that stays unread, a blocked one, Cmd-J, drag reorder, context menus, reopen.
 #
 # Needs Accessibility permission (System Events + cliclick). Build first:
-#   cargo build --release --bin pigeon-host && cargo build && swift build
+#   cargo build --release --bin pigeon-server && cargo build && swift build
 set -u
 export PATH="$HOME/.cargo/bin:$PATH"
 cd "$(dirname "$0")/.."
 
 APP=${APP:-.build/debug/pigeon}
-HOST=${HOST:-core/target/release/pigeon-host}
+HOST=${HOST:-core/target/release/pigeon-server}
 OUT=${OUT:-docs/images/m3}
 mkdir -p "$OUT"
 osa() { osascript "$@" >/dev/null 2>&1; }
@@ -98,7 +98,7 @@ printf '#!/bin/sh\nprintf "\\033]7501;state=blocked:kind=permission\\007"\nexec 
 chmod +x "$R/blocked.sh"
 cargo run --quiet --manifest-path core/Cargo.toml --example keys -- \
         --socket "$R/pigeon.sock" --new-session /tmp/pigeon/c --shell "$R/blocked.sh" >/dev/null 2>&1
-echo "sessions created: $(grep -c 'pigeon-host: <- new_session' "$R/host.log")"
+echo "sessions created: $(grep -c 'pigeon-server: <- new_session' "$R/host.log")"
 
 # --- light: full interaction pass ------------------------------------------------------
 launch light
@@ -132,11 +132,11 @@ echo "hot switch: appearance sent $sent_before -> $sent_after over 3 toggles"
 grep -o "appearance -> [a-z]*" "$R/app-light.log" | tail -3 | tr '\n' ' '
 echo
 
-before=$(grep -c 'pigeon-host: <- focus' "$R/host.log")
+before=$(grep -c 'pigeon-server: <- focus' "$R/host.log")
 key j "command down"
 sleep 1
-after=$(grep -c 'pigeon-host: <- focus' "$R/host.log")
-echo "Cmd-J focus messages: $before -> $after (ack: $(grep -c 'pigeon-host: <- ack_status' "$R/host.log"))"
+after=$(grep -c 'pigeon-server: <- focus' "$R/host.log")
+echo "Cmd-J focus messages: $before -> $after (ack: $(grep -c 'pigeon-server: <- ack_status' "$R/host.log"))"
 shoot "$OUT/jump-light.jpg"
 
 # The menu itself is the visual evidence; closing then goes through ⌘⇧W, which calls the
@@ -150,7 +150,7 @@ osa -e 'tell application "System Events" to key code 125' # Down
 sleep 0.3
 osa -e 'tell application "System Events" to key code 36' # Return
 sleep 2
-after=$(grep -c 'pigeon-host: <- close_pane' "$R/host.log")
+after=$(grep -c 'pigeon-server: <- close_pane' "$R/host.log")
 echo "menu Close Session: close_pane $before -> $after"
 
 cliclick rc:100,$(row_y 0)
@@ -161,7 +161,7 @@ sleep 1
 
 key t "command down"
 sleep 2
-echo "sessions after Cmd-T: $(grep -c 'pigeon-host: <- new_session' "$R/host.log")"
+echo "sessions after Cmd-T: $(grep -c 'pigeon-server: <- new_session' "$R/host.log")"
 
 # Drag reorder is not exercised here: AppKit refuses to start a drag session from
 # synthetic mouse events in this environment (the `drag start` debug line never fires, see

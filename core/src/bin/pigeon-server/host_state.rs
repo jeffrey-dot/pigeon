@@ -113,7 +113,7 @@ pub fn broadcast_size(session_id: u32, session: &Session, events: &broadcast::Se
     if clients > 1 && std::env::var_os("PIGEON_DEBUG").is_some() {
         let (cols, rows) = session.size();
         eprintln!(
-            "pigeon-host: size_state session={session_id} clients={clients} source={} box={cols}x{rows}",
+            "pigeon-server: size_state session={session_id} clients={clients} source={} box={cols}x{rows}",
             session.vote.policy().as_str(),
         );
     }

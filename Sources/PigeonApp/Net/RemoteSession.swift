@@ -4,7 +4,7 @@ import PigeonCore
 /// How this window reaches a remote machine (`docs/remote.md` §1).
 ///
 /// The three ways are probed from best to worst, and the window always says which one it got:
-/// - `proxy`: `ssh host pigeon-host --proxy` — the host runs on the far side, sessions outlive
+/// - `proxy`: `ssh host pigeon-server --proxy` — the host runs on the far side, sessions outlive
 ///   the window.
 /// - `forward`: `ssh -L <local sock>:<remote sock>` — same host, a different way in (needs
 ///   `AllowStreamLocalForwarding yes`).

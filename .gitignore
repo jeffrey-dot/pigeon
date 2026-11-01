@@ -9,9 +9,9 @@ core/target/
 DerivedData/
 
 # 构建产物
-pigeon-host
+pigeon-server
 # ...but not the host's sources, which live in a directory of the same name.
-!core/src/bin/pigeon-host/
+!core/src/bin/pigeon-server/
 *.p8
 *.dmg
 

@@ -208,7 +208,7 @@ fn wire_snapshot_with_a_short_row_is_refused() {
 fn a_hello_ack_says_which_features_the_host_offers() {
     let ack = Message::HelloAck {
         proto: PROTO_VERSION,
-        server: "pigeon-host test".into(),
+        server: "pigeon-server test".into(),
         features: vec!["delta".into(), "status_all".into()],
         host_id: "h".into(),
         client_id: 1,

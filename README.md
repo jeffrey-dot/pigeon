@@ -2,7 +2,7 @@
 
 一个原生终端：自带一个**隐形的后台会话进程**（关窗口任务继续跑，像 tmux，但不需要你配置任何服务），
 以及一等公民侧栏（agent inbox）。
-**M0 已可运行**：Rust 内核 + `pigeon-host` + AppKit 单 pane 客户端（关窗口进程不死、重开屏幕原样）。
+**M0 已可运行**：Rust 内核 + `pigeon-server` + AppKit 单 pane 客户端（关窗口进程不死、重开屏幕原样）。
 
 - [AGENTS.md](AGENTS.md) —— 给编码 agent 的工作说明：**模块划分**、风格、测试、不变量
 - [docs/m0-checklist.md](docs/m0-checklist.md) —— **M0 验收记录**：自动化结果、截图证据、未验项

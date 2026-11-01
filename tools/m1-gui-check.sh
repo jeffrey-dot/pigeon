@@ -3,12 +3,12 @@
 #
 # Needs Accessibility permission for the terminal that runs this script
 # (System Events + cliclick drive real input). Build first:
-#   cargo build --release --bin pigeon-host && cargo build && swift build
+#   cargo build --release --bin pigeon-server && cargo build && swift build
 set -u
 cd "$(dirname "$0")/.."
 
 APP=${APP:-.build/debug/pigeon}
-HOST=${HOST:-core/target/release/pigeon-host}
+HOST=${HOST:-core/target/release/pigeon-server}
 OUT=${OUT:-docs/images/m1}
 mkdir -p "$OUT"
 

@@ -60,13 +60,13 @@ jobs:
           cargo clippy --manifest-path core/Cargo.toml --all-targets --no-default-features -- -D warnings
           cargo test --manifest-path core/Cargo.toml --no-default-features
       - if: steps.core.outputs.exists == 'true'
-        name: pigeon-host 体积上限 8MB
+        name: pigeon-server 体积上限 8MB
         run: |
           cargo build --release --manifest-path core/Cargo.toml \
-            --bin pigeon-host
-          bin=core/target/release/pigeon-host
+            --bin pigeon-server
+          bin=core/target/release/pigeon-server
           size=$(stat -f%z "$bin" 2>/dev/null || stat -c%s "$bin")
-          echo "pigeon-host: $size bytes"
+          echo "pigeon-server: $size bytes"
           test "$size" -le 8388608
 
   # include/pigeon_core.h is generated from core/src/ffi/; a hand-edited

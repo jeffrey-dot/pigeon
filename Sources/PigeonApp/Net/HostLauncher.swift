@@ -1,12 +1,12 @@
 import Foundation
 
-/// Starts `pigeon-host` when the socket is missing. A terminal window that needs the user to
+/// Starts `pigeon-server` when the socket is missing. A terminal window that needs the user to
 /// open a shell and start a daemon by hand is not a terminal yet.
 public enum HostLauncher {
     /// Places a locally built host can be, most specific first.
     ///
     /// shortcut: a fixed candidate list (env override, next to the app, cargo target dirs).
-    /// M4's remote installer will add `~/.pigeon/host/<version>/`; revisit then.
+    /// M4's remote installer will add `~/.pigeon/server/<version>/`; revisit then.
     public static func candidates(
         environment: [String: String] = ProcessInfo.processInfo.environment,
         executable: String = CommandLine.arguments.first ?? "",
@@ -18,12 +18,12 @@ public enum HostLauncher {
         }
         if !executable.isEmpty {
             let directory = (executable as NSString).deletingLastPathComponent
-            paths.append((directory as NSString).appendingPathComponent("pigeon-host"))
+            paths.append((directory as NSString).appendingPathComponent("pigeon-server"))
         }
         for target in ["debug", "release"] {
             paths.append(
                 (workingDirectory as NSString)
-                    .appendingPathComponent("core/target/\(target)/pigeon-host"))
+                    .appendingPathComponent("core/target/\(target)/pigeon-server"))
         }
         return paths
     }

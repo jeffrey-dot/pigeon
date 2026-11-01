@@ -1,19 +1,19 @@
 # pigeon 远端（SSH）方案
 
-> 目标：本地窗口可以接管**服务器上**的终端；服务器上跑同一个 `pigeon-host`，
+> 目标：本地窗口可以接管**服务器上**的终端；服务器上跑同一个 `pigeon-server`，
 > 关掉本地窗口任务继续跑，重连原样恢复。全部走系统 `ssh`，不开端口、不管密码。
 
 ## 1. 三种对接方式（按可用性从高到低）
 
 | 方式 | 做法 | 需要远端装 pigeon | 能持久化 | 备注 |
 |---|---|---|---|---|
-| **A. `--proxy` 桥接（推荐）** | `ssh host pigeon-host --proxy`：把 stdin/stdout 上的协议帧转给远端宿主的 unix socket | ✅ | ✅ | 不依赖 sshd 的 stream-local 转发开关（很多机器默认关闭） |
+| **A. `--proxy` 桥接（推荐）** | `ssh host pigeon-server --proxy`：把 stdin/stdout 上的协议帧转给远端宿主的 unix socket | ✅ | ✅ | 不依赖 sshd 的 stream-local 转发开关（很多机器默认关闭） |
 | B. unix socket 直转 | `ssh -L /tmp/p.sock:$XDG_RUNTIME_DIR/pigeon.sock host` | ✅ | ✅ | 简洁，但需要远端 `AllowStreamLocalForwarding yes` |
 | C. 退化模式 | 普通 `ssh host` 开一个 pty | ❌ | ❌（会话随 ssh 断开） | **仍然有状态显示**：我们就是终端，OSC 7501 会直接到达；只是没有远端持久化与远端分屏 |
 
 三种都能同时支持：连接时先探测（A → B → C），并明确告诉用户当前用的是哪一种。
 
-`--stdio` 是同一条传输的另一种用法：不桥接已有 socket，而是让本次启动的 `pigeon-host` 直接作为宿主在
+`--stdio` 是同一条传输的另一种用法：不桥接已有 socket，而是让本次启动的 `pigeon-server` 直接作为宿主在
 stdin/stdout 上说话（首次安装后的第一次启动用它）；之后它常驻，后续连接用 `--proxy` 桥接到它的 unix socket。
 两种模式的帧格式与 `docs/protocol.md` 完全一致。
 
@@ -24,9 +24,9 @@ stdin/stdout 上说话（首次安装后的第一次启动用它）；之后它�
 | 产物 | 包含 | 大小目标 |
 |---|---|---|
 | `Pigeon.app`（客户端） | GUI、渲染、字体、输入法、侧栏 | 30–50 MB（本机） |
-| **`pigeon-host`**（会话宿主） | PTY + 内核（VT / 布局 / OSC 7501）+ socket 协议；**无 UI、无字体、无渲染** | **静态单文件 3–8 MB** |
+| **`pigeon-server`**（会话宿主） | PTY + 内核（VT / 布局 / OSC 7501）+ socket 协议；**无 UI、无字体、无渲染** | **静态单文件 3–8 MB** |
 
-`pigeon-host` 就是“最小 tmux”：它只负责“让进程活着 + 记住屏幕 + 说话”。本机和远端跑的是**同一个二进制**，
+`pigeon-server` 就是“最小 tmux”：它只负责“让进程活着 + 记住屏幕 + 说话”。本机和远端跑的是**同一个二进制**，
 所以本机与远端行为一致，内核也只有一个实现。
 
 ### 自动安装（VSCode Remote 的做法，但不用包管理器）
@@ -34,19 +34,19 @@ stdin/stdout 上说话（首次安装后的第一次启动用它）；之后它�
 首次连接某个主机时，客户端自己在 ssh 上完成安装，不需要 root、不需要 PATH、不改 rc：
 
 1. `ssh host 'uname -sm'` → 选对应架构的内嵌产物（Linux x86_64/aarch64、macOS arm64/x86_64）；
-2. 检查 `~/.pigeon/host/<version>/pigeon-host` 是否存在且哈希匹配；
+2. 检查 `~/.pigeon/server/<version>/pigeon-server` 是否存在且哈希匹配；
 3. 缺失就把二进制**从同一条 ssh 连接流过去**（不依赖 scp/ftp）：
 
    ```sh
-   ssh host 'mkdir -p ~/.pigeon/host/3.2.0 \
-     && cat > ~/.pigeon/host/3.2.0/pigeon-host.tmp \
-     && chmod +x ~/.pigeon/host/3.2.0/pigeon-host.tmp \
-     && mv ~/.pigeon/host/3.2.0/pigeon-host.tmp ~/.pigeon/host/3.2.0/pigeon-host' \
-     < pigeon-host
+   ssh host 'mkdir -p ~/.pigeon/server/3.2.0 \
+     && cat > ~/.pigeon/server/3.2.0/pigeon-server.tmp \
+     && chmod +x ~/.pigeon/server/3.2.0/pigeon-server.tmp \
+     && mv ~/.pigeon/server/3.2.0/pigeon-server.tmp ~/.pigeon/server/3.2.0/pigeon-server' \
+     < pigeon-server
    ```
 
 4. 校验 sha256（客户端内嵌期望值，远端 `shasum -a 256` 比对；不一致就删文件并报错）；
-5. 启动：`ssh host ~/.pigeon/host/3.2.0/pigeon-host --proxy`（宿主已在远端常驻，桥接它的 unix socket；socket 上没人监听时 `--proxy` 先拉起一个宿主——无共享 stdio、独立进程组，ssh 断开不会带走它——再桥接，所以重启后的第一次连接也只需要这一条命令）。
+5. 启动：`ssh host ~/.pigeon/server/3.2.0/pigeon-server --proxy`（宿主已在远端常驻，桥接它的 unix socket；socket 上没人监听时 `--proxy` 先拉起一个宿主——无共享 stdio、独立进程组，ssh 断开不会带走它——再桥接，所以重启后的第一次连接也只需要这一条命令）。
 
 ### 本机交叉构建（macOS → Linux）
 
@@ -56,31 +56,31 @@ stdin/stdout 上说话（首次安装后的第一次启动用它）；之后它�
 rustup target add x86_64-unknown-linux-musl        # aarch64 同理
 host=$(rustc -vV | sed -n 's/^host: //p')
 lld=$(ls ~/.rustup/toolchains/*/lib/rustlib/$host/bin/rust-lld | head -1)
-cargo build --release --manifest-path core/Cargo.toml --bin pigeon-host \
+cargo build --release --manifest-path core/Cargo.toml --bin pigeon-server \
   --target x86_64-unknown-linux-musl \
   --config "target.x86_64-unknown-linux-musl.linker=\"$lld\""
-# → core/target/x86_64-unknown-linux-musl/release/pigeon-host（static-pie，1.7 MB）
+# → core/target/x86_64-unknown-linux-musl/release/pigeon-server（static-pie，1.7 MB）
 ```
 
 macOS 的 `cc` 会被当成链接器并拒继 musl 的 `-static`，所以必须指到 rustup 自带的 `rust-lld`。
 产物放哪都行，安装器按**平台匹配**挑：`PIGEON_HOST_ARTIFACTS` 目录下的
-`pigeon-host-<triple>`，或 `core/target/<triple>/release/pigeon-host`。
+`pigeon-server-<triple>`，或 `core/target/<triple>/release/pigeon-server`。
 
 ### 自动安装怎么做
 
 `Sources/PigeonApp/Net/HostInstaller.swift`：`ssh uname -sm` 探测平台 → 本地算 sha256，
 版本目录名就是哈希前 16 位 → 远端有同名同哈希就**不传**，否则把二进制流进
-`~/.pigeon/host/<version>/pigeon-host.tmp`，**在远端**校验哈希后才 `mv` 成正式文件，
+`~/.pigeon/server/<version>/pigeon-server.tmp`，**在远端**校验哈希后才 `mv` 成正式文件，
 并只保留最新两个版本。远端的登录 shell 可能是 fish/csh，所以命令行走 base64 + `sh`，
 不假设是 POSIX sh。实跑记录见 `docs/m4-checklist.md`。
 
 ### 规则
 
 - **安装在远端用户的家目录**：`$HOME/.pigeon/`（用 `$HOME` 展开，不假设家目录路径），
-  目录结构：`~/.pigeon/host/<version>/pigeon-host`、`~/.pigeon/state/`（socket、日志）。
+  目录结构：`~/.pigeon/server/<version>/pigeon-server`、`~/.pigeon/state/`（socket、日志）。
   绝不写 `/usr/local`、不用 sudo、不改 PATH 与 rc。
 - **版本目录并存**：升级只推新目录（`host/3.2.1/`），老会话继续跑老版本直到重启；保留最近 2 个版本并 GC。
-- **先问一次**：首次连接弹确认（“将在 host 上安装 pigeon-host 4.1 MB 到 `~/.pigeon/`”），可勾选“以后不再问”；
+- **先问一次**：首次连接弹确认（“将在 host 上安装 pigeon-server 4.1 MB 到 `~/.pigeon/`”），可勾选“以后不再问”；
   `--no-remote-install` 全局关闭。
 - **卸载**：`rm -rf ~/.pigeon` 就是卸载，远端不留任何其它痕迹。
 - **静态链接**（musl / 自带依赖）：不依赖远端 glibc、openssl、字体；只依赖内核 + PTY。
@@ -92,8 +92,8 @@ macOS 的 `cc` 会被当成链接器并拒继 musl 的 `-static`，所以必须�
 
 ```text
 客户端                                   远端
-  │ ssh host pigeon-host --proxy           │
-  ├──────── stdio（长度前缀帧）─────────────►│── unix socket ──► pigeon-host
+  │ ssh host pigeon-server --proxy           │
+  ├──────── stdio（长度前缀帧）─────────────►│── unix socket ──► pigeon-server
   │                                        │                   ├─ PTY / VT 状态
   └─ 本地渲染 ◄── 快照 + 增量 ─────────────┘                   └─ 布局 / OSC 7501
 ```
@@ -133,7 +133,7 @@ macOS 的 `cc` 会被当成链接器并拒继 musl 的 `-static`，所以必须�
 
 ## 5. 安全
 
-- 只经 `ssh`；`pigeon-host` **只监听 unix socket**，权限 0700：装在 `~/.pigeon/host/` 下的远端宿主用
+- 只经 `ssh`；`pigeon-server` **只监听 unix socket**，权限 0700：装在 `~/.pigeon/server/` 下的远端宿主用
   `~/.pigeon/state/pigeon.sock`（`$XDG_RUNTIME_DIR` 会在用户最后一个登录会话结束时被 systemd 删掉，宿主就成了孤儿）；
   其它情况（本机、开发构建）用 `$XDG_RUNTIME_DIR/pigeon.sock`，回退 `/tmp/pigeon-<uid>.sock`。
 - `--proxy` 只转发协议帧：不接受任意命令、不做 shell 展开。
@@ -146,7 +146,7 @@ macOS 的 `cc` 会被当成链接器并拒继 musl 的 `-static`，所以必须�
 - 复用：优先 `ControlMaster auto` + `ControlPath ~/.ssh/cm-%r@%h:%p`（用户已有配置则沿用）；没有则用一个临时 master。
 - 不做交互式密码：认证失败的提示里给出"先在终端里 ssh 一次"的指引。
 - 跳板机：完全交给 `~/.ssh/config`（`ProxyJump`），pigeon 不解析。
-- 远端 `pigeon-host` 的日志写 `~/.local/state/pigeon/log`（滚动），便于远程排障；`--log` 可覆盖。
+- 远端 `pigeon-server` 的日志写 `~/.local/state/pigeon/log`（滚动），便于远程排障；`--log` 可覆盖。
 
 ## 7. 里程碑对应
 
@@ -162,4 +162,4 @@ macOS 的 `cc` 会被当成链接器并拒继 musl 的 `-static`，所以必须�
 - 远端无 pigeon：自动退化到方式 C，并说明"该主机的会话不会持久化"。
 - 版本不匹配：拒绝连接 + 给命令，不静默尝试。
 - 200ms 延迟下：按键回显 ≤1 帧的额外延迟（不做本地预测）。
-- `kill -9` 远端 `pigeon-host`：客户端显示"远端会话已丢失"，可重开新会话。
+- `kill -9` 远端 `pigeon-server`：客户端显示"远端会话已丢失"，可重开新会话。

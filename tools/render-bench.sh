@@ -15,7 +15,7 @@ export PATH="$HOME/.cargo/bin:$PATH"
 cd "$(dirname "$0")/.."
 
 APP=${APP:-.build/debug/pigeon}
-HOST=${HOST:-core/target/release/pigeon-host}
+HOST=${HOST:-core/target/release/pigeon-server}
 # `swift build` links whichever libpigeon_core it finds first, which is the debug dylib: an
 # unoptimized CBOR decoder that costs ~4x the app's CPU and swamps the renderer. Load the
 # release core instead (needs `cargo build --release`); CORE_LIB= measures the linked one.

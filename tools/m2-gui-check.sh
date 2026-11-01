@@ -7,13 +7,13 @@
 # socket file, so this does not need screenshots. Keyboard steps need Accessibility permission
 # for System Events; when that is missing they are reported as SKIP instead of quietly passing.
 #
-# Build first: `cargo build --release --bin pigeon-host && cargo build && swift build`.
+# Build first: `cargo build --release --bin pigeon-server && cargo build && swift build`.
 set -u
 export PATH="$HOME/.cargo/bin:$PATH"
 cd "$(dirname "$0")/.."
 
 APP=${APP:-.build/debug/pigeon}
-HOST=${HOST:-core/target/release/pigeon-host}
+HOST=${HOST:-core/target/release/pigeon-server}
 R=$(mktemp -d /tmp/pigeon-m2-XXXXXX)
 export XDG_RUNTIME_DIR="$R"
 # Isolate persisted state: a leftover `hosts.json` would start the app on some other host
@@ -107,14 +107,14 @@ sleep 1
 kill -9 "$HOST_PID" 2>/dev/null
 # The window restarts the host through HostLauncher, which runs it without our `--socket`
 # argument (it uses the default path, which is the same file under XDG_RUNTIME_DIR).
-wait_for 20 sh -c "test -S '$SOCKET' && pgrep -f 'pigeon-host' >/dev/null" ||
+wait_for 20 sh -c "test -S '$SOCKET' && pgrep -f 'pigeon-server' >/dev/null" ||
         bad "the host did not come back after kill -9"
 if wait_for 20 grep -q "host unreachable" "$APP_LOG"; then
         pass "kill -9: window noticed the dead host and restarted one"
 else
         skip "kill -9: the restart happened, but the window did not log the loss"
 fi
-HOST_PID=$(pgrep -f 'pigeon-host' | head -1)
+HOST_PID=$(pgrep -f 'pigeon-server' | head -1)
 # The window restarts the host as its own child, so the new host inherits the app's stderr
 # (where PIGEON_DEBUG writes). Everything from here on is read from there.
 LOG="$APP_LOG"

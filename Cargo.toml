@@ -1,5 +1,5 @@
 # Workspace root: lets the documented commands run from the repository root
-# (`cargo build --release --bin pigeon-host`, `cargo test`).
+# (`cargo build --release --bin pigeon-server`, `cargo test`).
 [workspace]
 members = ["core"]
 resolver = "2"

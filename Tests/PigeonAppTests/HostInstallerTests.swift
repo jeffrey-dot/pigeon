@@ -36,7 +36,7 @@ final class HostInstallerTests: XCTestCase {
     func testOnlyAMatchingPlatformCanBeServed() throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let linux = directory.appendingPathComponent("pigeon-host-x86_64-unknown-linux-musl")
+        let linux = directory.appendingPathComponent("pigeon-server-x86_64-unknown-linux-musl")
         FileManager.default.createFile(atPath: linux.path, contents: Data("elf".utf8))
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: linux.path)
 
@@ -53,7 +53,7 @@ final class HostInstallerTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let directory = root.appendingPathComponent("aarch64-unknown-linux-musl")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let plain = directory.appendingPathComponent("pigeon-host")
+        let plain = directory.appendingPathComponent("pigeon-server")
         FileManager.default.createFile(atPath: plain.path, contents: Data("elf".utf8))
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: plain.path)
 
@@ -62,19 +62,19 @@ final class HostInstallerTests: XCTestCase {
 
     func testTheRemoteScriptVerifiesBeforeItGoesLive() {
         let script = HostInstaller.installScript(
-            directory: "$HOME/.pigeon/host/0123456789abcdef", expected: "abc123")
-        XCTAssertTrue(script.contains("$HOME/.pigeon/host/0123456789abcdef/pigeon-host.tmp"))
+            directory: "$HOME/.pigeon/server/0123456789abcdef", expected: "abc123")
+        XCTAssertTrue(script.contains("$HOME/.pigeon/server/0123456789abcdef/pigeon-server.tmp"))
         XCTAssertTrue(script.contains("if [ \"$got\" != \"abc123\" ]"))
         XCTAssertTrue(script.contains("rm -f \"$tmp\""), "a bad transfer must not be left behind")
         XCTAssertTrue(
-            script.contains("mv \"$tmp\" \"$HOME/.pigeon/host/0123456789abcdef/pigeon-host\""),
+            script.contains("mv \"$tmp\" \"$HOME/.pigeon/server/0123456789abcdef/pigeon-server\""),
             "the binary only appears after the hash matches")
         XCTAssertTrue(script.contains("tail -n +3"), "older versions are garbage collected")
         XCTAssertFalse(script.contains("/tmp/"), "nothing is written outside ~/.pigeon")
     }
 
     func testTheHashProbeIsSilentWhenTheFileIsMissing() {
-        let script = HostInstaller.remoteHash("$HOME/.pigeon/host/v/pigeon-host")
+        let script = HostInstaller.remoteHash("$HOME/.pigeon/server/v/pigeon-server")
         XCTAssertTrue(script.contains("[ -f "))
         XCTAssertTrue(script.contains("sha256sum"))
         XCTAssertTrue(script.contains("shasum -a 256"), "macOS remotes have no sha256sum")
@@ -100,7 +100,7 @@ final class HostInstallerTests: XCTestCase {
         let version = String(full.prefix(16))
         var uploads = 0
         var scripts: [String] = []
-        let remotePath = "$HOME/.pigeon/host/\(version)/pigeon-host"
+        let remotePath = "$HOME/.pigeon/server/\(version)/pigeon-server"
         let installer = HostInstaller(run: { _, script, stdin in
             scripts.append(script)
             if script.contains("uname -sm") {
@@ -163,7 +163,7 @@ final class HostInstallerTests: XCTestCase {
             }
             if script.contains("set -e") {
                 return HostInstaller.Result(
-                    status: 3, output: "", error: "pigeon-host: hash mismatch (got deadbeef)")
+                    status: 3, output: "", error: "pigeon-server: hash mismatch (got deadbeef)")
             }
             return HostInstaller.Result(status: 0, output: "", error: "")
         })
@@ -192,7 +192,7 @@ final class HostInstallerTests: XCTestCase {
         // uploads" keeps holding instead of depending on what the previous run left on the
         // host. Trailing bytes after an ELF are ignored, so the copy still runs.
         let copy = FileManager.default.temporaryDirectory
-            .appendingPathComponent("pigeon-host-e2e-\(UUID().uuidString)")
+            .appendingPathComponent("pigeon-server-e2e-\(UUID().uuidString)")
         try (Data(contentsOf: artifact) + Data(UUID().uuidString.utf8)).write(to: copy)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: copy.path)
         defer { try? FileManager.default.removeItem(at: copy) }
@@ -217,7 +217,7 @@ final class HostInstallerTests: XCTestCase {
         }
         let leftovers = try HostInstaller.sshRunner(
             host: host,
-            script: "ls -1 ~/.pigeon/host/*/pigeon-host.tmp 2>/dev/null | wc -l",
+            script: "ls -1 ~/.pigeon/server/*/pigeon-server.tmp 2>/dev/null | wc -l",
             stdin: nil)
         XCTAssertEqual(leftovers.output.trimmingCharacters(in: .whitespacesAndNewlines), "0")
 
@@ -231,7 +231,7 @@ final class HostInstallerTests: XCTestCase {
         XCTAssertEqual(stray.output.trimmingCharacters(in: .whitespacesAndNewlines), "host")
         let versions = try HostInstaller.sshRunner(
             host: host,
-            script: "ls -1 ~/.pigeon/host | wc -l",
+            script: "ls -1 ~/.pigeon/server | wc -l",
             stdin: nil)
         XCTAssertLessThanOrEqual(
             Int(versions.output.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 99, 2,
@@ -252,7 +252,7 @@ final class HostInstallerTests: XCTestCase {
 
     private func fakeArtifact() throws -> URL {
         let directory = try temporaryDirectory()
-        let file = directory.appendingPathComponent("pigeon-host-x86_64-unknown-linux-musl")
+        let file = directory.appendingPathComponent("pigeon-server-x86_64-unknown-linux-musl")
         FileManager.default.createFile(atPath: file.path, contents: Data("not really an elf".utf8))
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
         return file

@@ -1,7 +1,7 @@
 import AppKit
 import PigeonCore
 
-/// Wires the window to a `pigeon-host`: sidebar on the left, split container on
+/// Wires the window to a `pigeon-server`: sidebar on the left, split container on
 /// the right, and the protocol messages that keep both in sync.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private typealias Row = SessionRow
@@ -616,12 +616,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// The host starts like a `tmux` server (`pigeon-host --detach`): its own process group,
+    /// The host starts like a `tmux` server (`pigeon-server --detach`): its own process group,
     /// nothing registered with the system, so it outlives this window without macOS listing
     /// it as a background item. It lives until "End All Sessions on This Mac…" or logout.
     private func startLocalHost() {
         guard let path = HostLauncher.find(candidates: HostLauncher.candidates()) else {
-            debugLog("no pigeon-host binary found")
+            debugLog("no pigeon-server binary found")
             return
         }
         let log = TerminalSettingsStore.defaultURL.deletingLastPathComponent()

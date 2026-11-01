@@ -74,7 +74,7 @@ where
                     Ok(event) => forward(event, host, &state, outbound).await?,
                     Err(RecvError::Lagged(missed)) => {
                         if std::env::var_os("PIGEON_DEBUG").is_some() {
-                            eprintln!("pigeon-host: client {client_id} lagged by {missed} events");
+                            eprintln!("pigeon-server: client {client_id} lagged by {missed} events");
                         }
                         // What is still queued predates the state about to be sent: skip it,
                         // so nothing older than the resync reaches the window after it.
@@ -109,7 +109,7 @@ async fn drain_inbox(
             Ok(Some((message, used))) => {
                 inbox.drain(..used);
                 if std::env::var_os("PIGEON_DEBUG").is_some() {
-                    eprintln!("pigeon-host: <- {}", message.name());
+                    eprintln!("pigeon-server: <- {}", message.name());
                 }
                 if let Some(reply) = dispatch(message, host, state).await {
                     reply_to(reply, host, state, outbound).await?;

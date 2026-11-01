@@ -95,7 +95,7 @@ fn start_reader(mut reader: Box<dyn Read + Send>) -> mpsc::Receiver<Vec<u8>> {
                 Ok(count) => {
                     if debug {
                         eprintln!(
-                            "pigeon-host: pty {:?}",
+                            "pigeon-server: pty {:?}",
                             String::from_utf8_lossy(&buffer[..count])
                         );
                     }

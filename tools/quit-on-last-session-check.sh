@@ -3,13 +3,13 @@
 # host and then quits. A private host on a temp socket whose shell exits after a few seconds,
 # so nothing touches the user's own sessions and nothing is typed into any window.
 #
-# Build first: cargo build --release --bin pigeon-host && cargo build && swift build
+# Build first: cargo build --release --bin pigeon-server && cargo build && swift build
 set -u
 export PATH="$HOME/.cargo/bin:$PATH"
 cd "$(dirname "$0")/.."
 
 APP=${APP:-.build/debug/pigeon}
-HOST=${HOST:-core/target/release/pigeon-host}
+HOST=${HOST:-core/target/release/pigeon-server}
 WAIT=${WAIT:-15}
 
 R=$(mktemp -d /tmp/pigeon-quit-XXXXXX)

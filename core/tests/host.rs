@@ -67,7 +67,7 @@ fn start_host_with_socket(socket: &str) -> Host {
 
 fn start_host_on(socket: &str, program: &str) -> Host {
     let socket = socket.to_owned();
-    let child = Command::new(env!("CARGO_BIN_EXE_pigeon-host"))
+    let child = Command::new(env!("CARGO_BIN_EXE_pigeon-server"))
         .args(["--socket", &socket, "--shell", program])
         .stdout(Stdio::null())
         .stderr(if std::env::var_os("PIGEON_DEBUG").is_some() {
@@ -76,7 +76,7 @@ fn start_host_on(socket: &str, program: &str) -> Host {
             Stdio::null()
         })
         .spawn()
-        .expect("spawn pigeon-host");
+        .expect("spawn pigeon-server");
     let host = Host { child, socket };
 
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -94,7 +94,7 @@ fn start_host_on(socket: &str, program: &str) -> Host {
 fn start_stdio_host() -> (Host, Client) {
     let quiet = script("#!/bin/sh\nexec env PS1= /bin/sh -i\n");
     let socket = unique_socket();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_pigeon-host"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_pigeon-server"))
         .args([
             "--stdio",
             "--socket",
@@ -110,7 +110,7 @@ fn start_stdio_host() -> (Host, Client) {
             Stdio::null()
         })
         .spawn()
-        .expect("spawn pigeon-host --stdio");
+        .expect("spawn pigeon-server --stdio");
     let stdin = child.stdin.take().expect("stdin");
     let stdout = child.stdout.take().expect("stdout");
     let host = Host {
@@ -630,13 +630,13 @@ fn stdio_mode_serves_a_client_and_keeps_the_socket_for_later() {
 fn proxy_mode_bridges_stdio_to_a_running_host() {
     let _serial = one_at_a_time();
     let host = start_host();
-    let mut proxy = Command::new(env!("CARGO_BIN_EXE_pigeon-host"))
+    let mut proxy = Command::new(env!("CARGO_BIN_EXE_pigeon-server"))
         .args(["--proxy", "--socket", &host.socket])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .expect("spawn pigeon-host --proxy");
+        .expect("spawn pigeon-server --proxy");
     let stdin = proxy.stdin.take().expect("stdin");
     let stdout = proxy.stdout.take().expect("stdout");
     let _guard = Guard(proxy);
@@ -653,7 +653,7 @@ fn proxy_mode_bridges_stdio_to_a_running_host() {
 }
 
 /// `--proxy` with no host behind the socket starts one (issue #3): the first `ssh host
-/// pigeon-host --proxy` after a reboot must not fail, and the host it starts must outlive
+/// pigeon-server --proxy` after a reboot must not fail, and the host it starts must outlive
 /// the bridge, or closing the window would end the remote sessions.
 #[test]
 fn proxy_mode_starts_a_host_when_none_is_running() {
@@ -671,7 +671,7 @@ fn proxy_mode_starts_a_host_when_none_is_running() {
     }
     let _reap = Reap(socket.clone());
 
-    let mut proxy = Command::new(env!("CARGO_BIN_EXE_pigeon-host"))
+    let mut proxy = Command::new(env!("CARGO_BIN_EXE_pigeon-server"))
         .args([
             "--proxy",
             "--socket",
@@ -683,7 +683,7 @@ fn proxy_mode_starts_a_host_when_none_is_running() {
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .expect("spawn pigeon-host --proxy");
+        .expect("spawn pigeon-server --proxy");
     let stdin = proxy.stdin.take().expect("stdin");
     let stdout = proxy.stdout.take().expect("stdout");
     let guard = Guard(proxy);
@@ -2235,7 +2235,7 @@ fn reconnect_with_since_replays_only_the_missed_deltas() {
     );
 }
 
-/// A second host on the same socket (a stray `pigeon-host`, a `--stdio` start racing a
+/// A second host on the same socket (a stray `pigeon-server`, a `--stdio` start racing a
 /// running one) must leave the live host and its sessions alone instead of unlinking the
 /// socket out from under them.
 #[test]
@@ -2246,12 +2246,12 @@ fn a_second_host_does_not_steal_a_live_socket() {
     hello(&mut client);
     let pane = attach_first(&mut client);
 
-    let mut second = Command::new(env!("CARGO_BIN_EXE_pigeon-host"))
+    let mut second = Command::new(env!("CARGO_BIN_EXE_pigeon-server"))
         .args(["--socket", &host.socket, "--shell", "/bin/sh"])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .expect("spawn second pigeon-host");
+        .expect("spawn second pigeon-server");
     let deadline = Instant::now() + Duration::from_secs(5);
     let exited = loop {
         if let Some(status) = second.try_wait().expect("wait") {
@@ -2712,13 +2712,13 @@ fn a_restarted_host_shows_the_last_screens_as_ended_sessions() {
     let quiet = script("#!/bin/sh\nexec env PS1= /bin/sh -i\n");
     let socket = unique_socket();
     let spawn = |socket: &str| {
-        Command::new(env!("CARGO_BIN_EXE_pigeon-host"))
+        Command::new(env!("CARGO_BIN_EXE_pigeon-server"))
             .args(["--socket", socket, "--shell", quiet.to_str().expect("utf8")])
             .env("PIGEON_SAVE_MS", "100")
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
-            .expect("spawn pigeon-host")
+            .expect("spawn pigeon-server")
     };
     let wait_for_socket = |socket: &str| {
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -2873,7 +2873,7 @@ fn detach_starts_one_host_that_outlives_its_starter() {
     }
     let _reap = Reap(socket.clone());
     let detach = || {
-        Command::new(env!("CARGO_BIN_EXE_pigeon-host"))
+        Command::new(env!("CARGO_BIN_EXE_pigeon-server"))
             .args([
                 "--detach",
                 "--socket",

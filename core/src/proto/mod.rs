@@ -558,7 +558,7 @@ mod tests {
             },
             Message::HelloAck {
                 proto: PROTO_VERSION,
-                server: "pigeon-host".into(),
+                server: "pigeon-server".into(),
                 features: vec!["delta".into(), "scrollback".into()],
                 host_id: "local".into(),
                 client_id: 7,

@@ -6,7 +6,7 @@ import XCTest
 final class HostsStoreTests: XCTestCase {
     func testHostsAndTheCurrentOneSurviveARestart() throws {
         let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("pigeon-hosts-\(UUID().uuidString)")
+            .appendingPathComponent("pigeon-servers-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
         let url = directory.appendingPathComponent("hosts.json")
 
@@ -26,7 +26,7 @@ final class HostsStoreTests: XCTestCase {
 
     func testACorruptFileFallsBackToAnEmptyList() throws {
         let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("pigeon-hosts-\(UUID().uuidString)")
+            .appendingPathComponent("pigeon-servers-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let url = directory.appendingPathComponent("hosts.json")

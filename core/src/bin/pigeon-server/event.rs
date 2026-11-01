@@ -43,6 +43,6 @@ pub enum Event {
 /// frame over the 8 MiB limit, which no client could read anyway.
 pub fn encode(message: &Message) -> Option<Frame> {
     crate::outbound::encode(message)
-        .map_err(|error| eprintln!("pigeon-host: {error}"))
+        .map_err(|error| eprintln!("pigeon-server: {error}"))
         .ok()
 }

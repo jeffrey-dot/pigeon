@@ -1,6 +1,6 @@
 # pigeon 协议（客户端 ⇄ 会话宿主）
 
-> 这是**字段级契约**：`pigeon-host`（本机/远端）与任何客户端都照它实现。
+> 这是**字段级契约**：`pigeon-server`（本机/远端）与任何客户端都照它实现。
 > 另一条同源的边界是 C ABI（`include/pigeon_core.h`，由 `core/src/ffi/mod.rs` 生成），
 > 用于“把内核编进客户端”的嵌入模式；两者共用同一份内核，字段语义必须一致（见 §9）。
 
@@ -8,7 +8,7 @@
 
 | 项 | 规定 |
 |---|---|
-| 传输 | 本机 unix socket（`/tmp/pigeon-<uid>.sock`，`0700`）；远端为同一协议的 stdio（`ssh host pigeon-host --proxy`） |
+| 传输 | 本机 unix socket（`/tmp/pigeon-<uid>.sock`，`0700`）；远端为同一协议的 stdio（`ssh host pigeon-server --proxy`） |
 | 帧 | `u32` 小端长度 `L` + 恰好 `L` 字节 payload。`L` **不含自身**；payload 为单个 CBOR map。不用换行分隔 |
 | 上限 | 单帧 ≤ 8 MiB（8388608）。超限即断开并回 `error{code:"frame_too_large"}`，payload 不进解析器 |
 | 半包 | 读端必须能处理“长度够但 payload 不足”的中间态，累积到 `L` 字节再解 |
@@ -181,7 +181,7 @@
 
 | | 嵌入模式（C ABI） | 进程模式（本协议） |
 |---|---|---|
-| 谁持有 PTY | 客户端进程 | `pigeon-host` |
+| 谁持有 PTY | 客户端进程 | `pigeon-server` |
 | 数据形态 | 直接调用函数，返回快照指针 | 同一份快照，序列化成帧 |
 | 适用 | 本机、追求最低延迟 | 持久化、远端、多客户端 |
 

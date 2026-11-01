@@ -2,7 +2,7 @@ import Darwin
 import Foundation
 import PigeonCore
 
-/// Degraded remote sessions (`docs/remote.md` §1 C): there is no `pigeon-host` on the far
+/// Degraded remote sessions (`docs/remote.md` §1 C): there is no `pigeon-server` on the far
 /// side, so this window owns the VT state and feeds it the bytes of a plain `ssh -tt` session.
 ///
 /// The trade-off is the whole point of mode C: the program runs, `OSC 7501` status still

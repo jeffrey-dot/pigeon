@@ -10,7 +10,7 @@ pub enum Transport {
     /// Socket *and* stdin/stdout: how a remote host is started over `ssh`, so the same
     /// process serves the ssh channel now and later bridges from the socket.
     Stdio,
-    /// Bridge stdin/stdout to an already running host. `ssh host pigeon-host --proxy` makes
+    /// Bridge stdin/stdout to an already running host. `ssh host pigeon-server --proxy` makes
     /// the ssh channel the transport; this mode knows nothing about the protocol.
     Proxy,
     /// Start a host in the background, the way `tmux` starts its server, and return:
@@ -32,7 +32,7 @@ pub enum Command {
     Print(String),
 }
 
-const USAGE: &str = "usage: pigeon-host [--socket PATH] [--shell PATH] [--stdio|--proxy]
+const USAGE: &str = "usage: pigeon-server [--socket PATH] [--shell PATH] [--stdio|--proxy]
   --socket-path  print the default socket path and exit
   --stdio  also serve one client on stdin/stdout (start a remote host)
   --proxy  bridge stdin/stdout to a running host's socket
@@ -74,7 +74,7 @@ pub fn parse(mut args: impl Iterator<Item = String>) -> Result<Command, String> 
 
 /// Where the socket lives (protocol §1, `docs/remote.md` §2):
 ///
-/// - a host installed by the client (`~/.pigeon/host/<version>/pigeon-host`) uses
+/// - a host installed by the client (`~/.pigeon/server/<version>/pigeon-server`) uses
 ///   `~/.pigeon/state/pigeon.sock`. `$XDG_RUNTIME_DIR` is removed by systemd when the last
 ///   login session ends, which would orphan a host that is meant to outlive the ssh link;
 /// - otherwise `$XDG_RUNTIME_DIR/pigeon.sock`, else `/tmp/pigeon-<uid>.sock`.
@@ -87,12 +87,12 @@ fn default_socket_path() -> PathBuf {
     runtime_socket_path()
 }
 
-/// `~/.pigeon/state` when `executable` sits under `~/.pigeon/host/`; `None` otherwise (a
+/// `~/.pigeon/state` when `executable` sits under `~/.pigeon/server/`; `None` otherwise (a
 /// development build, a host on this Mac). Pure, so the rule is unit-tested.
 pub fn state_dir_for(executable: Option<&Path>, home: Option<&Path>) -> Option<PathBuf> {
     let root = home?.join(".pigeon");
     executable?
-        .starts_with(root.join("host"))
+        .starts_with(root.join("server"))
         .then(|| root.join("state"))
 }
 
@@ -121,7 +121,7 @@ mod tests {
     #[test]
     fn an_installed_remote_host_keeps_its_socket_under_dot_pigeon() {
         let home = Path::new("/home/ada");
-        let exe = Path::new("/home/ada/.pigeon/host/0.1.0/pigeon-host");
+        let exe = Path::new("/home/ada/.pigeon/server/0.1.0/pigeon-server");
         assert_eq!(
             state_dir_for(Some(exe), Some(home)),
             Some(PathBuf::from("/home/ada/.pigeon/state"))
@@ -132,9 +132,9 @@ mod tests {
     fn any_other_binary_keeps_the_runtime_dir() {
         let home = Path::new("/home/ada");
         for exe in [
-            "/Users/ada/dev/pigeon/core/target/release/pigeon-host",
-            "/home/ada/.pigeon/hostile/pigeon-host",
-            "/home/ada/.pigeonx/host/pigeon-host",
+            "/Users/ada/dev/pigeon/core/target/release/pigeon-server",
+            "/home/ada/.pigeon/hostile/pigeon-server",
+            "/home/ada/.pigeonx/host/pigeon-server",
         ] {
             assert_eq!(
                 state_dir_for(Some(Path::new(exe)), Some(home)),

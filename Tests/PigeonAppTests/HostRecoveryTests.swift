@@ -18,8 +18,8 @@ final class HostRecoveryTests: XCTestCase {
     }
 
     func testStoppedKeepsTheReasonAndOffersARetry() {
-        let state = HostRecovery.State.stopped(detail: "pigeon-host: permission denied")
-        XCTAssertEqual(HostRecovery.banner(for: state), "pigeon-host: permission denied")
+        let state = HostRecovery.State.stopped(detail: "pigeon-server: permission denied")
+        XCTAssertEqual(HostRecovery.banner(for: state), "pigeon-server: permission denied")
         XCTAssertEqual(HostRecovery.action(for: state), "Retry")
     }
 
@@ -53,7 +53,7 @@ final class HostRecoveryTests: XCTestCase {
         let help = HostRecovery.remoteHelp(host: "example.com", reason: "Can't connect to example.com")
         XCTAssertTrue(help.contains("example.com with SSH"), help)
         for text in [help, HostRecovery.refusal(reason: "version", machine: "This Mac")] {
-            for jargon in ["pigeon-host", "cargo", "`", "session host"] {
+            for jargon in ["pigeon-server", "cargo", "`", "session host"] {
                 XCTAssertFalse(text.contains(jargon), "\(jargon) in: \(text)")
             }
         }
@@ -75,8 +75,8 @@ final class HostRecoveryTests: XCTestCase {
             workingDirectory: "/repo"
         )
         XCTAssertEqual(candidates.first, "/opt/pigeon/host")
-        XCTAssertEqual(candidates.dropFirst().first, "/Applications/Pigeon.app/Contents/MacOS/pigeon-host")
-        XCTAssertTrue(candidates.contains("/repo/core/target/debug/pigeon-host"))
+        XCTAssertEqual(candidates.dropFirst().first, "/Applications/Pigeon.app/Contents/MacOS/pigeon-server")
+        XCTAssertTrue(candidates.contains("/repo/core/target/debug/pigeon-server"))
     }
 
     /// A killed host must reach the window as a closed socket, not as silence: this is the
@@ -123,7 +123,7 @@ final class HostRecoveryTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let marker = directory.appendingPathComponent("started").path
-        let script = directory.appendingPathComponent("pigeon-host")
+        let script = directory.appendingPathComponent("pigeon-server")
         try "#!/bin/sh\ntouch \(marker)\n".write(to: script, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o755], ofItemAtPath: script.path)
@@ -142,7 +142,7 @@ final class HostRecoveryTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let missing = directory.appendingPathComponent("missing").path
-        let found = directory.appendingPathComponent("pigeon-host")
+        let found = directory.appendingPathComponent("pigeon-server")
         FileManager.default.createFile(atPath: found.path, contents: Data("#!/bin/sh\n".utf8))
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o755], ofItemAtPath: found.path)

@@ -13,7 +13,7 @@ mod size_policy;
 mod size_vote;
 
 pub use backlog::Backlog;
-// Host-side session bookkeeping: only `pigeon-host` uses these, so without `internals`
+// Host-side session bookkeeping: only `pigeon-server` uses these, so without `internals`
 // (a client build) nothing in the library refers to them.
 #[cfg_attr(not(feature = "internals"), allow(unused_imports))]
 pub use pane_meta::PaneMeta;

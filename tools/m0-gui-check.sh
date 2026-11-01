@@ -13,7 +13,7 @@ set -u
 cd "$(dirname "$0")/.."
 
 APP=${APP:-.build/debug/pigeon}
-HOST=${HOST:-core/target/release/pigeon-host}
+HOST=${HOST:-core/target/release/pigeon-server}
 OUT=${OUT:-docs/images/m0}
 HTOP=$(command -v htop || true)
 mkdir -p "$OUT"

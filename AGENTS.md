@@ -1,7 +1,7 @@
 # AGENTS.md
 
 给编码 agent 的工作说明。人看的部分在 `README.md`，产品/架构在设计文档里（见 §11）。
-**当前状态：M2 与 M4 已落地**——`core/`（VT / OSC 7501 / 协议 / 布局 / C ABI）、`pigeon-host`（多 pane、状态流、
+**当前状态：M2 与 M4 已落地**——`core/`（VT / OSC 7501 / 协议 / 布局 / C ABI）、`pigeon-server`（多 pane、状态流、
 `--stdio`/`--proxy` 远端传输）、AppKit 客户端（分屏、滚动回看、zoom、侧栏、未读/needs-you、远端自动安装与三档对接）；
 输入法（`NSTextInputClient`，preedit 在客户端画，提交后才发给宿主）已接入。验收记录见 `docs/m2-checklist.md`、`docs/m3-checklist.md`、`docs/m4-checklist.md`。
 
@@ -9,7 +9,7 @@
 
 pigeon 是一个**跨平台**终端（macOS 首发，Linux 跟进），自带隐形后台会话进程与一等公民侧栏：
 一个窗口里左边是按项目分组的会话列表（带 agent 状态、未读、`needs you` 计数），
-右边是该会话的终端本体。任务活过窗口关闭（`pigeon-host` 持有 PTY 与屏幕状态）。
+右边是该会话的终端本体。任务活过窗口关闭（`pigeon-server` 持有 PTY 与屏幕状态）。
 
 硬性边界：
 
@@ -24,9 +24,9 @@ pigeon 是一个**跨平台**终端（macOS 首发，Linux 跟进），自带隐
 macOS + Xcode 命令行工具（`swift --version` ≥ 6）与 Rust（见 `rust-toolchain.toml`）。
 
 ```sh
-cargo build --manifest-path core/Cargo.toml    # 内核 + pigeon-host（两平台都要能过）
+cargo build --manifest-path core/Cargo.toml    # 内核 + pigeon-server（两平台都要能过）
 cargo test  --manifest-path core/Cargo.toml    # 内核单测 + C ABI + 宿主端到端 + Rust 客户端 API
-cargo run   --manifest-path core/Cargo.toml --bin pigeon-host   # 会话宿主（本机自动拉起；远端按需推送；手动跑用于调试）
+cargo run   --manifest-path core/Cargo.toml --bin pigeon-server   # 会话宿主（本机自动拉起；远端按需推送；手动跑用于调试）
 cargo build                     # 先建核心：客户端链接 core/target/*/libpigeon_core.a
 swift build                     # 客户端（macOS only）
 swift test                      # 客户端纯逻辑单测（SidebarModel / Grouping / KeyEncoder）
@@ -47,11 +47,11 @@ Rust 客户端走 `pigeon_core::api`。客户端不认识 `core` 的内部类型
   与 C ABI 的函数分组一一对应，用所有权和 `Result<T, PgError>` 表达，不出现裸指针。
 - `core/src/ffi/` —— C ABI，是 `api` 的**薄包装**：只做指针/长度转换、错误码、`catch_unwind`，不实现语义。
   `ffi` 只许调 `api`，不直接碰内部模块，保证两种外形不分叉。
-- `pigeon-host` 与 `core/tests/` 属于内核自身，可以用内部模块（`internals` feature，默认开）；
+- `pigeon-server` 与 `core/tests/` 属于内核自身，可以用内部模块（`internals` feature，默认开）；
   **客户端 crate 以 `default-features = false` 依赖 `pigeon-core`**，此时 `term`/`layout`/`status`/`session`/`proto`
   是私有模块，编译期只看得到 `api` 与 `ffi`。
 
-`pigeon-host` 在 `core/` 里（同一个 crate 的 bin），所以宿主与嵌入模式跑的是同一份语义，不存在第二套实现。
+`pigeon-server` 在 `core/` 里（同一个 crate 的 bin），所以宿主与嵌入模式跑的是同一份语义，不存在第二套实现。
 
 可移植性标记：
 
@@ -85,7 +85,7 @@ pigeon/
 │   │   ├── status/               # OSC 7501 解析与记录生命周期
 │   │   ├── session/              # session/window/pane 模型
 │   │   └── proto/                # 分帧 + CBOR 编解码（协议的唯一实现）
-│   ├── src/bin/pigeon-host/      # 会话宿主：cli / transport / client / dispatch / pane_actor（3–8MB 硬指标）
+│   ├── src/bin/pigeon-server/      # 会话宿主：cli / transport / client / dispatch / pane_actor（3–8MB 硬指标）
 │   └── tests/                    # abi（C 外形）+ api（Rust 外形）+ host（真实 PTY 端到端）
 └── Sources/
     ├── PigeonCore/               # C 头封装（module map + 类型映射，不实现语义）
@@ -113,7 +113,7 @@ pigeon/
 `Net/{HostClient,Wire}.swift`、`Sidebar/{SidebarModel,Grouping}.swift`。
 
 后两个之前存在的 Swift 模块（`PigeonShared` / `PigeonHost`）已取消：协议与宿主现在只存在于 `core/src/proto/`
-与 `core/src/bin/pigeon-host/`。理由：宿主必须是 3–8MB 静态单文件（`docs/remote.md`），Swift 运行时做不到；
+与 `core/src/bin/pigeon-server/`。理由：宿主必须是 3–8MB 静态单文件（`docs/remote.md`），Swift 运行时做不到；
 而协议只留一处实现，客户端通过 C ABI 编解码（见 `docs/protocol.md` §9）。
 
 ### 新增代码放哪里（判定表）
@@ -123,7 +123,7 @@ pigeon/
 | 一种新的 OSC/控制序列的处理 | `core/src/term/`（渲染相关）或 `core/src/status/`（状态记录）；协议字段只有需要上线时才动 `core/src/proto/` |
 | 窗口与后台进程都要知道的数据 | `core/src/session/` + `core/src/proto/` + 重新生成头文件 |
 | 只在 UI 里用的派生状态（排序、分组、文案） | `Sources/PigeonApp/Sidebar/SidebarModel.swift`（保持纯函数，方便单测） |
-| 新的通信消息 | `core/src/proto/` 的 message enum + `pigeon-host` 的处理分支 + `core/tests/proto` 往返 |
+| 新的通信消息 | `core/src/proto/` 的 message enum + `pigeon-server` 的处理分支 + `core/tests/proto` 往返 |
 | 终端内核能力（换引擎 / 接别的内核） | `core/src/term/`（`Term` trait），C ABI、客户端、协议都不动 |
 | 渲染、字体、输入法 | `Sources/PigeonApp/Terminal/`，不往下漏 |
 | 一次性脚本 / 对账工具 | `tools/`，不放进 `Sources/` 或 `core/src/` |
@@ -153,7 +153,7 @@ pigeon/
   `core/tests/abi.rs` 测 C 外形，`api` 的用例测 Rust 外形。
 - `include/pigeon_core.h` 是**生成物**：改 ABI 就去改 `core/src/ffi/mod.rs`，然后跑 `cbindgen`，不要手改头文件。
 - `SidebarModel` / `Grouping` / `KeyEncoder` 必须是**纯逻辑**（无 AppKit、无 IO），可直接单测。
-- `pigeon-host` 里不能出现任何 UI 概念；`PigeonApp` 里不能出现 PTY 操作。
+- `pigeon-server` 里不能出现任何 UI 概念；`PigeonApp` 里不能出现 PTY 操作。
 - 任何跨进程行为都通过 `core/src/proto/` 的显式消息表达；不要用共享全局状态。
 - **终端语义只能在内核里实现**：VT 解析、快照/增量、布局计算、OSC 7501 记录都不许在客户端重复实现；
  客户端只做绘制与输入映射。
@@ -183,7 +183,7 @@ pigeon/
 **加一种状态显示**：`core/src/status/` 已有记录 → 只改 `SidebarModel` 的排序/图标映射 + `SidebarRowView`，不动协议。
 
 **加一条通信消息**：`core/src/proto/` 的 message enum 加 case（带 version）→ 分帧/编解码自动覆盖 →
-`pigeon-host` 加处理分支 → `core/tests/proto` 加编解码往返 → 重新生成 `include/pigeon_core.h` → 客户端订阅处处理。
+`pigeon-server` 加处理分支 → `core/tests/proto` 加编解码往返 → 重新生成 `include/pigeon_core.h` → 客户端订阅处处理。
 
 **换 VT 引擎**：只替换 `core/src/term/` 的实现（`Term` trait），C ABI、客户端、协议都不动。
 
@@ -192,7 +192,7 @@ pigeon/
 
 ## 7. 不变量（谁都不许破）
 
-1. 关掉客户端 / 客户端崩溃，pane 里的进程必须继续跑（`pigeon-host` 持有 PTY）。
+1. 关掉客户端 / 客户端崩溃，pane 里的进程必须继续跑（`pigeon-server` 持有 PTY）。
 2. 重连后的屏幕必须与断开前一致（含备用屏、光标、滚动区）——用全量快照 + 增量，不靠重放历史字节。
 3. OSC 7501 的丢弃规则严格按规范：超长、解不出 base64、解码后含控制字符 → **整条丢弃**，不能只丢一半。
 4. `done` / `error` 记录在用户看过之前不能被静默清掉；`working` / `blocked` 在进程退出或 OSC 133A 提示符时必须清掉。

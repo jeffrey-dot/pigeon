@@ -3,13 +3,13 @@
 # wide glyphs and emoji, one screenshot per appearance, written to $OUT.
 # A private host on a temp socket, so nothing touches the user's own sessions.
 #
-# Build first: cargo build --release --bin pigeon-host && cargo build && swift build
+# Build first: cargo build --release --bin pigeon-server && cargo build && swift build
 set -u
 export PATH="$HOME/.cargo/bin:$PATH"
 cd "$(dirname "$0")/.."
 
 APP=${APP:-.build/debug/pigeon}
-HOST=${HOST:-core/target/release/pigeon-host}
+HOST=${HOST:-core/target/release/pigeon-server}
 OUT=${OUT:-/tmp/pigeon-metal-check}
 mkdir -p "$OUT"
 

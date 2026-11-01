@@ -1,7 +1,7 @@
 import CryptoKit
 import Foundation
 
-/// Pushes `pigeon-host` to a remote machine over the system `ssh` (`docs/remote.md` §2).
+/// Pushes `pigeon-server` to a remote machine over the system `ssh` (`docs/remote.md` §2).
 ///
 /// Rules this file exists to keep: no package manager and no root; everything lives under
 /// `~/.pigeon/`; the version directory is the binary's content hash, so "already installed"
@@ -10,7 +10,7 @@ public struct HostInstaller {
     public struct Remote: Equatable {
         /// `uname -sm`, e.g. `Linux x86_64`.
         public var platform: String
-        /// Content-hash prefix: the directory name under `~/.pigeon/host/`.
+        /// Content-hash prefix: the directory name under `~/.pigeon/server/`.
         public var version: String
         /// Absolute path of the installed binary on the remote.
         public var path: String
@@ -40,7 +40,7 @@ public struct HostInstaller {
         case unsupportedPlatform(String)
         case noArtifact(String)
         case rejected(String)
-        /// The remote could not be reached as a `pigeon-host` at all (degraded mode refused).
+        /// The remote could not be reached as a `pigeon-server` at all (degraded mode refused).
         case noHost(String)
         /// ssh itself failed (exit 255): the machine was never reached, so no fallback can help.
         case unreachable(host: String, detail: String)
@@ -48,8 +48,8 @@ public struct HostInstaller {
         public var description: String {
             switch self {
             case let .command(detail): return "ssh: \(detail)"
-            case let .unsupportedPlatform(platform): return "no pigeon-host build for \(platform)"
-            case let .noArtifact(platform): return "no local pigeon-host binary for \(platform)"
+            case let .unsupportedPlatform(platform): return "no pigeon-server build for \(platform)"
+            case let .noArtifact(platform): return "no local pigeon-server binary for \(platform)"
             case let .rejected(detail): return "remote refused the install: \(detail)"
             // The detail is plumbing (missing builds, refused forwards): logged, not shown.
             case .noHost: return "Couldn't set up Pigeon on the server"
@@ -103,8 +103,8 @@ public struct HostInstaller {
         }
         let full = try hash(artifact)
         let version = String(full.prefix(16))
-        let directory = "$HOME/.pigeon/host/\(version)"
-        let path = "\(directory)/pigeon-host"
+        let directory = "$HOME/.pigeon/server/\(version)"
+        let path = "\(directory)/pigeon-server"
 
         // Cheap first question: is this exact content already there?
         let probe = try run(host, Self.remoteHash(path), nil)
@@ -154,7 +154,7 @@ public struct HostInstaller {
         """
         set -e
         mkdir -p "\(directory)"
-        tmp="\(directory)/pigeon-host.tmp"
+        tmp="\(directory)/pigeon-server.tmp"
         cat > "$tmp"
         chmod +x "$tmp"
         if command -v sha256sum >/dev/null 2>&1; then
@@ -166,15 +166,18 @@ public struct HostInstaller {
             rm -f "$tmp"
             # A rejected transfer leaves nothing behind, not even its directory.
             rmdir "\(directory)" 2>/dev/null || true
-            echo "pigeon-host: hash mismatch (got $got)" >&2
+            echo "pigeon-server: hash mismatch (got $got)" >&2
             exit 3
         fi
-        mv "$tmp" "\(directory)/pigeon-host"
+        mv "$tmp" "\(directory)/pigeon-server"
         # Newest two survive; older runs keep their own binary until the session restarts.
-        ls -1t "$HOME/.pigeon/host" 2>/dev/null | tail -n +3 | while read -r old; do
-            rm -rf "$HOME/.pigeon/host/$old"
+        ls -1t "$HOME/.pigeon/server" 2>/dev/null | tail -n +3 | while read -r old; do
+            rm -rf "$HOME/.pigeon/server/$old"
         done
-        printf '%s' "\(directory)/pigeon-host"
+        # Builds before the rename lived in ~/.pigeon/host. A host still running from there
+        # keeps working (the socket is the same); only its file goes.
+        rm -rf "$HOME/.pigeon/host"
+        printf '%s' "\(directory)/pigeon-server"
         """
     }
 
@@ -206,14 +209,14 @@ public struct HostInstaller {
         let triples = platforms.filter { $0.value == platform }.keys.sorted()
         for directory in directories {
             for triple in triples {
-                let named = directory.appendingPathComponent("pigeon-host-\(triple)")
+                let named = directory.appendingPathComponent("pigeon-server-\(triple)")
                 if FileManager.default.isExecutableFile(atPath: named.path) {
                     return named
                 }
                 // cargo keeps the triple in the path (`target/<triple>/release`) and the
                 // binary under its plain name.
                 if directory.pathComponents.contains(triple) {
-                    let plain = directory.appendingPathComponent("pigeon-host")
+                    let plain = directory.appendingPathComponent("pigeon-server")
                     if FileManager.default.isExecutableFile(atPath: plain.path) {
                         return plain
                     }
@@ -234,7 +237,7 @@ public struct HostInstaller {
             directories.append(URL(fileURLWithPath: explicit))
         }
         if let resources {
-            directories.append(resources.appendingPathComponent("host"))
+            directories.append(resources.appendingPathComponent("server"))
         }
         for triple in platforms.keys.sorted() {
             directories.append(

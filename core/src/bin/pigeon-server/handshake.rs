@@ -25,7 +25,7 @@ pub fn hello(proto: u16, features: &[String], state: &mut ClientState) -> Messag
     state.status_all = offered.iter().any(|f| f == "status_all");
     Message::HelloAck {
         proto: PROTO_VERSION,
-        server: format!("pigeon-host {}", env!("CARGO_PKG_VERSION")),
+        server: format!("pigeon-server {}", env!("CARGO_PKG_VERSION")),
         features: offered,
         host_id: hostname(),
         client_id: state.client_id,

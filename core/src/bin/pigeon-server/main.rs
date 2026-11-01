@@ -35,14 +35,14 @@ fn main() -> ExitCode {
     {
         Ok(runtime) => runtime,
         Err(error) => {
-            eprintln!("pigeon-host: cannot start runtime: {error}");
+            eprintln!("pigeon-server: cannot start runtime: {error}");
             return ExitCode::FAILURE;
         }
     };
     match runtime.block_on(run()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("pigeon-host: {error}");
+            eprintln!("pigeon-server: {error}");
             ExitCode::FAILURE
         }
     }

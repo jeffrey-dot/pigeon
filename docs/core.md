@@ -24,7 +24,7 @@
 
 1. **嵌入（首选，低延迟）**：客户端把 core 编进进程（Swift/C 走静态库或 dylib + C ABI；Rust 客户端直接依赖 crate 并只用 `pigeon_core::api`，见 §4.1），
    自己驱动渲染循环；PTY 可以由客户端进程持有，也可以接后台进程。
-2. **会话宿主（持久化，默认）**：`pigeon-host` 用同一份 core 持有 PTY 与会话状态，窗口通过 socket 消费
+2. **会话宿主（持久化，默认）**：`pigeon-server` 用同一份 core 持有 PTY 与会话状态，窗口通过 socket 消费
    **快照 + 增量**。远端场景（ssh）也走这条。
 
 两条路径共享：同一套 parser/screen、同一份快照格式、同一套 OSC 7501 记录规则。
@@ -66,7 +66,7 @@ C ABI 是给非 Rust 客户端的。Rust 客户端（例如 M5 的 GTK4 客户�
 - `core/src/api/`：安全的 Rust API，分组与 §4 的表一一对应（pane / 快照 / 状态 / 布局 / 消息），
   用所有权表达生命周期，错误是 `Result<T, PgError>`。
 - `core/src/ffi/`：`api` 的薄包装，只做指针/长度转换、错误码、panic 捕获，不再直接碰内部模块。
-- `term` / `layout` / `status` / `session` / `proto` 只在 `internals` feature 下是 `pub`（默认开，给 `pigeon-host`
+- `term` / `layout` / `status` / `session` / `proto` 只在 `internals` feature 下是 `pub`（默认开，给 `pigeon-server`
   与 `core/tests/` 用）；客户端以 `default-features = false` 依赖时它们是私有模块，`api` 只重导出客户端需要的类型
   （快照/格子、状态记录、布局矩形、协议 `Message` 与编解码），“客户端不认识内部类型”在编译期成立。
 - Rust 客户端是独立 crate（`clients/linux/`），不进 `core/`。
@@ -93,7 +93,7 @@ PgSnapshot {            // 字段以 include/pigeon_core.h 为准，此处只写
 
 | 选项 | 优点 | 代价 | 结论 |
 |---|---|---|---|
-| **Rust + `alacritty_terminal`** | 生态最全（`vte` 解析器 + 成熟 `Term` 状态机）；C ABI 天然；性能上限高；`musl` 静态链接能把 `pigeon-host` 压进 3–8MB | 多一门语言 + 多一套构建 + FFI 胶水；M0 变慢 | **推荐（已选）** |
+| **Rust + `alacritty_terminal`** | 生态最全（`vte` 解析器 + 成熟 `Term` 状态机）；C ABI 天然；性能上限高；`musl` 静态链接能把 `pigeon-server` 压进 3–8MB | 多一门语言 + 多一套构建 + FFI 胶水；M0 变慢 | **推荐（已选）** |
 | **Swift + C ABI（备选）** | 与客户端同语言：无 FFI 胶水、无第二套构建；SwiftTerm 的 `Terminal` 已被大量使用，且能在 Linux 编译；`@_cdecl` 导出 C ABI 给其它语言客户端 | 性能调优空间比 Rust 小；`musl` 静态链接不可用，远端单文件体积难控；被第三方重度复用时生态弱 | 备选（触发条件见 `docs/plan.md` §3.1） |
 | C/C++ 核心 | 像 kitty 一样成熟的路子；C ABI 天然 | 手写内存管理，VT 状态机易出错 | 备选 |
 | Zig（libghostty-vt） | 直接复用 Ghostty 的内核 | 依赖上游演进；生态较新 | 备选 |
@@ -127,7 +127,7 @@ SwiftTerm 同时保留为**对账参考**（M1 起的 `tools/vt-parity`），因
 
 | 里程碑 | 内核相关 |
 |---|---|
-| M0 | 内核库 + 最小 C 头 + macOS 客户端 + 本地 `pigeon-host`（关窗口不断任务） |
+| M0 | 内核库 + 最小 C 头 + macOS 客户端 + 本地 `pigeon-server`（关窗口不断任务） |
 | M1 | 布局在核心里（`pg_layout_*`），客户端只画矩形与分隔线 |
 | M2 | 协议版本协商、多窗口同看一个会话、后台进程崩溃提示 |
 | M3 | 状态记录（OSC 7501）从核心里读；侧栏只做展示与排序 |

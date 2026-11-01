@@ -12,11 +12,11 @@ name = "pigeon_core"
 crate-type = ["rlib", "staticlib", "cdylib"]
 
 [[bin]]
-name = "pigeon-host"
-path = "src/bin/pigeon-host/main.rs"
+name = "pigeon-server"
+path = "src/bin/pigeon-server/main.rs"
 required-features = ["host", "internals"]
 
-# Spawns the pigeon-host binary, which needs the host feature to exist.
+# Spawns the pigeon-server binary, which needs the host feature to exist.
 [[test]]
 name = "host"
 path = "tests/host.rs"
@@ -30,7 +30,7 @@ required-features = ["internals"]
 
 [features]
 default = ["host", "internals"]
-# Makes term/layout/status/session/proto public for pigeon-host and the
+# Makes term/layout/status/session/proto public for pigeon-server and the
 # integration tests. Clients turn default features off and use `api` only.
 internals = []
 # Host-only dependencies: the library itself must build without a runtime or a

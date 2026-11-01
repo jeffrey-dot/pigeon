@@ -36,7 +36,7 @@
 └───────────────────────────┬─────────────────────────────────────┘
                             │ unix socket（本机）/ ssh 转发（远端）
 ┌───────────────────────────┴─────────────────────────────────────┐
-│ pigeon-host（无窗口，也可推到远端）：每个 pane 一个 PTY            │
+│ pigeon-server（无窗口，也可推到远端）：每个 pane 一个 PTY            │
 │   ├─ pigeon-core（Rust，C ABI）：完整 VT 状态机 + 布局 + 状态记录   │
 │   ├─ LayoutTree：会话/窗口/pane 的几何与焦点                      │
 │   ├─ StatusStore：解析 pane 字节流里的 OSC 7501                   │
@@ -83,7 +83,7 @@ Rust 写的客户端（如 GTK4 + `gtk4-rs`）走与之一一对应的安全 API
 | 层 | 平台 | 说明 |
 |---|---|---|
 | `core/`（VT / 布局 / OSC 7501 / 协议 / 会话） | 全平台 | Rust；只许 std + POSIX 绑定；无 UI、无字体、无图形 API；`unsafe` 只在 `ffi.rs` |
-| `pigeon-host`（PTY + 会话宿主；本机与远端同一个二进制） | 全平台 | `core/` 里的 bin；用 `portable-pty`（forkpty/openpty 的安全封装）；静态单文件 3–8MB（见 `docs/remote.md`） |
+| `pigeon-server`（PTY + 会话宿主；本机与远端同一个二进制） | 全平台 | `core/` 里的 bin；用 `portable-pty`（forkpty/openpty 的安全封装）；静态单文件 3–8MB（见 `docs/remote.md`） |
 | `include/pigeon_core.h` | 全平台 | 由 `cbindgen` 从 `core/src/ffi/mod.rs` 生成，非 Rust 客户端共用的唯一 C ABI 面；Rust 客户端用对应的 `pigeon_core::api` |
 | 客户端 | 按平台 | macOS：**AppKit**（`NSOutlineView` 侧栏 + 自绘网格，M0 首发）；Linux：**GTK4**（M5）。为什么不用 winit/Qt/Electron 见 `docs/gui.md` |
 
@@ -116,7 +116,7 @@ tmux attach（前台，一个普通程序）
 |---|---|---|---|
 | 普通终端（kitty/iTerm） | 窗口进程 | 进程被杀（SIGHUP） | ❌ |
 | tmux | `tmux server` | 继续跑 | ✅ |
-| **pigeon** | **`pigeon-host`** | 继续跑 | ✅（连回去要一份屏幕快照即可重画） |
+| **pigeon** | **`pigeon-server`** | 继续跑 | ✅（连回去要一份屏幕快照即可重画） |
 
 具体来说，后台进程负责：
 
@@ -132,34 +132,34 @@ tmux attach（前台，一个普通程序）
 打开 pigeon.app
    ├─ 连 /tmp/pigeon-501.sock
    │    ├─ 连上 → 复用（列出已有会话）
-   │    └─ 连不上 → fork 一个 pigeon-host（setsid 脱离父进程）→ 再连
+   │    └─ 连不上 → fork 一个 pigeon-server（setsid 脱离父进程）→ 再连
    └─ 拿快照，画窗口
 
 关窗口 → 窗口进程退出，后台继续跑
 再打开 → 连上、要快照、原样恢复
 ```
 
-两个产物：`Pigeon.app`（窗口）与 `pigeon-host`（无窗口的会话宿主，3–8 MB，本机自动拉起、远端按需推送）。
+两个产物：`Pigeon.app`（窗口）与 `pigeon-server`（无窗口的会话宿主，3–8 MB，本机自动拉起、远端按需推送）。
 
-**本机是不是装了两个应用？** 不是。`pigeon-host` 打包在 `Pigeon.app/Contents/Helpers/` 里，
+**本机是不是装了两个应用？** 不是。`pigeon-server` 打包在 `Pigeon.app/Contents/Helpers/` 里，
 随 app 一起签名/公证/升级；Dock 里只有一个图标、/Applications 里只有一个 app。
-运行时 `ps` 会看到两个进程（`Pigeon` + `pigeon-host`）——和 Chrome 的 helper、VSCode 的后端进程一样。
-关窗口 / `⌘Q` / 窗口崩溃 = 窗口进程退出、`pigeon-host` 继续；结束全部会话走单独的菜单项 `End All Sessions on This Mac…`（会确认）。
-本机宿主像 tmux server 一样启动（issue #2）：连不上 socket 时，客户端跑 `pigeon-host --detach`，
+运行时 `ps` 会看到两个进程（`Pigeon` + `pigeon-server`）——和 Chrome 的 helper、VSCode 的后端进程一样。
+关窗口 / `⌘Q` / 窗口崩溃 = 窗口进程退出、`pigeon-server` 继续；结束全部会话走单独的菜单项 `End All Sessions on This Mac…`（会确认）。
+本机宿主像 tmux server 一样启动（issue #2）：连不上 socket 时，客户端跑 `pigeon-server --detach`，
 它在**新的进程组**里拉起宿主、等 socket 能连上再返回。宿主因此不是窗口的子进程，`⌘Q`、崩溃、`kill -9` 窗口都带不走它。
 **不向系统注册任何东西**（不写 LaunchAgent、没有登录项），所以 macOS 不会提示“可在后台运行”；
 代价是不随登录自启、崩溃不自动拉回，下次打开窗口时再拉起（上次的屏幕由状态文件恢复成“已结束”的会话）。
 旧版本注册过的 `~/Library/LaunchAgents/dev.pigeon.host.plist` 在启动时删掉（宿主还在跑就不 `bootout`，免得带走会话）。
 `End All Sessions on This Mac…` 发协议消息 `shutdown`：结束所有会话、删掉 socket 与状态文件，宿主退出。
 日志写 `~/.config/pigeon/host.log`（追加）。
-不需要 root，不开网络端口，`ps` 里只看到一个 `pigeon-host`。Linux 客户端届时用 systemd user unit 做同样的事。
+不需要 root，不开网络端口，`ps` 里只看到一个 `pigeon-server`。Linux 客户端届时用 systemd user unit 做同样的事。
 
 ### 3.4 远端（SSH：同一后台进程装到服务器上）
 
-远端跑**同一个** `pigeon-host`（3–8 MB 的小宿主，自动推送安装），本机窗口通过系统 `ssh` 连过去，接管服务器上的终端。
+远端跑**同一个** `pigeon-server`（3–8 MB 的小宿主，自动推送安装），本机窗口通过系统 `ssh` 连过去，接管服务器上的终端。
 细节见 **`docs/remote.md`**，三条要点：
 
-1. **三种对接**（自动探测并明示）：`ssh host pigeon-host --proxy`（stdio 桥接，推荐）→ unix socket 直转 →
+1. **三种对接**（自动探测并明示）：`ssh host pigeon-server --proxy`（stdio 桥接，推荐）→ unix socket 直转 →
    退化模式（普通 ssh，仍能显示 OSC 7501 状态，但没有远端持久化）。
 2. **安装**：客户端首次连接时自动推送并安装（先打印命令与哈希再执行，`--no-remote-install` 可关）；
    推对应架构的静态二进制 + sha256 校验；不静默覆盖已有版本、不改远端 shell 配置。
@@ -210,7 +210,7 @@ tmux attach（前台，一个普通程序）
 
 | 里程碑 | 交付 | 验收 |
 |---|---|---|
-| **M0 单 pane + 后台会话进程** | Rust 内核（C ABI）+ AppKit 客户端 + `pigeon-host` + 快照复原 | vim/htop/less/Pi TUI 正常；中文/宽字符/真彩色；resize；无重复应答；**关窗口后进程继续跑、重开屏幕原样** |
+| **M0 单 pane + 后台会话进程** | Rust 内核（C ABI）+ AppKit 客户端 + `pigeon-server` + 快照复原 | vim/htop/less/Pi TUI 正常；中文/宽字符/真彩色；resize；无重复应答；**关窗口后进程继续跑、重开屏幕原样** |
 | **M1 分屏** | 自己的 LayoutTree + 多 pane | 左右/上下/三格/四格嵌套；拖动分隔线；缩放；焦点切换；关窗口后所有 pane 继续跑 |
 | **M2 多客户端与健壮性** | 协议版本协商、多窗口同看一个会话、后台进程崩溃处理、**滚动回看**（滚轮 / PageUp·PageDown / 滚动条） | 两个窗口看同一会话尺寸正确；`kill -9` 后台进程有明确提示并可重开；协议版本不匹配拒绝连接并说明；**能回看全部历史（默认 1 万行）、备用屏（alt）下禁用回看、offset>0 时不画光标、重连后仍可回看** |
 | **M3 侧栏** | 树 + 状态 + 未读 + 通知 + 跳转 | 分组与计数正确；`blocked` 优先；后台 pane 状态可见；kill -9 后 ≤5s 回落；点击/键盘都能跳 |
@@ -274,7 +274,7 @@ M2 落地后仍在的洞（M2 的验收记录见 `docs/m2-checklist.md`）。
 | 布局只有单 pane | `core/src/layout/` 的布局树 + `pg_layout_*` 全实现；宿主每 pane 独立 PTY/actor；客户端按 `PgRect` 分屏 |
 | 滚动回看（翻页） | **宿主侧**回看：`scroll{pane_id, offset}`（负=往历史看，0=回到底部）由宿主在 10,000 行滚动缓冲里切片，回给客户端的是一屏 `snapshot`（`Snapshot::scrolled`），历史不再整段过线；每连接的 offset 独立，回看期间该 pane 的实时帧暂停。客户端只把滚轮/PageUp·PageDown 换成 `scroll` 请求。`scroll` 答复额外带 `history_len`/`offset`，侧栏位置条据此绘制；`scrollback` 仍随 `attach` 下发（重连要原样画回来） |
 | VT 对账（`tools/vt-parity`） | `run.sh` + `core/examples/vt-dump`：同一段字节喂内核与 tmux `capture-pane` 逐行比较，8 条语料（basic/cursor/erase/wide/scroll-region/alt-screen/insert-delete/wrap）全 ok；`--record` 重录 golden；顺带修掉 tab 占位符漏进快照的真 bug |
-| 远端（M4） | `pigeon-host --stdio`（ssh 通道 + socket 双入口）、`--proxy`（stdio↔socket 帧桥）、`--socket-path`；客户端 `HostInstaller`（uname 探测 → 平台匹配产物 → 内容哈希版本目录 → 远端校验后才上线 → 只留两版）与 `RemoteSession`（A `--proxy` / B `ssh -L` / C plain ssh + 客户端本地 VT 的 A→B→C 探测）；多主机侧栏分组 `host / project` + `Hosts` 菜单 + 侧栏 `Machines` 分组（每台主机一行、connected/connecting/offline）、`~/.config/pigeon/hosts.json`、窗口级断线重连（远端模式重新探测 A→B→C）。在 `ssh arch`（Linux x86_64、fish 登录 shell）上实跑：首传/命中/篡改拒绝、A、B 退化、30s 断连后 200 行逐行一致。见 `docs/m4-checklist.md` |
+| 远端（M4） | `pigeon-server --stdio`（ssh 通道 + socket 双入口）、`--proxy`（stdio↔socket 帧桥）、`--socket-path`；客户端 `HostInstaller`（uname 探测 → 平台匹配产物 → 内容哈希版本目录 → 远端校验后才上线 → 只留两版）与 `RemoteSession`（A `--proxy` / B `ssh -L` / C plain ssh + 客户端本地 VT 的 A→B→C 探测）；多主机侧栏分组 `host / project` + `Hosts` 菜单 + 侧栏 `Machines` 分组（每台主机一行、connected/connecting/offline）、`~/.config/pigeon/hosts.json`、窗口级断线重连（远端模式重新探测 A→B→C）。在 `ssh arch`（Linux x86_64、fish 登录 shell）上实跑：首传/命中/篡改拒绝、A、B 退化、30s 断连后 200 行逐行一致。见 `docs/m4-checklist.md` |
 | `zoom_pane` / `unzoom` | 布局树 `zoom` 字段 + 宿主两个 handler + `layout.zoom` 下发；客户端 ⌘⇧↩ 切换、兄弟 pane 隐藏但保活（unzoom 立即还原嵌套比例）；`pg_msg_layout_zoom` 进 C ABI |
 | 多客户端尺寸策略与 `size_state` | 宿主实现 `latest`/`smallest`/`locked`（策略由首个 `attach` 决定、`locked` 只认 owner、`latest` 跟最后一个 focus/keys），每次尺寸变化广播 `size_state{pane_id, cols, rows, source, clients}`；`hello_ack.client_id` 也换成真实的每连接 id。侧栏在 age 位显示 `2× latest`。见 `docs/m2-checklist.md` |
 | 程序的颜色查询（OSC 4/10/11） | 客户端通过 `appearance` 把当前色板交给宿主，宿主用 `Event::ColorRequest` 的 formatter 回 `rgb:rrrr/gggg/bbbb`；TUI（pi 等）因此能自己选亮/深主题；见 `docs/protocol.md` §3 与 `core/tests/host.rs` 的 `appearance_reaches_existing_panes_and_a_malformed_one_keeps_the_previous` |
@@ -297,7 +297,7 @@ M2 落地后仍在的洞（M2 的验收记录见 `docs/m2-checklist.md`）。
 | PTY 走 `portable-pty` 而不是原始 fd | 为了让 `core/src`（除 `ffi/`）零 `unsafe` | 需要原始 fd 做特殊 ioctl 时 |
 | `swift test` 依赖完整 Xcode | `xcode-select` 指向 CLT 时需 `DEVELOPER_DIR` | 换 swift-testing 或写进 README |
 
-**平台说明**：`pigeon-host` 在 macOS 与 Linux 用同一份代码；CI 的 `rust` 作业在 ubuntu 与 macos 各跑一遍
+**平台说明**：`pigeon-server` 在 macOS 与 Linux 用同一份代码；CI 的 `rust` 作业在 ubuntu 与 macos 各跑一遍
 `cargo test`（含 spawn 真实 PTY 的宿主用例）。首跑记录：
 M0 <https://github.com/jeffrey-dot/pigeon/actions/runs/40633073432>（`4adc398`，64 passed）、
 M1 <https://github.com/jeffrey-dot/pigeon/actions/runs/40635575813>（`6637f5c`，86 passed）。

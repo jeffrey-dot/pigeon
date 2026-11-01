@@ -22,12 +22,12 @@ pub async fn serve(socket: &Path, transport: Transport, host: HostState) -> Resu
     let restored = persist::restore(&host, &state).await;
     if restored > 0 {
         eprintln!(
-            "pigeon-host: restored {restored} session(s) from {}",
+            "pigeon-server: restored {restored} session(s) from {}",
             state.display()
         );
     }
     persist::start(host.clone(), state.clone());
-    eprintln!("pigeon-host listening on {}", socket.display());
+    eprintln!("pigeon-server listening on {}", socket.display());
 
     if transport == Transport::Stdio {
         // One extra client on this process's stdio. When the ssh channel closes the client
@@ -37,7 +37,7 @@ pub async fn serve(socket: &Path, transport: Transport, host: HostState) -> Resu
         tokio::spawn(async move {
             let stdio = tokio::io::join(tokio::io::stdin(), tokio::io::stdout());
             if let Err(error) = handle_client(stdio, host).await {
-                eprintln!("pigeon-host: stdio client gone: {error}");
+                eprintln!("pigeon-server: stdio client gone: {error}");
             }
         });
     }
@@ -53,14 +53,14 @@ pub async fn serve(socket: &Path, transport: Transport, host: HostState) -> Resu
         let (stream, _) = match accepted {
             Ok(pair) => pair,
             Err(error) => {
-                eprintln!("pigeon-host: accept failed: {error}");
+                eprintln!("pigeon-server: accept failed: {error}");
                 continue;
             }
         };
         let host = host.clone();
         tokio::spawn(async move {
             if let Err(error) = handle_client(stream, host).await {
-                eprintln!("pigeon-host: client gone: {error}");
+                eprintln!("pigeon-server: client gone: {error}");
             }
         });
     }
@@ -69,7 +69,7 @@ pub async fn serve(socket: &Path, transport: Transport, host: HostState) -> Resu
 /// `shutdown`: every session ends (SIGHUP → SIGKILL through `Cmd::Kill`), nothing is left
 /// to restore, and the socket goes away so the next window starts a fresh host.
 async fn shut_down(host: &HostState, socket: &Path, state: &Path) {
-    eprintln!("pigeon-host: shutting down on request");
+    eprintln!("pigeon-server: shutting down on request");
     let senders: Vec<_> = {
         let map = host.sessions.lock().await;
         map.values()
@@ -96,7 +96,9 @@ async fn shut_down(host: &HostState, socket: &Path, state: &Path) {
 async fn bind_private(socket: &Path) -> Result<UnixListener, String> {
     if std::fs::metadata(socket).is_ok_and(|meta| meta.file_type().is_socket()) {
         if UnixStream::connect(socket).await.is_ok() {
-            return Err(format!("another pigeon-host is already serving {socket:?}"));
+            return Err(format!(
+                "another pigeon-server is already serving {socket:?}"
+            ));
         }
         // Nobody listening: a crashed host left its socket behind.
         let _ = std::fs::remove_file(socket);
@@ -131,7 +133,7 @@ async fn bind_private(socket: &Path) -> Result<UnixListener, String> {
 /// bridge must not care which protocol version the two ends agreed on.
 ///
 /// With nothing listening (first connect after a reboot, or the host crashed) it starts a
-/// host first, so `ssh host pigeon-host --proxy` is the only command a client ever needs.
+/// host first, so `ssh host pigeon-server --proxy` is the only command a client ever needs.
 pub async fn proxy(socket: &Path, shell: &str) -> Result<(), String> {
     let stream = match UnixStream::connect(socket).await {
         Ok(stream) => stream,
