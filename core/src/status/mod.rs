@@ -528,4 +528,21 @@ mod tests {
         store.feed(&report("state=done"));
         assert_eq!(store.len(), 1, "the scanner recovers after the garbage");
     }
+
+    #[test]
+    fn overlong_complete_sequence_never_becomes_a_record() {
+        let mut store = StatusStore::new();
+        let mut bytes = b"\x1b]7501;state=working:id=".to_vec();
+        bytes.extend(std::iter::repeat_n(b'x', MAX_SEQUENCE));
+        bytes.push(0x07);
+        store.feed(&bytes);
+        assert!(store.is_empty(), "a terminated over-limit report is dropped too");
+    }
+
+    #[test]
+    fn control_characters_in_app_drop_the_whole_report() {
+        let mut store = StatusStore::new();
+        store.feed(&report("id=a:state=blocked:app=p\u{1}i"));
+        assert!(store.is_empty(), "no half-applied record without its app");
+    }
 }
