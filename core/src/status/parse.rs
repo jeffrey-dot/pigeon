@@ -3,8 +3,9 @@
 //! (title). Everything else is ignored.
 //!
 //! Spec rules implemented here (see `docs/plan.md` §4 and `AGENTS.md` §7):
-//!   * an over-long, undecodable, or control-character-carrying report is dropped
-//!     **whole** — never half-applied;
+//!   * an over-long (> [`MAX_SEQUENCE`] bytes, terminated or not), non-UTF-8,
+//!     undecodable, or control-character-carrying report (in any field) is
+//!     dropped **whole** — never half-applied;
 //!   * unknown fields and unknown states are ignored, not fatal;
 //!   * the scanner keeps a bounded tail so a sequence split across reads still
 //!     resolves exactly once.
@@ -54,8 +55,15 @@ pub(crate) fn take_osc(buf: &mut Vec<u8>, out: &mut Vec<(Vec<u8>, Vec<u8>)>) {
             return;
         };
 
+        let total = PREFIX.len() + consumed;
+        if total > MAX_SEQUENCE {
+            // Over the limit is over the limit, whether it arrived in one read or
+            // many: the whole sequence goes.
+            buf.drain(..total);
+            continue;
+        }
         let body = buf[PREFIX.len()..PREFIX.len() + body_end].to_vec();
-        buf.drain(..PREFIX.len() + consumed);
+        buf.drain(..total);
         let split = body.iter().position(|byte| *byte == b';');
         let (code, payload) = match split {
             Some(index) => (body[..index].to_vec(), body[index + 1..].to_vec()),
@@ -106,32 +114,33 @@ fn percent_decode(text: &str) -> Option<String> {
 }
 
 pub(crate) fn parse(body: &[u8]) -> Parsed {
+    // Checked over the whole body so no field, known or not, can carry a control
+    // character or broken UTF-8 into a record that is otherwise applied.
+    let Ok(body) = std::str::from_utf8(body) else {
+        return Parsed::Ignore;
+    };
+    if has_control_chars(body) {
+        return Parsed::Ignore;
+    }
+
     let mut state = None;
     let mut id = String::new();
     let mut kind = String::new();
     let mut msg = String::new();
     let mut app = String::new();
 
-    for pair in body.split(|byte| *byte == b':') {
-        let Some(eq) = pair.iter().position(|byte| *byte == b'=') else {
+    for pair in body.split(':') {
+        let Some((key, value)) = pair.split_once('=') else {
             continue;
         };
-        let (key, value) = (&pair[..eq], &pair[eq + 1..]);
         if key.is_empty() || value.is_empty() {
             continue;
         }
-        let (Ok(key), Ok(value)) = (std::str::from_utf8(key), std::str::from_utf8(value)) else {
-            continue;
-        };
         match key {
             "state" => state = Some(value.to_owned()),
             "id" => id = value.to_owned(),
             "kind" => kind = value.to_owned(),
-            "app" => {
-                if !has_control_chars(value) {
-                    app = value.to_owned();
-                }
-            }
+            "app" => app = value.to_owned(),
             "msg" => match decode_message(value) {
                 Some(text) => msg = text,
                 // A message that does not decode takes the whole report down.
@@ -213,7 +222,7 @@ fn keep_prefix_tail(buf: &mut Vec<u8>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse, take_osc, Parsed};
+    use super::{parse, take_osc, Parsed, MAX_SEQUENCE};
 
     fn bodies(chunks: &[&[u8]]) -> Vec<Vec<u8>> {
         let mut buf = Vec::new();
@@ -264,6 +273,44 @@ mod tests {
         buf.extend_from_slice(b"\x1b]7501;state=done\x07");
         take_osc(&mut buf, &mut out);
         assert_eq!(out, vec![(b"7501".to_vec(), b"state=done".to_vec())]);
+    }
+
+    #[test]
+    fn overlong_complete_sequence_is_discarded() {
+        // One read carries the whole over-limit sequence, terminator included.
+        let mut bytes = b"\x1b]7501;state=working:id=".to_vec();
+        bytes.extend(std::iter::repeat_n(b'x', MAX_SEQUENCE));
+        bytes.extend_from_slice(b"\x07\x1b]7501;state=done\x07");
+        assert_eq!(bodies(&[&bytes]), vec![b"state=done".to_vec()]);
+    }
+
+    #[test]
+    fn sequence_at_the_limit_is_kept() {
+        let head = b"\x1b]7501;state=done:id=";
+        let mut bytes = head.to_vec();
+        bytes.extend(std::iter::repeat_n(b'x', MAX_SEQUENCE - head.len() - 1));
+        bytes.push(0x07);
+        assert_eq!(bytes.len(), MAX_SEQUENCE);
+        assert_eq!(bodies(&[&bytes]).len(), 1);
+    }
+
+    #[test]
+    fn control_characters_in_any_field_drop_the_whole_report() {
+        for body in [
+            "state=working:id=w\u{1}1".as_bytes(),
+            "state=working:kind=perm\u{1}ission".as_bytes(),
+            "state=working:app=p\u{1}i".as_bytes(),
+            "state=work\u{1}ing".as_bytes(),
+            "state=working:app=p\u{85}i".as_bytes(),
+            "state=working:future=a\u{7f}b".as_bytes(),
+        ] {
+            assert_eq!(parse(body), Parsed::Ignore, "{body:?}");
+        }
+    }
+
+    #[test]
+    fn non_utf8_report_is_dropped_whole() {
+        assert_eq!(parse(b"state=working:app=p\xffi"), Parsed::Ignore);
     }
 
     #[test]
