@@ -220,6 +220,25 @@ pub trait Term {
         snapshot.history.clear();
         snapshot
     }
+    /// The screen plus only the newest `max_history` scrollback rows (oldest first): what
+    /// a history `attach` can fit in one frame, without converting the rows it would drop.
+    fn snapshot_with_recent_history(&self, max_history: usize) -> Snapshot {
+        let mut snapshot = self.snapshot();
+        let drop = snapshot.history.len().saturating_sub(max_history);
+        snapshot.history.drain(..drop);
+        snapshot
+    }
+    /// The given screen rows (out-of-range ones skipped) and a picture without `screen` or
+    /// `history` for the cursor/alt/scroll fields. A delta converts one row, not the grid.
+    fn screen_rows(&self, rows: &[u16]) -> (Vec<(u16, Vec<Cell>)>, Snapshot) {
+        let mut snapshot = self.screen_snapshot();
+        let picked = rows
+            .iter()
+            .filter_map(|y| snapshot.screen.get(usize::from(*y)).map(|cells| (*y, cells.clone())))
+            .collect();
+        snapshot.screen.clear();
+        (picked, snapshot)
+    }
     /// The screen scrolled back `offset` lines (clamped to the history), plus the history
     /// length; equal to `snapshot().scrolled(offset)` without `history`. Engines override it
     /// to convert one screen of rows instead of the whole backlog on every scroll step.
