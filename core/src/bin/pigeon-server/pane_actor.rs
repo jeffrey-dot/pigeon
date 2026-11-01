@@ -18,6 +18,12 @@ use crate::event::{encode, Event};
 use crate::host_state::{Exits, HostState, Meta};
 
 const SCROLLBACK: usize = 10_000;
+/// One PTY read. Big enough that `cat` of a large file takes a few reads per frame, not
+/// dozens; the buffer is reused, and each read becomes one owned chunk of exactly its size.
+const READ_CHUNK: usize = 64 * 1024;
+/// At most this many bytes are fed per batch before the per-batch work (metadata, status,
+/// replies, frame) runs, so a flood still yields to commands and frames regularly.
+const BATCH_BYTES: usize = 256 * 1024;
 /// At most one delta per pane per frame. A burst of output (`cat`, a build log) arrives in
 /// many small PTY reads, and one delta each would repaint the whole screen dozens of times
 /// per frame and flood an ssh link; a lone keystroke still goes out immediately.
@@ -91,7 +97,7 @@ fn start_reader(mut reader: Box<dyn Read + Send>) -> mpsc::Receiver<Vec<u8>> {
     let (pty_tx, pty_rx) = mpsc::channel::<Vec<u8>>(64);
     let debug = std::env::var_os("PIGEON_DEBUG").is_some();
     std::thread::spawn(move || {
-        let mut buffer = [0u8; 8192];
+        let mut buffer = vec![0u8; READ_CHUNK];
         loop {
             match reader.read(&mut buffer) {
                 Ok(0) | Err(_) => break,
@@ -187,7 +193,20 @@ impl PaneActor {
                 }
                 chunk = pty_rx.recv(), if output_open => {
                     match chunk {
-                        Some(chunk) => self.output(&chunk).await,
+                        Some(chunk) => {
+                            // Whatever else is already queued goes in the same batch, so
+                            // the per-batch work runs once per wake-up, not once per read.
+                            self.pane.feed(&chunk);
+                            let mut fed = chunk.len();
+                            while fed < BATCH_BYTES {
+                                let Ok(more) = pty_rx.try_recv() else {
+                                    break;
+                                };
+                                self.pane.feed(&more);
+                                fed += more.len();
+                            }
+                            self.after_feed().await;
+                        }
                         None => output_open = false,
                     }
                 }
