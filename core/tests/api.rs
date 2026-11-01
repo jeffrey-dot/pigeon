@@ -2,9 +2,9 @@
 //! client would; `abi.rs` covers the same behaviour through the C face.
 
 use pigeon_core::api::{
-    encode_frame, layout_focus, layout_rects, layout_splits, offers_feature, snapshot_of, Axis,
-    Config, Core, Message, Node, PgError, Scroll, SplitAxis, SplitNode, StatusState, WireCell,
-    WireCursor, PROTO_VERSION,
+    delta_of, encode_frame, layout_focus, layout_rects, layout_splits, layout_zoom, offers_feature,
+    sessions_of, snapshot_of, Axis, Config, Core, Message, Node, PgError, Row, Scroll, SessionInfo,
+    SplitAxis, SplitNode, StatusState, WireCell, WireCursor, PROTO_VERSION,
 };
 
 fn core_with_pane(cols: u16, rows: u16) -> (Core, u32) {
@@ -294,4 +294,89 @@ fn split_sizes_follow_the_ratio_and_resize_clamps_against_the_window() {
     // Closing gives the sibling the whole box back, in cells too.
     core.close(third).expect("close");
     assert_eq!(core.snapshot(second).expect("snap").cols, 100);
+}
+
+#[test]
+fn a_status_record_with_an_id_is_acked_by_seq_like_the_host_does() {
+    let (mut core, pane) = core_with_pane(40, 6);
+    core.feed(pane, b"\x1b]7501;state=done:id=w1\x07")
+        .expect("feed");
+    let seq = {
+        let (_, mut records) = core.focused_status().expect("status");
+        records.next().expect("record").seq
+    };
+    assert!(core.ack_status(pane, seq).expect("ack"));
+    let (_, mut records) = core.focused_status().expect("status");
+    assert!(records.next().expect("record").acked);
+}
+
+#[test]
+fn a_delta_message_decodes_into_rows() {
+    let message = Message::Delta {
+        pane_id: 3,
+        seq: 9,
+        rows: vec![Row {
+            y: 1,
+            cells: vec![wire_cell('中'), wire_cell(' '), wire_cell('a')],
+        }],
+        cursor: Some(WireCursor {
+            x: 2,
+            y: 1,
+            visible: true,
+            shape: 0,
+        }),
+        scroll: None,
+        links: None,
+        alt: Some(true),
+        modes: None,
+    };
+    let delta = delta_of(&message).expect("delta");
+    assert_eq!((delta.pane_id, delta.seq, delta.alt), (3, 9, Some(true)));
+    assert_eq!(delta.rows.len(), 1);
+    let (y, cells) = &delta.rows[0];
+    assert_eq!(*y, 1);
+    assert_eq!((cells[0].width, cells[1].width, cells[2].width), (2, 0, 1));
+    assert_eq!(delta.cursor.map(|cursor| cursor.x), Some(2));
+    assert_eq!(delta_of(&layout_message()).err(), Some(PgError::InvalidArg));
+}
+
+#[test]
+fn layout_zoom_and_sessions_are_read_through_the_api() {
+    let Message::Layout {
+        session_id, tree, ..
+    } = layout_message()
+    else {
+        panic!("layout");
+    };
+    let zoomed = Message::Layout {
+        session_id,
+        tree,
+        zoom: Some(2),
+        focus: None,
+    };
+    assert_eq!(layout_zoom(&zoomed), Ok(Some(2)));
+    assert_eq!(layout_zoom(&layout_message()), Ok(None));
+    assert_eq!(
+        layout_zoom(&Message::Pong { ts: 1 }).err(),
+        Some(PgError::InvalidArg)
+    );
+
+    let sessions = Message::Sessions {
+        items: vec![SessionInfo {
+            session_id: 4,
+            title: "t".into(),
+            cwd: "/tmp".into(),
+            panes: vec![5, 6],
+            active_pane: Some(6),
+            active_title: None,
+            active_program: Some("vim".into()),
+        }],
+    };
+    let items = sessions_of(&sessions).expect("sessions");
+    assert_eq!(items.len(), 1);
+    assert_eq!((items[0].session_id, &items[0].panes[..]), (4, &[5, 6][..]));
+    assert_eq!(
+        sessions_of(&Message::Pong { ts: 1 }).err(),
+        Some(PgError::InvalidArg)
+    );
 }

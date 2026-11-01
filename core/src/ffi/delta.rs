@@ -9,7 +9,6 @@ use std::ptr;
 use super::msg::{msg_ref, PgMsgType};
 use super::{ffi_call, to_pg_cell, PgCell, PgCursor};
 use crate::error::PgError;
-use crate::proto::Message;
 
 /// One changed row of a `delta`.
 #[repr(C)]
@@ -47,11 +46,8 @@ pub extern "C" fn pg_msg_delta(msg: *const super::msg::PgMsg) -> *mut PgDelta {
         if msg.kind() != PgMsgType::PG_MSG_DELTA {
             return Err(PgError::InvalidArg);
         }
-        let message = msg.to_message()?;
-        let Message::Delta { pane_id, .. } = message else {
-            return Err(PgError::InvalidArg);
-        };
-        let delta = crate::session::delta_from_message(&message).ok_or(PgError::InvalidArg)?;
+        let delta = crate::api::delta_of(&msg.to_message()?)?;
+        let pane_id = delta.pane_id;
         let rows = delta
             .rows
             .into_iter()

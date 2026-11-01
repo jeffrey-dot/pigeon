@@ -154,10 +154,10 @@ impl Core {
         Ok((pane.pane_id, pane.status().records()))
     }
 
-    /// Marks the pane's default done/error record as seen; false when `seq`
-    /// is not its current one.
+    /// Marks the done/error record carrying `seq` as seen, whatever its id, exactly
+    /// like the host's `ack_status`; false when no such record is pending.
     pub fn ack_status(&mut self, pane_id: PaneId, seq: u32) -> PgResult<bool> {
-        Ok(self.pane_mut(pane_id)?.status_mut().ack("", seq))
+        Ok(self.pane_mut(pane_id)?.status_mut().ack_seq(seq))
     }
 
     /// Splits a pane and returns the **new pane id**, which takes focus. Both halves

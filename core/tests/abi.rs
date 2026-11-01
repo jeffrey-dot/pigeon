@@ -534,3 +534,55 @@ fn layout_resize_clamps_against_the_window_and_split_honours_the_ratio() {
     assert_eq!(cols_of(first), 85, "panes follow the new ratio");
     pg_core_free(core);
 }
+
+#[test]
+fn sessions_and_zoom_are_read_through_the_api_helpers() {
+    use pigeon_core::api::{Message, Node, SessionInfo};
+    use pigeon_core::ffi::{
+        pg_msg_decode_frame, pg_msg_free, pg_msg_layout_zoom, pg_msg_session_panes,
+        pg_msg_sessions_count,
+    };
+
+    let decode = |message: &Message| {
+        let frame = pigeon_core::api::encode_frame(message).expect("frame");
+        let mut consumed = 0usize;
+        let handle = pg_msg_decode_frame(frame.as_ptr(), frame.len(), &mut consumed);
+        assert!(!handle.is_null());
+        handle
+    };
+    let sessions = decode(&Message::Sessions {
+        items: vec![SessionInfo {
+            session_id: 1,
+            title: "t".into(),
+            cwd: "/".into(),
+            panes: vec![5, 6, 7],
+            active_pane: None,
+            active_title: None,
+            active_program: None,
+        }],
+    });
+    assert_eq!(pg_msg_sessions_count(sessions), 1);
+    let mut panes = [0u32; 2];
+    assert_eq!(
+        pg_msg_session_panes(sessions, 0, panes.as_mut_ptr(), panes.len()),
+        2
+    );
+    assert_eq!(panes, [5, 6]);
+    assert_eq!(
+        pg_msg_session_panes(sessions, 1, panes.as_mut_ptr(), panes.len()),
+        0
+    );
+    assert_eq!(pg_last_error_code(), PgErrorCode::PG_ERR_INVALID_ARG);
+
+    let layout = decode(&Message::Layout {
+        session_id: 1,
+        tree: Node::Leaf { leaf: 5 },
+        zoom: Some(5),
+        focus: None,
+    });
+    assert_eq!(pg_msg_layout_zoom(layout), 5);
+    assert_eq!(pg_msg_sessions_count(layout), 0, "not a sessions message");
+    assert_eq!(pg_last_error_code(), PgErrorCode::PG_ERR_INVALID_ARG);
+    pg_msg_free(sessions);
+    pg_msg_free(layout);
+}
