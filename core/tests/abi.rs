@@ -492,3 +492,45 @@ fn osc7501_disabled_in_the_config_keeps_status_empty() {
     assert_eq!(feed_status(1), 1);
     assert_eq!(feed_status(0), 0, "osc7501_enabled = 0 must reach the core");
 }
+
+#[test]
+fn layout_resize_clamps_against_the_window_and_split_honours_the_ratio() {
+    use pigeon_core::ffi::{pg_layout_resize, pg_layout_split, pg_layout_split_of, PgAxis};
+
+    let core = pg_core_new(ptr::null());
+    let first = pg_pane_new(core, &pane_options(100, 30));
+    let second = pg_layout_split(core, first, PgAxis::PG_AXIS_VERTICAL, 0.25);
+    assert!(second > 0);
+    let cols_of = |pane: u32| {
+        let snapshot = pg_pane_snapshot(core, pane);
+        assert!(!snapshot.is_null());
+        // SAFETY: owned here, freed right after.
+        let cols = unsafe { (*snapshot).cols };
+        pg_snapshot_free(snapshot);
+        cols
+    };
+    assert_eq!(cols_of(first), 25, "the old pane keeps the ratio's share");
+    assert_eq!(
+        cols_of(second),
+        75,
+        "the new pane gets the rest, not cols/2"
+    );
+
+    // The new, focused pane is not the window: the clamp must measure the 100 columns.
+    assert_eq!(pg_layout_focused(core), second);
+    let split = pg_layout_split_of(core, first);
+    assert!(pg_layout_resize(core, split, 0.85));
+    let blank = PgRect {
+        size: std::mem::size_of::<PgRect>() as u32,
+        pane_id: 0,
+        x: 0.0,
+        y: 0.0,
+        w: 0.0,
+        h: 0.0,
+    };
+    let mut rects = [blank; 2];
+    assert_eq!(pg_layout_rects(core, rects.as_mut_ptr(), rects.len()), 2);
+    assert!((rects[0].w - 0.85).abs() < 1e-5, "got {}", rects[0].w);
+    assert_eq!(cols_of(first), 85, "panes follow the new ratio");
+    pg_core_free(core);
+}

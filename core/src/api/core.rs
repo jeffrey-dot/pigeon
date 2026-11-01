@@ -39,6 +39,8 @@ pub struct Core {
     outboxes: BTreeMap<PaneId, Outbox>,
     /// Geometry and focus live in the layout tree; the map only holds panes.
     layout: Option<Layout>,
+    /// The window's size in cells: what the layout's normalized rects are fractions of.
+    window: (u16, u16),
     next_pane: PaneId,
 }
 
@@ -49,6 +51,7 @@ impl Core {
             panes: BTreeMap::new(),
             outboxes: BTreeMap::new(),
             layout: None,
+            window: (80, 24),
             next_pane: 1,
         }
     }
@@ -65,6 +68,7 @@ impl Core {
         pane.set_status_enabled(self.config.osc7501_enabled);
         self.panes.insert(pane_id, pane);
         self.layout = Some(Layout::new(pane_id));
+        self.window = (cols.max(2), rows.max(1));
         Ok(pane_id)
     }
 
@@ -85,12 +89,23 @@ impl Core {
         Ok(())
     }
 
+    /// Resizes one pane. The window is taken to be whatever box gives this pane that
+    /// grid at its current rect, so later layout changes divide the right extent.
     pub fn resize(&mut self, pane_id: PaneId, cols: u16, rows: u16) -> PgResult<()> {
         let pane = self.panes.get_mut(&pane_id).ok_or(PgError::NoSuchPane)?;
         pane.resize(cols, rows);
-        let (_, rows) = pane.size();
+        let (cols, rows) = pane.size();
         if let Some(outbox) = self.outboxes.get_mut(&pane_id) {
             outbox.clip_rows(rows);
+        }
+        let rect = self.layout.as_ref().and_then(|layout| {
+            layout
+                .rects()
+                .into_iter()
+                .find_map(|(id, rect)| (id == pane_id).then_some(rect))
+        });
+        if let Some(rect) = rect {
+            self.window = window_for(rect, cols, rows, self.window);
         }
         Ok(())
     }
@@ -145,23 +160,20 @@ impl Core {
         Ok(self.pane_mut(pane_id)?.status_mut().ack("", seq))
     }
 
-    /// Splits a pane and returns the **new pane id**, which takes focus.
+    /// Splits a pane and returns the **new pane id**, which takes focus. Both halves
+    /// get the share of the window their rect says, not a fixed half.
     pub fn split(&mut self, pane_id: PaneId, axis: Axis, ratio: f32) -> PgResult<PaneId> {
-        // The target pane's own size is the extent being divided.
+        // The target pane's own size is the extent being divided (its minimum clamp).
         let (cols, rows) = self.pane(pane_id)?.size();
         let new_id = self.allocate_pane_id();
         let history = self.scrollback_lines();
         let layout = self.layout.as_mut().ok_or(PgError::NoSuchPane)?;
         layout.split(pane_id, new_id, axis, ratio, cols, rows)?;
-        let (child_cols, child_rows) = match axis {
-            Axis::Vertical => ((cols / 2).max(2), rows),
-            Axis::Horizontal => (cols, (rows / 2).max(1)),
-        };
-        let mut pane = PaneState::new(new_id, child_cols, child_rows, history);
-        pane.resize(child_cols, child_rows);
+        let _ = layout.focus(new_id);
+        let mut pane = PaneState::new(new_id, cols, rows, history);
         pane.set_status_enabled(self.config.osc7501_enabled);
         self.panes.insert(new_id, pane);
-        let _ = layout.focus(new_id);
+        self.fit_panes();
         Ok(new_id)
     }
 
@@ -172,14 +184,18 @@ impl Core {
         if let Some(layout) = self.layout.as_mut() {
             layout.close(pane_id)?;
         }
+        self.fit_panes();
         Ok(())
     }
 
-    /// Changes a split's ratio, clamped so both sides keep their minimum size.
+    /// Changes a split's ratio, clamped so both sides keep their minimum size inside
+    /// the window (not inside whichever pane happens to have focus).
     pub fn set_split_ratio(&mut self, split_id: SplitId, ratio: f32) -> PgResult<()> {
-        let (cols, rows) = self.focused_pane()?.size();
+        let (cols, rows) = self.window;
         let layout = self.layout.as_mut().ok_or(PgError::NoSuchSplit)?;
-        layout.set_ratio(split_id, ratio, cols, rows)
+        layout.set_ratio(split_id, ratio, cols, rows)?;
+        self.fit_panes();
+        Ok(())
     }
 
     /// One normalized rect per pane, in tree order.
@@ -208,6 +224,27 @@ impl Core {
 
     pub fn focused(&self) -> Option<PaneId> {
         self.layout.as_ref().and_then(Layout::focused)
+    }
+
+    /// Gives every pane the grid its rect covers in the window.
+    fn fit_panes(&mut self) {
+        let Some(layout) = self.layout.as_ref() else {
+            return;
+        };
+        let (cols, rows) = self.window;
+        for (pane_id, rect) in layout.rects() {
+            let Some(pane) = self.panes.get_mut(&pane_id) else {
+                continue;
+            };
+            let wanted = cells_of(rect, cols, rows);
+            if pane.size() == wanted {
+                continue;
+            }
+            pane.resize(wanted.0, wanted.1);
+            if let Some(outbox) = self.outboxes.get_mut(&pane_id) {
+                outbox.clip_rows(wanted.1);
+            }
+        }
     }
 
     fn allocate_pane_id(&mut self) -> PaneId {
@@ -243,4 +280,26 @@ impl Core {
             lines => usize::try_from(lines.min(100_000)).unwrap_or(10_000),
         }
     }
+}
+
+/// A rect's share of the window in cells, with the minimum a VT grid needs.
+fn cells_of(rect: Rect, cols: u16, rows: u16) -> (u16, u16) {
+    let cols = ((rect.w * f32::from(cols)).round() as u16).max(2);
+    let rows = ((rect.h * f32::from(rows)).round() as u16).max(1);
+    (cols, rows)
+}
+
+/// The window a pane of `cols`x`rows` at `rect` implies; `fallback` for an empty rect.
+fn window_for(rect: Rect, cols: u16, rows: u16, fallback: (u16, u16)) -> (u16, u16) {
+    let extent = |cells: u16, share: f32, old: u16| {
+        if share > 0.0 {
+            ((f32::from(cells) / share).round() as u16).max(1)
+        } else {
+            old
+        }
+    };
+    (
+        extent(cols, rect.w, fallback.0).max(2),
+        extent(rows, rect.h, fallback.1),
+    )
 }

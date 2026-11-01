@@ -272,3 +272,26 @@ fn osc7501_can_be_turned_off() {
     let (_, records) = core.focused_status().expect("status");
     assert_eq!(records.count(), 0);
 }
+
+#[test]
+fn split_sizes_follow_the_ratio_and_resize_clamps_against_the_window() {
+    let (mut core, first) = core_with_pane(100, 30);
+    let second = core.split(first, Axis::Horizontal, 0.5).expect("split");
+    assert_eq!(core.snapshot(first).expect("snap").rows, 15);
+    assert_eq!(core.snapshot(second).expect("snap").rows, 15);
+    let third = core.split(second, Axis::Vertical, 0.3).expect("split");
+    assert_eq!(core.snapshot(second).expect("snap").cols, 30);
+    assert_eq!(core.snapshot(third).expect("snap").cols, 70);
+
+    // The focused pane is 15 rows tall; the outer split divides the 30-row window, so
+    // 3-row minimums allow 0.9 (measured against the pane it would stop at 0.8).
+    let outer = core.split_of(first).expect("split_of").expect("split");
+    core.set_split_ratio(outer, 0.9).expect("resize");
+    let rects = core.rects().expect("rects");
+    assert!((rects[0].1.h - 0.9).abs() < 1e-5, "got {}", rects[0].1.h);
+    assert_eq!(core.snapshot(first).expect("snap").rows, 27);
+
+    // Closing gives the sibling the whole box back, in cells too.
+    core.close(third).expect("close");
+    assert_eq!(core.snapshot(second).expect("snap").cols, 100);
+}
