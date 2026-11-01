@@ -1,11 +1,14 @@
 ---
-# Builds pigeon-server for every platform a remote machine can be, and publishes them on the
-# GitHub release for the tag. The app downloads the one a server needs on first connect
-# (Sources/PigeonApp/Net/ServerDownload.swift), so Pigeon.app itself carries none of them.
+# Builds pigeon-server for every platform a remote machine can be, plus Pigeon.app, and
+# publishes them on the GitHub release for the tag. The app downloads the server a remote
+# needs on first connect (Sources/PigeonApp/Net/ServerDownload.swift), so Pigeon.app itself
+# carries none of them. latest.json, signed with secrets.PIGEON_UPDATE_KEY, tells installed
+# copies about the new version (docs/update.md).
 #
 #   git tag v0.1.0 && git push origin v0.1.0
 #
-# Asset names are a contract with ServerDownload: pigeon-server-<triple>.gz + SHA256SUMS.
+# Asset names are a contract with ServerDownload (pigeon-server-<triple>.gz + SHA256SUMS)
+# and with Updater (latest.json + Pigeon-<version>.zip).
 name: release
 "on":
   push:
@@ -77,8 +80,28 @@ jobs:
           name: pigeon-server-${{ matrix.triple }}
           path: dist/
 
+  # Pigeon.app itself, for the in-app updater (Sources/PigeonApp/Update/, docs/update.md).
+  app:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - name: build Pigeon.app
+        run: |
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          UNIVERSAL=1 tools/bundle-app.sh build
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' core/Cargo.toml | head -1)
+          mkdir -p dist
+          # ditto keeps the bundle's symlinks, modes and signature, which zip(1) does not.
+          ditto -c -k --keepParent build/Pigeon.app "dist/Pigeon-$version.zip"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pigeon-app
+          path: dist/
+
   publish:
-    needs: build
+    needs: [build, app]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -90,6 +113,28 @@ jobs:
       - name: checksums
         working-directory: dist
         run: sha256sum pigeon-server-*.gz | tee SHA256SUMS
+      # latest.json is what installed copies poll. Its signature covers version + archive
+      # hash (UpdateManifest.signedMessage); the private key never leaves this secret.
+      - name: sign the update
+        working-directory: dist
+        env:
+          PIGEON_UPDATE_KEY: ${{ secrets.PIGEON_UPDATE_KEY }}
+          REPO: ${{ github.repository }}
+        run: |
+          test -n "$PIGEON_UPDATE_KEY" || { echo "secret PIGEON_UPDATE_KEY is not set"; exit 1; }
+          tag="${{ inputs.tag || github.ref_name }}"
+          version=${tag#v}
+          zip="Pigeon-$version.zip"
+          sha=$(sha256sum "$zip" | cut -d' ' -f1)
+          key=$(mktemp)
+          trap 'rm -f "$key" message' EXIT
+          printf '%s\n' "$PIGEON_UPDATE_KEY" > "$key"
+          printf 'pigeon-update %s %s' "$version" "$sha" > message
+          signature=$(openssl pkeyutl -sign -inkey "$key" -rawin -in message | base64 | tr -d '\n')
+          url="https://github.com/$REPO/releases/download/$tag/$zip"
+          jq -n --arg v "$version" --arg u "$url" --arg h "$sha" --arg s "$signature" \
+            '{version: $v, url: $u, sha256: $h, signature: $s}' > latest.json
+          cat latest.json
       - name: publish
         env:
           GH_TOKEN: ${{ github.token }}
@@ -99,3 +144,5 @@ jobs:
           gh release view "$tag" >/dev/null 2>&1 \
             || gh release create "$tag" --title "$tag" --notes "pigeon $tag"
           gh release upload "$tag" dist/* --clobber
+          # releases/latest/download/latest.json follows the release marked latest.
+          gh release edit "$tag" --latest

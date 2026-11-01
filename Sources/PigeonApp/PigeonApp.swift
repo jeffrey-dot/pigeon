@@ -20,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var heartbeatTimer: Timer?
     private var recovering: [String: Int] = [:]
     private let hostAgent = HostAgent()
+    private let updates = UpdateController()
     /// Set by "End All Sessions on This Mac…" so the dropped socket is not taken for a crash.
     private var stoppedByUser = false
     /// The host whose layout is on screen; every host stays connected in the background.
@@ -125,6 +126,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hosts = hostsStore.load()
         buildMenu()
         buildWindow()
+        updates.start()
         if let host = ProcessInfo.processInfo.environment["PIGEON_REMOTE"], !host.isEmpty {
             startRemote(host, select: true)
             return
@@ -291,6 +293,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let appItem = NSMenuItem()
         mainMenu.addItem(appItem)
         let appMenu = NSMenu()
+        appMenu.addItem(updates.menuItem)
+        appMenu.addItem(.separator())
         // Quitting leaves the host and its sessions running; ending them is its own command.
         let stopHost = NSMenuItem(
             title: "End All Sessions on This Mac…", action: #selector(stopLocalHost(_:)), keyEquivalent: "")

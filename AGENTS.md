@@ -103,6 +103,7 @@ pigeon/
         │   ├── PaneView+Metal.swift    # 把格子交给渲染线程（唯一的网格渲染路径）
         │   ├── Render/                 # GPU 渲染：图集、脏行、实例构建、Metal 线程与 shader
         │   └── KeyEncoder.swift        # 按键 → 字节（kitty protocol / legacy）
+        ├── Update/               # 软件更新：检查 latest.json、验签、替换 Pigeon.app 并重启
         └── Layout/               # M1 分屏
             ├── SplitView.swift         # 把 PgRect 画成 AppKit 视图
             └── Focus.swift             # 焦点与选择
@@ -228,6 +229,7 @@ pigeon/
 - `docs/protocol.md` —— 客户端 ⇄ 宿主的字段级契约（消息表、错误码、能力、尺寸策略）
 - `include/pigeon_core.h` —— C ABI 的生成产物（唯一对外的 C ABI 面；Rust 客户端对应 `pigeon_core::api`）
 - `docs/remote.md` —— SSH 方案：远端宿主、三种对接、安装与安全
+- `docs/update.md` —— 软件更新：检查、签名校验、替换与重启、发版步骤
 - `docs/gui.md` —— 前端路线：为何 AppKit/GTK、渲染与 IME 的归属
 - `docs/ui.md` —— 侧栏与窗口的可见规格（含参考图，`docs/images/`）
 - `docs/tmux-integration.md`、`docs/kitty-fork-status.md` —— 上一版（gmux）的实测记录，当反面教材读
