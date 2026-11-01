@@ -38,12 +38,15 @@ stdin/stdout 上说话（首次安装后的第一次启动用它）；之后它�
 3. 缺失就把二进制**从同一条 ssh 连接流过去**（不依赖 scp/ftp）：
 
    ```sh
-   ssh host 'mkdir -p ~/.pigeon/server/3.2.0 \
-     && cat > ~/.pigeon/server/3.2.0/pigeon-server.tmp \
-     && chmod +x ~/.pigeon/server/3.2.0/pigeon-server.tmp \
-     && mv ~/.pigeon/server/3.2.0/pigeon-server.tmp ~/.pigeon/server/3.2.0/pigeon-server' \
+   ssh host 'd=~/.pigeon/server/3.2.0; mkdir -p "$d" \
+     && tmp=$(mktemp "$d/.pigeon-server.XXXXXX") \
+     && cat > "$tmp" && chmod 755 "$tmp" \
+     && mv -f "$tmp" "$d/pigeon-server"' \
      < pigeon-server
    ```
+
+   临时文件名由 `mktemp` 生成（Linux 与 macOS 同一写法），两个窗口同时安装时各写各的，
+   谁也不会在另一方校验完、`mv` 之前把它的文件截断；任何一步失败都删掉临时文件。
 
 4. 校验 sha256（客户端内嵌期望值，远端 `shasum -a 256` 比对；不一致就删文件并报错）；
 5. 启动：`ssh host ~/.pigeon/server/3.2.0/pigeon-server --proxy`（宿主已在远端常驻，桥接它的 unix socket；socket 上没人监听时 `--proxy` 先拉起一个宿主——无共享 stdio、独立进程组，ssh 断开不会带走它——再桥接，所以重启后的第一次连接也只需要这一条命令）。
@@ -85,7 +88,7 @@ cargo build --release --manifest-path core/Cargo.toml --bin pigeon-server \
 
 `Sources/PigeonApp/Net/HostInstaller.swift`：`ssh uname -sm` 探测平台 → 本地算 sha256，
 版本目录名就是哈希前 16 位 → 远端有同名同哈希就**不传**，否则把二进制流进
-`~/.pigeon/server/<version>/pigeon-server.tmp`，**在远端**校验哈希后才 `mv` 成正式文件，
+`~/.pigeon/server/<version>/.pigeon-server.XXXXXX`（`mktemp`），**在远端**校验哈希后才 `mv` 成正式文件，
 并只保留最新两个版本。远端的登录 shell 可能是 fish/csh，所以命令行走 base64 + `sh`，
 不假设是 POSIX sh。实跑记录见 `docs/m4-checklist.md`。
 

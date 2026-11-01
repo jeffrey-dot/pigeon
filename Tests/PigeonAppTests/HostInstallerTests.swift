@@ -63,14 +63,47 @@ final class HostInstallerTests: XCTestCase {
     func testTheRemoteScriptVerifiesBeforeItGoesLive() {
         let script = HostInstaller.installScript(
             directory: "$HOME/.pigeon/server/0123456789abcdef", expected: "abc123")
-        XCTAssertTrue(script.contains("$HOME/.pigeon/server/0123456789abcdef/pigeon-server.tmp"))
+        // A fixed temp name would let a second window truncate this one's verified file
+        // between the hash check and the `mv`.
+        XCTAssertTrue(
+            script.contains("mktemp \"$HOME/.pigeon/server/0123456789abcdef/.pigeon-server.XXXXXX\""),
+            script)
+        XCTAssertFalse(script.contains("pigeon-server.tmp"), "the temp file name must be unique")
         XCTAssertTrue(script.contains("if [ \"$got\" != \"abc123\" ]"))
         XCTAssertTrue(script.contains("rm -f \"$tmp\""), "a bad transfer must not be left behind")
         XCTAssertTrue(
-            script.contains("mv \"$tmp\" \"$HOME/.pigeon/server/0123456789abcdef/pigeon-server\""),
+            script.contains("mv -f \"$tmp\" \"$HOME/.pigeon/server/0123456789abcdef/pigeon-server\""),
             "the binary only appears after the hash matches")
         XCTAssertTrue(script.contains("tail -n +3"), "older versions are garbage collected")
         XCTAssertFalse(script.contains("/tmp/"), "nothing is written outside ~/.pigeon")
+    }
+
+    /// The script itself, run by a local `/bin/sh` against a throwaway `$HOME`: a good
+    /// transfer goes live, a bad one leaves no temp file and no version directory.
+    func testTheRemoteScriptRunsAndCleansUpAfterItself() throws {
+        let home = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let artifact = try fakeArtifact()
+        defer { try? FileManager.default.removeItem(at: artifact) }
+        let full = try HostInstaller.contentHash(artifact)
+        let directory = "$HOME/.pigeon/server/\(full.prefix(16))"
+        let installed = home.appendingPathComponent(".pigeon/server/\(full.prefix(16))")
+
+        let bad = try runLocally(
+            HostInstaller.installScript(directory: directory, expected: String(repeating: "0", count: 64)),
+            home: home, stdin: artifact)
+        XCTAssertEqual(bad.status, 3)
+        XCTAssertTrue(bad.error.contains("hash mismatch"), bad.error)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: installed.path), "nothing is left")
+
+        let good = try runLocally(
+            HostInstaller.installScript(directory: directory, expected: full),
+            home: home, stdin: artifact)
+        XCTAssertEqual(good.status, 0, good.error)
+        XCTAssertEqual(good.output, installed.appendingPathComponent("pigeon-server").path)
+        XCTAssertEqual(
+            try FileManager.default.contentsOfDirectory(atPath: installed.path), ["pigeon-server"],
+            "the temp file is renamed, not copied")
     }
 
     func testTheHashProbeIsSilentWhenTheFileIsMissing() {
@@ -217,7 +250,7 @@ final class HostInstallerTests: XCTestCase {
         }
         let leftovers = try HostInstaller.sshRunner(
             host: host,
-            script: "ls -1 ~/.pigeon/server/*/pigeon-server.tmp 2>/dev/null | wc -l",
+            script: "ls -1 ~/.pigeon/server/*/.pigeon-server.* 2>/dev/null | wc -l",
             stdin: nil)
         XCTAssertEqual(leftovers.output.trimmingCharacters(in: .whitespacesAndNewlines), "0")
 
@@ -242,6 +275,26 @@ final class HostInstallerTests: XCTestCase {
     }
 
     // MARK: - helpers
+
+    private func runLocally(_ script: String, home: URL, stdin: URL) throws -> HostInstaller.Result {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", script]
+        process.environment = ["HOME": home.path, "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
+        process.standardInput = try FileHandle(forReadingFrom: stdin)
+        let out = Pipe()
+        let err = Pipe()
+        process.standardOutput = out
+        process.standardError = err
+        try process.run()
+        let output = out.fileHandleForReading.readDataToEndOfFile()
+        let error = err.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return HostInstaller.Result(
+            status: process.terminationStatus,
+            output: String(decoding: output, as: UTF8.self),
+            error: String(decoding: error, as: UTF8.self))
+    }
 
     private func temporaryDirectory() throws -> URL {
         let directory = FileManager.default.temporaryDirectory

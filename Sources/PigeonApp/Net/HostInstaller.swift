@@ -170,26 +170,34 @@ public struct HostInstaller {
 
     /// The shell run on the remote: write a temp file next to the target, verify the hash
     /// **there** (a cut-off transfer must never become live), move it in, keep two versions.
+    ///
+    /// The temp file comes from `mktemp` (same flags on Linux and macOS): two windows
+    /// installing at once each verify and rename their own file, so neither can truncate the
+    /// other's between the hash check and the `mv`. No `trap`: the runner already owns `EXIT`
+    /// (it removes its helper script), so every failure path cleans up by hand.
     public static func installScript(directory: String, expected: String) -> String {
         """
         set -e
         mkdir -p "\(directory)"
-        tmp="\(directory)/pigeon-server.tmp"
-        cat > "$tmp"
-        chmod +x "$tmp"
-        if command -v sha256sum >/dev/null 2>&1; then
-            got=$(sha256sum "$tmp" | cut -d' ' -f1)
-        else
-            got=$(shasum -a 256 "$tmp" | cut -d' ' -f1)
-        fi
-        if [ "$got" != "\(expected)" ]; then
+        tmp=$(mktemp "\(directory)/.pigeon-server.XXXXXX")
+        fail() {
             rm -f "$tmp"
             # A rejected transfer leaves nothing behind, not even its directory.
             rmdir "\(directory)" 2>/dev/null || true
-            echo "pigeon-server: hash mismatch (got $got)" >&2
-            exit 3
+            echo "pigeon-server: $1" >&2
+            exit "$2"
+        }
+        cat > "$tmp" || fail "transfer failed" 4
+        chmod 755 "$tmp" || fail "chmod failed" 4
+        if command -v sha256sum >/dev/null 2>&1; then
+            got=$(sha256sum "$tmp" | cut -d' ' -f1) || fail "sha256sum failed" 4
+        else
+            got=$(shasum -a 256 "$tmp" | cut -d' ' -f1) || fail "shasum failed" 4
         fi
-        mv "$tmp" "\(directory)/pigeon-server"
+        if [ "$got" != "\(expected)" ]; then
+            fail "hash mismatch (got $got)" 3
+        fi
+        mv -f "$tmp" "\(directory)/pigeon-server" || fail "mv failed" 4
         # Newest two survive; older runs keep their own binary until the session restarts.
         ls -1t "$HOME/.pigeon/server" 2>/dev/null | tail -n +3 | while read -r old; do
             rm -rf "$HOME/.pigeon/server/$old"
