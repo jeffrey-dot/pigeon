@@ -118,6 +118,22 @@ final class SidebarOrderingTests: XCTestCase {
             "a ⌘T answer is on its way")
     }
 
+    /// Ctrl-D on a remote's last session must not leave its final screen up: the window moves
+    /// to a session on another machine, and only an empty sidebar leaves nothing to show.
+    func testAnEmptiedMachineHandsTheWindowToAnotherMachinesSession() {
+        func on(_ host: String, _ id: Int) -> SidebarSession {
+            var row = SidebarSession(id: id, title: "session \(id)", group: "pigeon", status: .idle, unread: 0)
+            row.host = host
+            return row
+        }
+        let sections = SidebarModel.sections([on("local", 7), on("local", 8), on("arch", 9)])
+        XCTAssertEqual(SidebarModel.sessionToShow(afterEmptying: "jeffrey@asia", sections: sections), 7)
+        XCTAssertEqual(SidebarModel.sessionToShow(afterEmptying: "local", sections: sections), 9)
+        let onlyThere = SidebarModel.sections([on("arch", 9)])
+        XCTAssertNil(SidebarModel.sessionToShow(afterEmptying: "arch", sections: onlyThere))
+        XCTAssertNil(SidebarModel.sessionToShow(afterEmptying: "local", sections: []))
+    }
+
     func testThePlusMenuListsThisMacThenEverySavedHostThenConnect() {
         let items = SidebarModel.newSessionItems(
             hosts: ["arch", "pi", "box"], connected: ["local", "arch"], connecting: "pi",

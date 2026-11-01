@@ -251,6 +251,12 @@ public enum SidebarModel {
         listIsEmpty && firstList
     }
 
+    /// The session to show once the machine on screen has none left: the first one the sidebar
+    /// lists on any other machine, or `nil` when there is none (the app then quits).
+    public static func sessionToShow(afterEmptying host: String, sections: [SidebarSection]) -> Int? {
+        sections.filter { $0.host != host }.first?.sessions.first?.id
+    }
+
     /// Whether closing a session left nothing to show: no session on any connected machine,
     /// and no `new_session` still waiting for its answer.
     public static func shouldQuitAfterClose(remainingSessions: Int, creatingSession: Bool) -> Bool {

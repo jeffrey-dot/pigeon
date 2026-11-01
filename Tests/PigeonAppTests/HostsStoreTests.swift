@@ -45,4 +45,33 @@ final class HostsStoreTests: XCTestCase {
         }
         XCTAssertEqual(HostsStore.defaultURL.path, override + "/hosts.json")
     }
+
+    func testWhatTheUserTypesBecomesOneSshDestination() {
+        XCTAssertEqual(try HostName.parse("  jeffrey@asia \n").get(), "jeffrey@asia")
+        XCTAssertEqual(try HostName.parse("ssh jeffrey@asia").get(), "jeffrey@asia", "a pasted command")
+        XCTAssertEqual(try HostName.parse("ssh asia").get(), "asia")
+        XCTAssertEqual(try HostName.parse("sshbox").get(), "sshbox", "only the word ssh is dropped")
+        XCTAssertEqual(HostName.parse(""), .failure(.empty))
+        XCTAssertEqual(HostName.parse("ssh "), .failure(.empty))
+        for bad in ["asia -p 2222", "ssh -p 2222 asia", "-oProxyCommand=x", "a\tb", "a\u{7}b"] {
+            guard case .failure(.notOneName) = HostName.parse(bad) else {
+                return XCTFail("accepted \(bad)")
+            }
+        }
+        XCTAssertFalse(HostName.Problem.notOneName("asia -p 1").description.contains("ssh -"), "no jargon")
+    }
+
+    /// A list saved before names were checked (`ssh asia`) is repaired on load, not retried.
+    func testABadSavedHostIsRepairedOrDropped() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pigeon-servers-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("hosts.json")
+        let saved = #"{"hosts":["arch","ssh asia","jeffrey@asia","asia","x -p 2"],"current":"ssh asia"}"#
+        try Data(saved.utf8).write(to: url)
+        let loaded = HostsStore(url: url).load()
+        XCTAssertEqual(loaded.hosts, ["arch", "asia", "jeffrey@asia"])
+        XCTAssertEqual(loaded.current, "asia")
+    }
 }

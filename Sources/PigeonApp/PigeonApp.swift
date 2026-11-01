@@ -929,7 +929,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if selectedSession == id { selectedSession = nil }
         refreshSidebar()
         requestSessions()
+        showAnotherMachineIfEmpty()
         quitIfNoSessionsLeft()
+    }
+
+    /// The machine on screen just lost its last session (its shell exited, or it was closed):
+    /// move the window to another machine's session instead of leaving the closed session's
+    /// last screen up. A background machine emptying changes nothing on screen.
+    private func showAnotherMachineIfEmpty() {
+        guard swappedFrom == nil, rows.isEmpty else { return }
+        let order = state.order.compactMap(SessionRef.init(key:)).map { sessionRefs.id(for: $0) }
+        let sections = SidebarModel.sections(sidebarSessions(), order: order)
+        guard let next = SidebarModel.sessionToShow(afterEmptying: activeHost, sections: sections) else {
+            container.apply(.empty)
+            return
+        }
+        debugLog("no sessions left on \(activeHost): showing \(next)")
+        // `select` moves `activeHost`; the close runs inside `onHost`, which would put it back.
+        DispatchQueue.main.async { [weak self] in self?.select(next) }
     }
 
     /// Closing the last session (from the sidebar, ⌘⇧W, or its shell exiting) quits the app,
@@ -1032,9 +1049,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: "Connect")
         alert.addButton(withTitle: "Cancel")
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let host = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !host.isEmpty else { return }
-        switchTo(host: host)
+        switch HostName.parse(field.stringValue) {
+        case let .success(host):
+            switchTo(host: host)
+        case .failure(.empty):
+            return
+        case let .failure(problem):
+            let refusal = NSAlert()
+            refusal.messageText = "Couldn't connect"
+            refusal.informativeText = problem.description
+            refusal.addButton(withTitle: "OK")
+            refusal.runModal()
+        }
     }
 
     /// Brings a machine to the front. Every other host keeps its connection, so switching is

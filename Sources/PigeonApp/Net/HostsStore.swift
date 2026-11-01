@@ -24,12 +24,16 @@ final class HostsStore {
             .appendingPathComponent(".config/pigeon/hosts.json")
     }
 
+    /// Entries ssh cannot use (`ssh asia`, typed as a command) are repaired or dropped here,
+    /// so a bad entry saved once does not fail every launch.
     func load() -> HostsState {
         guard let data = try? Data(contentsOf: url),
-              let state = try? JSONDecoder().decode(HostsState.self, from: data)
+              var state = try? JSONDecoder().decode(HostsState.self, from: data)
         else {
             return HostsState()
         }
+        state.hosts = HostName.cleaned(state.hosts)
+        state.current = state.current.flatMap { try? HostName.parse($0).get() }
         return state
     }
 
