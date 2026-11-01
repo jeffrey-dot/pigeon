@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::task::JoinHandle;
+use tokio::time::{sleep_until, Instant};
 
 use pigeon_core::error::PgError;
 use pigeon_core::proto::{self, Message};
@@ -57,14 +58,27 @@ where
     let mut inbox = Vec::new();
     let mut subscribed = host.events.subscribe();
     let mut state = ClientState::new(client_id);
+    let connected = Instant::now();
+    let mut last_heard = connected;
 
     loop {
+        // Before `hello`: the hello timeout from connecting; after: the idle timeout from
+        // the last inbound bytes (protocol §1, §3.1).
+        let deadline = if state.greeted {
+            last_heard + handshake::idle_timeout()
+        } else {
+            connected + handshake::hello_timeout()
+        };
         tokio::select! {
+            () = sleep_until(deadline) => {
+                return Err(if state.greeted { "idle timeout" } else { "no hello" }.into());
+            }
             read = reader.read_buf(&mut inbox) => {
                 let count = read.map_err(|error| error.to_string())?;
                 if count == 0 {
                     return Ok(());
                 }
+                last_heard = Instant::now();
                 if !drain_inbox(&mut inbox, host, &mut state, outbound).await? {
                     return Ok(());
                 }
@@ -122,6 +136,11 @@ async fn drain_inbox(
                 // Outside the reply branch: a replay has no single reply.
                 for frame in std::mem::take(&mut state.outbox) {
                     outbound.send(&frame)?;
+                }
+                // A first frame that did not greet (`hello_error`, or not `hello` at all)
+                // has had its answer; nothing else is served on this connection.
+                if !state.greeted {
+                    return Ok(false);
                 }
             }
             // Protocol §2 rule 7: answer, skip exactly this frame, keep going.

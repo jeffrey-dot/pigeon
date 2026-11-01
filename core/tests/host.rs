@@ -66,9 +66,15 @@ fn start_host_with_socket(socket: &str) -> Host {
 }
 
 fn start_host_on(socket: &str, program: &str) -> Host {
+    start_host_env(socket, program, &[])
+}
+
+/// Like `start_host_on`, with extra environment (the tests shorten the host's timeouts).
+fn start_host_env(socket: &str, program: &str, env: &[(&str, &str)]) -> Host {
     let socket = socket.to_owned();
     let child = Command::new(env!("CARGO_BIN_EXE_pigeon-server"))
         .args(["--socket", &socket, "--shell", program])
+        .envs(env.iter().copied())
         .stdout(Stdio::null())
         .stderr(if std::env::var_os("PIGEON_DEBUG").is_some() {
             Stdio::inherit()
@@ -203,6 +209,19 @@ impl Client {
                 }
             }
         }
+    }
+
+    /// Whether the host closes the connection within `within`; frames before that are read.
+    fn closed_within(&mut self, within: Duration) -> bool {
+        let deadline = Instant::now() + within;
+        while Instant::now() < deadline {
+            match self.incoming.recv_timeout(Duration::from_millis(20)) {
+                Ok(chunk) => self.buffer.extend_from_slice(&chunk),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return true,
+            }
+        }
+        false
     }
 
     fn drain(&mut self, want: &impl Fn(&Message) -> bool) -> Option<Message> {
@@ -452,6 +471,49 @@ fn bad_version_is_rejected_with_hello_error() {
     });
     let reply = client.wait_for(|m| matches!(m, Message::HelloError { .. }));
     assert!(matches!(reply, Message::HelloError { .. }));
+    // Protocol §3.1: the connection closes right after `hello_error`.
+    assert!(client.closed_within(Duration::from_secs(3)));
+}
+
+#[test]
+fn a_first_message_other_than_hello_is_refused_and_closed() {
+    let _serial = one_at_a_time();
+    let host = start_host();
+    let mut client = Client::connect(&host.socket);
+    client.send(&Message::Sessions { items: Vec::new() });
+    let reply = client.wait_for(|m| matches!(m, Message::Error { .. }));
+    assert!(matches!(reply, Message::Error { code, .. } if code == "protocol"));
+    assert!(client.closed_within(Duration::from_secs(3)));
+}
+
+/// Protocol §1/§3.1: no `hello` within the hello timeout, or no frame at all within the
+/// idle timeout, and the host hangs up. Shortened here; the real values are 5 s and 45 s.
+#[test]
+fn silent_connections_are_closed_and_pinging_ones_kept() {
+    let _serial = one_at_a_time();
+    let quiet = script("#!/bin/sh\nexec env PS1= /bin/sh -i\n");
+    let host = start_host_env(
+        &unique_socket(),
+        quiet.to_str().expect("utf8"),
+        &[("PIGEON_HELLO_MS", "300"), ("PIGEON_IDLE_MS", "600")],
+    );
+    let mut mute = Client::connect(&host.socket);
+    assert!(mute.closed_within(Duration::from_secs(3)), "no hello");
+
+    let mut pinging = Client::connect(&host.socket);
+    hello(&mut pinging);
+    for ts in 0..8 {
+        pinging.send(&Message::Ping { ts });
+        let _ = pinging.wait_for(|m| matches!(m, Message::Pong { .. }));
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    let mut idle = Client::connect(&host.socket);
+    hello(&mut idle);
+    assert!(
+        idle.closed_within(Duration::from_secs(3)),
+        "idle past the timeout"
+    );
+    let _ = std::fs::remove_file(&quiet);
 }
 
 #[test]
