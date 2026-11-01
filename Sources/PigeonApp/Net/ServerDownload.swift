@@ -14,6 +14,7 @@ public struct ServerDownload {
         case notListed(String)
         case corrupt(String)
         case network(String)
+        case insecure(String)
 
         public var description: String {
             switch self {
@@ -21,6 +22,7 @@ public struct ServerDownload {
             case let .notListed(name): return "\(name) is not in the release's SHA256SUMS"
             case let .corrupt(name): return "\(name) does not match its SHA256SUMS entry"
             case let .network(detail): return "download failed: \(detail)"
+            case let .insecure(url): return "refusing to download from \(url): it must use https"
             }
         }
     }
@@ -77,6 +79,10 @@ public struct ServerDownload {
         // Only a verified download is ever renamed into place, so a cached file is trusted.
         if FileManager.default.isExecutableFile(atPath: target.path) { return target }
 
+        // `SHA256SUMS` comes from the same origin as the binary, so it only catches a broken
+        // download; against tampering the transport is all there is. Releases are not signed
+        // yet (`docs/remote.md` §5).
+        guard Self.isTrusted(base) else { throw Failure.insecure(base.absoluteString) }
         let name = Self.assetName(triple: triple)
         let sums = Self.parseSums(String(decoding: try fetch(base.appendingPathComponent("SHA256SUMS")), as: UTF8.self))
         guard let expected = sums[name] else { throw Failure.notListed(name) }
@@ -94,6 +100,16 @@ public struct ServerDownload {
         }
         try FileManager.default.moveItem(at: temporary, to: target)
         return target
+    }
+
+    /// https anywhere; plain http only to this machine (a local mirror for testing), where
+    /// there is no network path to tamper with.
+    public static func isTrusted(_ url: URL) -> Bool {
+        switch url.scheme?.lowercased() {
+        case "https": return true
+        case "http": return ["localhost", "127.0.0.1", "::1"].contains(url.host?.lowercased() ?? "")
+        default: return false
+        }
     }
 
     /// `sha256sum` output (`<hex>  <name>`, or `<hex> *<name>` in binary mode) → name: hex.
@@ -129,6 +145,12 @@ public struct ServerDownload {
             defer { done.signal() }
             if let error {
                 box.result = .failure(Failure.network(error.localizedDescription))
+                return
+            }
+            // A redirect could leave https (GitHub sends assets to another host); what was
+            // actually read must have come over a trusted transport too.
+            if let final = response?.url, !ServerDownload.isTrusted(final) {
+                box.result = .failure(Failure.insecure(final.absoluteString))
                 return
             }
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0

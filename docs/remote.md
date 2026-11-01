@@ -71,7 +71,8 @@ stdin/stdout 上说话（首次安装后的第一次启动用它）；之后它�
 
 客户端（`ServerDownload.swift`）第一次连到某个平台时：取 `releases/download/v<App 版本>/SHA256SUMS` →
 下载对应 `.gz` → **校验哈希后**才解压、`chmod +x`、改名进 `~/.cache/pigeon/server/<版本>/`；
-校验不过什么都不留。同一版本同一平台只下一次。`PIGEON_SERVER_URL` 可指向镜像（内网 / 访问 GitHub 困难的地区）。
+校验不过什么都不留。同一版本同一平台只下一次。`PIGEON_SERVER_URL` 可指向镜像（内网 / 访问 GitHub 困难的地区），
+但必须是 `https`（含重定向后的最终地址）；明文 `http` 只允许 `localhost` / `127.0.0.1` / `::1`（本机测试用）。
 下载失败时退回普通 ssh 模式（不持久），界面照常说明。
 
 开发构建（没有 bundle 版本号）不下载，直接用 `PIGEON_HOST_ARTIFACTS` 或 `core/target/<triple>/release/pigeon-server`。
@@ -155,6 +156,9 @@ cargo build --release --manifest-path core/Cargo.toml --bin pigeon-server \
   `~/.pigeon/state/pigeon.sock`（`$XDG_RUNTIME_DIR` 会在用户最后一个登录会话结束时被 systemd 删掉，宿主就成了孤儿）；
   其它情况（本机、开发构建）用 `$XDG_RUNTIME_DIR/pigeon.sock`，回退 `/tmp/pigeon-<uid>.sock`。
 - `--proxy` 只转发协议帧：不接受任意命令、不做 shell 展开。
+- **已知缺口：release 没有签名。** `SHA256SUMS` 与二进制来自同一来源，只能发现下载损坏，挡不住来源本身被篡改
+  （GitHub 账号或镜像被攻破）；目前唯一的保护是 https。要补上需要一把由维护者持有的签名密钥（例如 minisign /
+  sigstore），客户端内置公钥、校验 `SHA256SUMS` 的签名后再信任其中的哈希。
 - 用户填的主机名只当 ssh 目的地：以 `-` 开头（如 `-oProxyCommand=…`，会在本机执行命令）、为空或含空白/控制字符的
   直接拒绝，不降级成普通 ssh；每次调用 ssh 都在目的地前加 `--`。拼进远端 shell 的值里，远端返回的二进制路径一律单引号转义，
   版本目录名只允许小写十六进制（它要和 `$HOME` 一起放在双引号里）。
