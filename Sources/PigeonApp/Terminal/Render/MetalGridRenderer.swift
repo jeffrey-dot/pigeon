@@ -39,8 +39,11 @@ final class MetalGridRenderer: @unchecked Sendable {
     private var glyphs: GlyphCache?
     private var glyphsScale: Float = 0
     private var instances = GridInstances()
+    /// Per slot: backgrounds, glyphs, decorations, overlays (cursor, selection, thumb).
     private var buffers: [[MTLBuffer?]] = Array(
-        repeating: [nil, nil, nil], count: MetalGridRenderer.inFlight)
+        repeating: Array(repeating: nil, count: 4), count: MetalGridRenderer.inFlight)
+    /// Which `GridInstances.version` each slot's first three buffers hold.
+    private var uploaded = Array(repeating: -1, count: MetalGridRenderer.inFlight)
     private var slot = 0
 
     private static let debug = ProcessInfo.processInfo.environment["PIGEON_DEBUG"] != nil
@@ -225,8 +228,10 @@ final class MetalGridRenderer: @unchecked Sendable {
             instances.invalidate()
             return
         }
-        let (backgrounds, decorations) = instances.rects(overlays: GridInstances.overlays(for: frame))
-        let glyphList = instances.glyphs()
+        // The grid's instance lists only change when a row was rebuilt; this slot's buffers
+        // may already hold the current version (cursor blink, selection drag, thumb).
+        let fresh = uploaded[slot] == instances.version
+        let overlays = GridInstances.overlays(for: frame)
 
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = drawable.texture
@@ -244,14 +249,16 @@ final class MetalGridRenderer: @unchecked Sendable {
         encoder.setVertexBytes(&uniforms, length: MemoryLayout<SIMD2<Float>>.stride, index: 1)
 
         encoder.setRenderPipelineState(rectPipeline)
-        draw(backgrounds, buffer: 0, encoder: encoder)
+        draw(instances.backgrounds, buffer: 0, reuse: fresh, encoder: encoder)
         encoder.setRenderPipelineState(glyphPipeline)
         encoder.setFragmentTexture(atlas.mask, index: 0)
         encoder.setFragmentTexture(atlas.color, index: 1)
-        draw(glyphList, buffer: 1, encoder: encoder)
+        draw(instances.glyphs, buffer: 1, reuse: fresh, encoder: encoder)
         encoder.setRenderPipelineState(rectPipeline)
-        draw(decorations, buffer: 2, encoder: encoder)
+        draw(instances.decorations, buffer: 2, reuse: fresh, encoder: encoder)
+        draw(overlays, buffer: 3, reuse: false, encoder: encoder)
         encoder.endEncoding()
+        uploaded[slot] = instances.version
 
         let semaphore = slots
         let measure = FrameStats.enabled
@@ -272,18 +279,27 @@ final class MetalGridRenderer: @unchecked Sendable {
         if Self.debug {
             let micros = (DispatchTime.now().uptimeNanoseconds - start) / 1000
             FileHandle.standardError.write(Data(
-                "pigeon: gpu frame rows=\(instances.lastRebuilt)/\(frame.rows) glyphs=\(glyphList.count) cpu=\(micros)us\n".utf8))
+                "pigeon: gpu frame rows=\(instances.lastRebuilt)/\(frame.rows) glyphs=\(instances.glyphs.count) reused=\(fresh) cpu=\(micros)us\n".utf8))
         }
     }
 
     /// Copies `items` into this frame's slot of buffer `index` (growing it when needed) and
-    /// issues one instanced draw of six vertices per item.
-    private func draw<T>(_ items: [T], buffer index: Int, encoder: MTLRenderCommandEncoder) {
+    /// issues one instanced draw of six vertices per item. `reuse` skips the copy when the
+    /// slot's buffer already holds exactly these items from an earlier frame.
+    private func draw<T>(
+        _ items: [T], buffer index: Int, reuse: Bool, encoder: MTLRenderCommandEncoder
+    ) {
         guard !items.isEmpty else { return }
         let length = items.count * MemoryLayout<T>.stride
         let buffer: MTLBuffer
         if let existing = buffers[slot][index], existing.length >= length {
             buffer = existing
+            if reuse {
+                encoder.setVertexBuffer(buffer, offset: 0, index: 0)
+                encoder.drawPrimitives(
+                    type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: items.count)
+                return
+            }
         } else {
             // Grow geometrically so a busy screen does not reallocate every frame.
             guard let grown = device.makeBuffer(

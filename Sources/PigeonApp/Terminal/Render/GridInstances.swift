@@ -41,6 +41,7 @@ struct GridInstances {
             }
             lastRebuilt += 1
         }
+        if lastRebuilt > 0 { flatten() }
     }
 
     /// Forgets everything so the next update rebuilds every row (hidden pane, new atlas).
@@ -48,22 +49,29 @@ struct GridInstances {
         rows = []
         cols = 0
         readable = [:]
+        flatten()
     }
 
-    /// Background, decoration and overlay rectangles in draw order.
-    func rects(overlays: [RectInstance]) -> (backgrounds: [RectInstance], decorations: [RectInstance]) {
-        var backgrounds: [RectInstance] = []
-        var decorations: [RectInstance] = []
+    /// The rows' instances concatenated in draw order. Re-flattened only after an update that
+    /// rebuilt a row, into the same storage; a frame that only moves the cursor, blinks it or
+    /// changes the selection reuses them (and the GPU buffers holding them) untouched.
+    private(set) var backgrounds: [RectInstance] = []
+    private(set) var glyphs: [GlyphInstance] = []
+    private(set) var decorations: [RectInstance] = []
+    /// Bumped whenever the flattened lists change, so the renderer knows which of its
+    /// rotating GPU buffers already hold them.
+    private(set) var version = 0
+
+    private mutating func flatten() {
+        backgrounds.removeAll(keepingCapacity: true)
+        glyphs.removeAll(keepingCapacity: true)
+        decorations.removeAll(keepingCapacity: true)
         for row in rows {
             backgrounds.append(contentsOf: row.backgrounds)
+            glyphs.append(contentsOf: row.glyphs)
             decorations.append(contentsOf: row.decorations)
         }
-        decorations.append(contentsOf: overlays)
-        return (backgrounds, decorations)
-    }
-
-    func glyphs() -> [GlyphInstance] {
-        rows.flatMap(\.glyphs)
+        version += 1
     }
 
     /// The cursor in its shape: a translucent block, an underline or a bar, and an outline

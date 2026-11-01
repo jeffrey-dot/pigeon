@@ -171,6 +171,25 @@ final class MetalRendererTests: XCTestCase {
         XCTAssertEqual(grid.lastRebuilt, 2, "an atlas reset invalidates every row's slots")
     }
 
+    /// The flattened instance lists used to be rebuilt into fresh arrays every frame; a frame
+    /// that only moves or blinks the cursor must now leave them (and their version) alone.
+    func testACursorOnlyFrameReusesTheFlattenedInstances() {
+        var grid = GridInstances()
+        grid.update(from: frame("abcd", cols: 2), atlasGeneration: 0, glyph: slot)
+        XCTAssertEqual(grid.glyphs.count, 4)
+        let version = grid.version
+        var blink = frame("abcd", cols: 2, dirty: .none)
+        blink.cursor = PaneView.Cursor(x: 1, y: 1, visible: true)
+        grid.update(from: blink, atlasGeneration: 0, glyph: slot)
+        XCTAssertEqual(grid.lastRebuilt, 0)
+        XCTAssertEqual(grid.version, version, "nothing to re-flatten or re-upload")
+        var dirty = DirtyRows.none
+        dirty.mark(0)
+        grid.update(from: frame("xycd", cols: 2, dirty: dirty), atlasGeneration: 0, glyph: slot)
+        XCTAssertEqual(grid.version, version + 1)
+        XCTAssertEqual(grid.glyphs.map(\.uv.x), [120, 121, 99, 100])
+    }
+
     func testBlanksDrawNothingAndThemeBackgroundsAreLeftToTheClearColour() {
         let row = RowInstances.build(row: 0, of: frame("a b", cols: 3), glyph: slot) { $0 }
         XCTAssertEqual(row.glyphs.count, 2)
