@@ -57,6 +57,8 @@ jobs:
               lld="$(rustc --print sysroot)/lib/rustlib/$host/bin/rust-lld"
               var="CARGO_TARGET_$(echo "$triple" | tr 'a-z-' 'A-Z_')_LINKER"
               export "$var=$lld"
+              # Static on every musl target: some (riscv64) default to dynamic linking.
+              export "CARGO_TARGET_$(echo "$triple" | tr 'a-z-' 'A-Z_')_RUSTFLAGS=-C target-feature=+crt-static"
               ;;
           esac
           cargo build --release --manifest-path core/Cargo.toml \
@@ -65,6 +67,9 @@ jobs:
           size=$(stat -f%z "$bin" 2>/dev/null || stat -c%s "$bin")
           echo "pigeon-server ($triple): $size bytes"
           test "$size" -le 8388608
+          case "$triple" in
+            *-linux-musl*) file "$bin" | tee /dev/stderr | grep -q "statically linked" ;;
+          esac
           mkdir -p dist
           gzip -9 -n -c "$bin" > "dist/pigeon-server-$triple.gz"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
