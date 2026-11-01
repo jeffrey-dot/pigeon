@@ -13,9 +13,14 @@ use crate::cli::Transport;
 use crate::client::handle_client;
 use crate::host_state::HostState;
 use crate::persist;
+use crate::socket_lock::SocketLock;
 
 /// Serves the socket forever, plus one stdio client with `Transport::Stdio`.
 pub async fn serve(socket: &Path, transport: Transport, host: HostState) -> Result<(), String> {
+    ensure_private_parent(socket)?;
+    // Held until this function returns: probing, binding and the state file are this
+    // process's alone for as long as it serves.
+    let _lock = SocketLock::acquire(socket)?;
     let listener = bind_private(socket).await?;
     // Only the host that owns the socket may read or write the state file next to it.
     let state = persist::state_path(socket);
@@ -104,12 +109,6 @@ async fn bind_private(socket: &Path) -> Result<UnixListener, String> {
         let _ = std::fs::remove_file(socket);
     }
     let parent = socket.parent().unwrap_or_else(|| Path::new("."));
-    // `~/.pigeon/state` on a fresh install: create it private, never loosen one that exists.
-    if !parent.exists() {
-        std::fs::create_dir_all(parent).map_err(|error| format!("mkdir {parent:?}: {error}"))?;
-        std::fs::set_permissions(parent, Permissions::from_mode(0o700))
-            .map_err(|error| format!("chmod {parent:?}: {error}"))?;
-    }
     let staging = parent.join(format!(".pigeon-bind-{}", std::process::id()));
     std::fs::create_dir(&staging).map_err(|error| format!("mkdir {staging:?}: {error}"))?;
     std::fs::set_permissions(&staging, Permissions::from_mode(0o700))
@@ -127,6 +126,17 @@ async fn bind_private(socket: &Path) -> Result<UnixListener, String> {
     let _ = std::fs::remove_file(&temporary);
     let _ = std::fs::remove_dir(&staging);
     bound
+}
+
+/// `~/.pigeon/state` on a fresh install: create it private, never loosen one that exists.
+fn ensure_private_parent(socket: &Path) -> Result<(), String> {
+    let parent = socket.parent().unwrap_or_else(|| Path::new("."));
+    if !parent.exists() {
+        std::fs::create_dir_all(parent).map_err(|error| format!("mkdir {parent:?}: {error}"))?;
+        std::fs::set_permissions(parent, Permissions::from_mode(0o700))
+            .map_err(|error| format!("chmod {parent:?}: {error}"))?;
+    }
+    Ok(())
 }
 
 /// Bridges stdin/stdout to a running host. Frames are opaque bytes here on purpose: the

@@ -21,6 +21,7 @@ mod pane_actor;
 mod pane_query;
 mod persist;
 mod resync;
+mod socket_lock;
 mod transport;
 
 use std::process::ExitCode;

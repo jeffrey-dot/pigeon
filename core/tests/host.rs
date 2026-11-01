@@ -31,6 +31,7 @@ impl Drop for Host {
         let _ = std::fs::remove_file(&self.socket);
         // The host saves its screens next to the socket (`persist`).
         let _ = std::fs::remove_file(std::path::Path::new(&self.socket).with_extension("state"));
+        let _ = std::fs::remove_file(std::path::Path::new(&self.socket).with_extension("lock"));
     }
 }
 
@@ -2356,6 +2357,39 @@ fn a_second_host_does_not_steal_a_live_socket() {
         matches!(reply, Message::Snapshot { .. }),
         "the live host keeps its panes: {reply:?}"
     );
+}
+
+/// Hosts started at the same moment on a stale socket (a crash left it, two windows open at
+/// once) must not both take it over: exactly one serves, the others exit.
+#[test]
+fn hosts_racing_for_a_stale_socket_leave_exactly_one() {
+    let _serial = one_at_a_time();
+    let socket = unique_socket();
+    // A socket file nobody listens on.
+    drop(std::os::unix::net::UnixListener::bind(&socket).expect("bind"));
+    let mut racers: Vec<Child> = (0..6)
+        .map(|_| {
+            Command::new(env!("CARGO_BIN_EXE_pigeon-server"))
+                .args(["--socket", &socket, "--shell", "/bin/sh"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("spawn pigeon-server")
+        })
+        .collect();
+    std::thread::sleep(Duration::from_secs(2));
+    let alive = racers
+        .iter_mut()
+        .filter_map(|child| child.try_wait().expect("wait").is_none().then_some(()))
+        .count();
+    for child in &mut racers {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    let _ = std::fs::remove_file(&socket);
+    let _ = std::fs::remove_file(std::path::Path::new(&socket).with_extension("state"));
+    let _ = std::fs::remove_file(std::path::Path::new(&socket).with_extension("lock"));
+    assert_eq!(alive, 1, "one host serves, the rest give up");
 }
 
 #[test]
