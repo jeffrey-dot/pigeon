@@ -6,8 +6,6 @@
 
 mod backlog;
 mod pane_meta;
-mod saved_state;
-mod session_restore;
 mod session_state;
 mod size_policy;
 mod size_vote;
@@ -18,7 +16,6 @@ pub use backlog::Backlog;
 #[cfg_attr(not(feature = "internals"), allow(unused_imports))]
 pub use pane_meta::PaneMeta;
 #[cfg_attr(not(feature = "internals"), allow(unused_imports))]
-pub use saved_state::{SavedPane, SavedSession, SavedState, MAX_SAVED_STATE, SAVED_STATE_VERSION};
 #[cfg_attr(not(feature = "internals"), allow(unused_imports))]
 pub use session_state::{empty_layout_message, SessionState};
 #[cfg_attr(not(feature = "internals"), allow(unused_imports))]
@@ -60,13 +57,6 @@ impl PaneState {
             status: StatusStore::new(),
             backlog: Backlog::default(),
         }
-    }
-
-    /// A pane brought back from a saved state: its last screen, no process behind it.
-    pub fn restored(pane_id: u32, snapshot: Snapshot) -> Self {
-        let mut pane = Self::from_snapshot(snapshot);
-        pane.pane_id = pane_id;
-        pane
     }
 
     /// Rebuilds client state from a snapshot — no byte replay, no parsing.

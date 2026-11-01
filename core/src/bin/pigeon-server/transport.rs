@@ -12,21 +12,10 @@ use tokio::time::Instant;
 use crate::cli::Transport;
 use crate::client::handle_client;
 use crate::host_state::HostState;
-use crate::persist;
 
 /// Serves the socket forever, plus one stdio client with `Transport::Stdio`.
 pub async fn serve(socket: &Path, transport: Transport, host: HostState) -> Result<(), String> {
     let listener = bind_private(socket).await?;
-    // Only the host that owns the socket may read or write the state file next to it.
-    let state = persist::state_path(socket);
-    let restored = persist::restore(&host, &state).await;
-    if restored > 0 {
-        eprintln!(
-            "pigeon-server: restored {restored} session(s) from {}",
-            state.display()
-        );
-    }
-    persist::start(host.clone(), state.clone());
     eprintln!("pigeon-server listening on {}", socket.display());
 
     if transport == Transport::Stdio {
@@ -46,7 +35,7 @@ pub async fn serve(socket: &Path, transport: Transport, host: HostState) -> Resu
         let accepted = tokio::select! {
             accepted = listener.accept() => accepted,
             () = host.stop.notified() => {
-                shut_down(&host, socket, &state).await;
+                shut_down(&host, socket).await;
                 return Ok(());
             }
         };
@@ -66,9 +55,9 @@ pub async fn serve(socket: &Path, transport: Transport, host: HostState) -> Resu
     }
 }
 
-/// `shutdown`: every session ends (SIGHUP → SIGKILL through `Cmd::Kill`), nothing is left
-/// to restore, and the socket goes away so the next window starts a fresh host.
-async fn shut_down(host: &HostState, socket: &Path, state: &Path) {
+/// `shutdown`: every session ends (SIGHUP → SIGKILL through `Cmd::Kill`) and the socket
+/// goes away so the next window starts a fresh host.
+async fn shut_down(host: &HostState, socket: &Path) {
     eprintln!("pigeon-server: shutting down on request");
     let senders: Vec<_> = {
         let map = host.sessions.lock().await;
@@ -81,10 +70,8 @@ async fn shut_down(host: &HostState, socket: &Path, state: &Path) {
     }
     host.sessions.lock().await.clear();
     let _ = std::fs::remove_file(socket);
-    // Give the pane tasks a moment to deliver the kills before the runtime goes away. The
-    // state file goes last, so a save already in flight cannot write it back.
+    // Give the pane tasks a moment to deliver the kills before the runtime goes away.
     tokio::time::sleep(Duration::from_millis(200)).await;
-    let _ = std::fs::remove_file(state);
 }
 
 /// Takes over `socket` only if nobody answers on it: a live host keeps its socket and its

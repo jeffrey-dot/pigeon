@@ -23,6 +23,4 @@ struct SessionRow: Equatable {
     var group: String = ""
     /// The agent's own report (name, task, since when), from the last `status`.
     var agent: AgentInfo = .none
-    /// Panes brought back from disk after a host restart: a picture, no process.
-    var restored: Set<UInt32> = []
 }

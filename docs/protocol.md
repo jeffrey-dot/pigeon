@@ -59,7 +59,7 @@
 | c→s | `unzoom` | `id: u32`, `pane_id: u32` | — | 取消放大 |
 | s→c | `layout` | `session_id: u32`, `tree: node` | `zoom: u32`, `focus: u32` | `node = {leaf: pane_id} \| {split: {id: u32, axis: "v"\|"h", ratio: f32, a: node, b: node}}`；`zoom` 是当前放大的 `pane_id`；`focus` 是宿主持有的焦点 pane（M1 新增，可选，旧客户端忽略） |
 | s→c | `size_state` | `pane_id: u32`, `cols: u16`, `rows: u16`, `source: str`, `clients: u8` | — | `source` ∈ `latest`/`smallest`/`locked`；客户端据此在侧栏标注当前尺寸来源 |
-| s→c | `pane_exited` | `pane_id: u32`, `code: i32` | — | 进程退出；pane 记录保留到 `close_pane`。`attach` 一个已经退出的 pane 时，快照后紧跟一条。`code = -1`：宿主重启后从状态文件恢复的 pane（只有最后一屏，没有进程，输入被忽略），客户端应保留它直到用户关闭 |
+| s→c | `pane_exited` | `pane_id: u32`, `code: i32` | — | 进程退出；pane 记录保留到 `close_pane`。`attach` 一个已经退出的 pane 时，快照后紧跟一条 |
 
 ### 3.3 屏幕
 
@@ -121,7 +121,7 @@
 |---|---|---|---|---|
 | c→s | `ack_status` | `pane_id: u32`, `seq: u32` | — | 用户已看过该条状态，可被淘汰 |
 | c→s | `ping` | `ts: u64` | — | `ts` = 发送方单调时钟（毫秒），只用于回显 |
-| c→s | `shutdown` | — | — | 结束宿主：杀掉所有 pane 的进程、删掉 socket 与状态文件后退出（窗口的 “End All Sessions on This Mac…”）；`hello` 之前发同样按 `protocol` 错误处理 |
+| c→s | `shutdown` | — | — | 结束宿主：杀掉所有 pane 的进程、删掉 socket 后退出（窗口的 “End All Sessions on This Mac…”）；`hello` 之前发同样按 `protocol` 错误处理 |
 | s→c | `pong` | `ts: u64` | — | 原样回显 `ping.ts` |
 | s→c | `unsupported` | `t_of: str` | — | 收到不认识的消息；不断开 |
 | s→c | `error` | `code: str`, `detail: str` | `id: u32` | `id` 回显出错请求 |
