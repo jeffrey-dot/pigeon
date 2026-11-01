@@ -44,6 +44,8 @@ public struct HostInstaller {
         case noHost(String)
         /// ssh itself failed (exit 255): the machine was never reached, so no fallback can help.
         case unreachable(host: String, detail: String)
+        /// The destination would not reach ssh as a destination (a leading `-` is an option).
+        case invalidDestination(String)
 
         public var description: String {
             switch self {
@@ -55,6 +57,9 @@ public struct HostInstaller {
             case .noHost: return "Couldn't set up Pigeon on the server"
             case let .unreachable(host, detail):
                 return detail.isEmpty ? "Can't connect to \(host)" : "Can't connect to \(host): \(detail)"
+            case let .invalidDestination(host):
+                return "\"\(host)\" is not a valid SSH destination. "
+                    + "Use a name like user@example.com; it can't start with \"-\" or contain spaces."
             }
         }
     }
@@ -122,6 +127,11 @@ public struct HostInstaller {
             throw Failure.unsupportedPlatform(platform)
         }
         let full = try hash(artifact)
+        // The hash becomes a directory name inside double-quoted shell text (`$HOME` has to
+        // expand there), so only lowercase hex may get that far.
+        guard full.count == 64, full.allSatisfy({ $0.isHexDigit && !$0.isUppercase }) else {
+            throw Failure.command("bad content hash \(full)")
+        }
         let version = String(full.prefix(16))
         let directory = "$HOME/.pigeon/server/\(version)"
         let path = "\(directory)/pigeon-server"
@@ -222,6 +232,23 @@ public struct HostInstaller {
         """
     }
 
+    /// What the user typed must reach ssh as a destination and nothing else: a leading `-`
+    /// would be an option (`-oProxyCommand=…` runs a local command), and whitespace or
+    /// control characters are never part of a host name. The `--` every call passes is the
+    /// second line of defence; this one gives the user a clear message.
+    public static func checkDestination(_ host: String) throws {
+        let bad = host.isEmpty || host.hasPrefix("-")
+            || host.unicodeScalars.contains {
+                CharacterSet.whitespacesAndNewlines.contains($0) || CharacterSet.controlCharacters.contains($0)
+            }
+        if bad { throw Failure.invalidDestination(host) }
+    }
+
+    /// `value` as one POSIX shell word: single quotes, with `'` written as `'\''`.
+    public static func shellQuote(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
     public static func firstWord(_ text: String) -> String {
         text.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? ""
     }
@@ -316,6 +343,7 @@ public struct HostInstaller {
     /// those understand, and the real script travels as base64 on it: written under
     /// `~/.pigeon/` and run with `/bin/sh`. That also keeps stdin free for the binary.
     public static func sshRunner(host: String, script: String, stdin: URL?) throws -> Result {
+        try checkDestination(host)
         // Whatever the outcome, the helper file goes away: the only things left under
         // `~/.pigeon/` are the host binaries.
         let body = "trap 'rm -f \"$0\"' EXIT\n" + script
@@ -324,7 +352,8 @@ public struct HostInstaller {
             + "> \"$HOME/.pigeon/install.sh\"; sh \"$HOME/.pigeon/install.sh\""
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-        process.arguments = sshOptions() + [host, pipeline]
+        // `--` ends ssh's options: neither the destination nor the command is ever read as one.
+        process.arguments = sshOptions() + ["--", host, pipeline]
         let out = Pipe()
         let err = Pipe()
         process.standardOutput = out

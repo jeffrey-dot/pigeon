@@ -28,6 +28,67 @@ final class RemoteSessionTests: XCTestCase {
         XCTAssertTrue(outcome.note.contains("far"))
     }
 
+    /// A "host" that starts with `-` would reach ssh as an option (`-oProxyCommand=…` runs a
+    /// local command). It is refused before anything runs, not degraded to plain ssh.
+    func testAHostThatLooksLikeAnOptionIsRefused() {
+        var ran = false
+        var spawned = false
+        let session = RemoteSession(
+            host: "-oProxyCommand=touch /tmp/pwned",
+            installer: HostInstaller(run: { _, _, _ in
+                ran = true
+                return HostInstaller.Result(status: 0, output: "", error: "")
+            }),
+            run: { _ in
+                ran = true
+                return HostInstaller.Result(status: 0, output: "", error: "")
+            },
+            spawn: { _ in
+                spawned = true
+                return Process()
+            },
+            artifact: { _ in nil }
+        )
+        XCTAssertThrowsError(try session.connect()) { error in
+            XCTAssertTrue("\(error)".contains("not a valid SSH destination"), "got \(error)")
+        }
+        XCTAssertFalse(ran)
+        XCTAssertFalse(spawned)
+    }
+
+    /// Every ssh call ends its options with `--`, so the destination can never be read as one.
+    func testTheDestinationAlwaysFollowsAnEndOfOptionsMarker() throws {
+        var calls: [[String]] = []
+        let session = RemoteSession(
+            host: "far",
+            run: { _ in HostInstaller.Result(status: 0, output: "", error: "") },
+            spawn: { arguments in
+                calls.append(arguments)
+                return Process()
+            }
+        )
+        _ = try session.connect(allowHost: false)
+        XCTAssertEqual(calls, [["-tt", "--", "far"]])
+    }
+
+    /// The installed path comes back from the remote, so it is quoted for the shell, never
+    /// pasted inside double quotes where `$(…)` or a `"` would still be live.
+    func testTheRemoteBinaryPathIsShellQuoted() throws {
+        var scripts: [String] = []
+        let session = RemoteSession(
+            host: "far",
+            run: { script in
+                scripts.append(script)
+                return HostInstaller.Result(status: 0, output: "/s.sock", error: "")
+            },
+            spawn: { _ in Process() }
+        )
+        _ = try session.remoteSocket(binary: "/home/a'b/$(id)/pigeon-server")
+        XCTAssertEqual(scripts, ["'/home/a'\\''b/$(id)/pigeon-server' --socket-path"])
+        XCTAssertEqual(HostInstaller.shellQuote("plain"), "'plain'")
+        XCTAssertEqual(HostInstaller.shellQuote("it's"), "'it'\\''s'")
+    }
+
     /// Mode A end to end, without ssh: the "remote" is a local host serving its stdio, so a
     /// working handshake is the same bytes a real `--proxy` would carry.
     func testTheBridgeIsChosenWhenAProtocolPeerAnswers() throws {
@@ -206,7 +267,7 @@ final class RemoteSessionTests: XCTestCase {
         let host = try sshHost()
         let session = RemoteSession(host: host, spawn: { arguments in
             // Refuse the bridge the way a host that cannot run `--proxy` would.
-            if arguments.count == 2, arguments[1].contains("--proxy") {
+            if arguments.last?.contains("--proxy") == true {
                 let refusal = Process()
                 refusal.executableURL = URL(fileURLWithPath: "/usr/bin/false")
                 try refusal.run()

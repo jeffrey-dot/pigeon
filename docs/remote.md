@@ -155,6 +155,9 @@ cargo build --release --manifest-path core/Cargo.toml --bin pigeon-server \
   `~/.pigeon/state/pigeon.sock`（`$XDG_RUNTIME_DIR` 会在用户最后一个登录会话结束时被 systemd 删掉，宿主就成了孤儿）；
   其它情况（本机、开发构建）用 `$XDG_RUNTIME_DIR/pigeon.sock`，回退 `/tmp/pigeon-<uid>.sock`。
 - `--proxy` 只转发协议帧：不接受任意命令、不做 shell 展开。
+- 用户填的主机名只当 ssh 目的地：以 `-` 开头（如 `-oProxyCommand=…`，会在本机执行命令）、为空或含空白/控制字符的
+  直接拒绝，不降级成普通 ssh；每次调用 ssh 都在目的地前加 `--`。拼进远端 shell 的值里，远端返回的二进制路径一律单引号转义，
+  版本目录名只允许小写十六进制（它要和 `$HOME` 一起放在双引号里）。
 - `--remote-install` / `--no-remote-install` 永不静默安装；打印完整命令与哈希；不修改远端 shell 配置。
 - 认证/密钥/known_hosts 全部交给系统 `ssh`；pigeon 不读、不缓存任何凭据。
 - 远端进程以普通用户身份运行，与用户手敲命令同权限。

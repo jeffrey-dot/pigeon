@@ -106,6 +106,27 @@ final class HostInstallerTests: XCTestCase {
             "the temp file is renamed, not copied")
     }
 
+    /// ssh would read a leading `-` as an option; the runner refuses before starting ssh.
+    func testTheRunnerRefusesADestinationThatLooksLikeAnOption() {
+        for host in ["-oProxyCommand=/usr/bin/false", "", "two words", "a\nb"] {
+            XCTAssertThrowsError(
+                try HostInstaller.sshRunner(host: host, script: "true", stdin: nil), host
+            ) { error in
+                XCTAssertTrue("\(error)".contains("not a valid SSH destination"), "got \(error)")
+            }
+        }
+        // The content hash lands in shell text too, so it has to be plain hex.
+        let artifact = URL(fileURLWithPath: "/dev/null")
+        let shady = HostInstaller(
+            run: { _, _, _ in HostInstaller.Result(status: 0, output: "Linux x86_64", error: "") },
+            hash: { _ in "$(id)" + String(repeating: "a", count: 59) })
+        XCTAssertThrowsError(try shady.install(host: "arch", artifact: artifact)) {
+            XCTAssertTrue("\($0)".contains("bad content hash"), "got \($0)")
+        }
+        XCTAssertNoThrow(try HostInstaller.checkDestination("user@example.com"))
+        XCTAssertNoThrow(try HostInstaller.checkDestination("ssh://u@h:2222"))
+    }
+
     func testTheHashProbeIsSilentWhenTheFileIsMissing() {
         let script = HostInstaller.remoteHash("$HOME/.pigeon/server/v/pigeon-server")
         XCTAssertTrue(script.contains("[ -f "))
