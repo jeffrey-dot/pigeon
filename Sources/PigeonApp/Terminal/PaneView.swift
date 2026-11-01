@@ -72,6 +72,8 @@ final class PaneView: NSView {
     var selectionActive = false
     /// What the input method is composing, drawn at the cursor until it commits.
     var preedit: Preedit?
+    /// The row the composing overlay was drawn on in the last posted frame.
+    var preeditRow: Int?
     /// ⌥ as Meta (`TerminalSettings.optionAsMeta`); off lets ⌥ compose characters.
     var optionAsMeta = true
     /// The key being handed to the input method, for `doCommand(by:)` to encode.

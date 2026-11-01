@@ -57,10 +57,16 @@ extension PaneView {
         var shown = (cells: cells, cursor: cursor)
         shown.cursor.hollow = !hasKeyboardFocus
         if blinkTimer != nil, !blink.isLit(at: Date()) { shown.cursor.visible = false }
+        var overlayRow: Int?
         if let preedit, let overlay = preedit.overlay(cells: cells, cursor: cursor, cols: cols, rows: rows) {
             shown = (overlay.cells, overlay.cursor)
-            dirty.mark(overlay.row)
+            overlayRow = overlay.row
         }
+        // Only the row the composing overlay left and the row it covers differ from the grid.
+        for row in Preedit.rowsToRedraw(previous: preeditRow, current: overlayRow, rows: rows) {
+            dirty.mark(row)
+        }
+        preeditRow = overlayRow
         metal.layer.contentsScale = scale
         metal.layer.backgroundColor = CellPalette.color(palette.background).cgColor
         metal.post(GridFrame(
