@@ -105,9 +105,6 @@ pub struct Record {
 pub struct StatusStore {
     records: BTreeMap<String, Record>,
     buf: Vec<u8>,
-    /// Tail of the stream used to spot OSC 133 `A` (a shell prompt) even when the
-    /// marker is split across reads.
-    prompt_buf: Vec<u8>,
     /// Last cwd reported by OSC 7 (falls back to the spawn cwd in the host).
     cwd: Option<String>,
     /// Last title reported by OSC 0/2.
@@ -117,9 +114,6 @@ pub struct StatusStore {
     next_seq: u32,
 }
 
-/// OSC 133 `A` — the shell is back at a prompt.
-const PROMPT_MARKER: &[u8] = b"\x1b]133;A";
-
 impl StatusStore {
     pub fn new() -> Self {
         Self::default()
@@ -127,14 +121,17 @@ impl StatusStore {
 
     /// Consumes pane bytes. Bytes that are not OSC 7501 are ignored here — the
     /// VT engine is what turns them into a screen.
+    ///
+    /// Every sequence, OSC 133 included, comes out of one scanner and is applied in
+    /// stream order, so a prompt only clears reports that were written before it.
     pub fn feed(&mut self, bytes: &[u8]) {
-        self.scan_prompts(bytes);
         self.buf.extend_from_slice(bytes);
         let mut sequences = Vec::new();
         parse::take_osc(&mut self.buf, &mut sequences);
         for (code, body) in sequences {
             match code.as_slice() {
                 b"7501" => self.apply(&body),
+                b"133" if is_prompt_mark(&body) => self.on_prompt(),
                 b"7" => {
                     if let Some(path) = parse::decode_file_url(&body) {
                         self.cwd = Some(path);
@@ -246,20 +243,6 @@ impl StatusStore {
         }
     }
 
-    /// OSC 133 `A` means the prompt is back: nothing is working any more.
-    fn scan_prompts(&mut self, bytes: &[u8]) {
-        self.prompt_buf.extend_from_slice(bytes);
-        while let Some(index) = find_bytes(&self.prompt_buf, PROMPT_MARKER) {
-            self.prompt_buf.drain(..index + PROMPT_MARKER.len());
-            self.on_prompt();
-        }
-        let keep = PROMPT_MARKER.len().saturating_sub(1);
-        if self.prompt_buf.len() > keep {
-            let drop = self.prompt_buf.len() - keep;
-            self.prompt_buf.drain(..drop);
-        }
-    }
-
     fn apply(&mut self, body: &[u8]) {
         match parse::parse(body) {
             parse::Parsed::Ignore => {}
@@ -335,10 +318,9 @@ impl StatusStore {
     }
 }
 
-fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack
-        .windows(needle.len())
-        .position(|window| window == needle)
+/// OSC 133 `A` (optionally followed by `;options`) marks a fresh shell prompt.
+fn is_prompt_mark(body: &[u8]) -> bool {
+    body == b"A" || body.starts_with(b"A;")
 }
 
 #[cfg(test)]
@@ -433,7 +415,7 @@ mod tests {
         store.feed(&report("id=b:state=done"));
         // Split the prompt marker across two reads on purpose.
         store.feed(b"\x1b]13");
-        store.feed(b"3;A");
+        store.feed(b"3;A\x07");
         assert!(store.get("a").is_none(), "working dies at the prompt");
         assert!(store.get("b").is_some(), "done waits for the user");
     }
@@ -544,5 +526,68 @@ mod tests {
         let mut store = StatusStore::new();
         store.feed(&report("id=a:state=blocked:app=p\u{1}i"));
         assert!(store.is_empty(), "no half-applied record without its app");
+    }
+
+    const PROMPT: &[u8] = b"\x1b]133;A\x07";
+
+    fn feed_all(store: &mut StatusStore, chunks: &[&[u8]]) {
+        for chunk in chunks {
+            store.feed(chunk);
+        }
+    }
+
+    #[test]
+    fn prompt_after_working_in_one_read_clears_it() {
+        let mut store = StatusStore::new();
+        let bytes = [report("id=a:state=working"), PROMPT.to_vec()].concat();
+        store.feed(&bytes);
+        assert!(store.get("a").is_none(), "the prompt came after the report");
+    }
+
+    #[test]
+    fn working_after_prompt_in_one_read_survives() {
+        let mut store = StatusStore::new();
+        let bytes = [PROMPT.to_vec(), report("id=a:state=working")].concat();
+        store.feed(&bytes);
+        assert!(store.get("a").is_some(), "the report came after the prompt");
+    }
+
+    #[test]
+    fn prompt_after_working_split_across_reads_clears_it() {
+        let mut store = StatusStore::new();
+        let bytes = [report("id=a:state=working"), PROMPT.to_vec()].concat();
+        for cut in 1..bytes.len() {
+            let mut store_cut = StatusStore::new();
+            feed_all(&mut store_cut, &[&bytes[..cut], &bytes[cut..]]);
+            assert!(store_cut.get("a").is_none(), "cut at {cut}");
+        }
+        store.feed(&bytes);
+        assert!(store.get("a").is_none());
+    }
+
+    #[test]
+    fn working_after_prompt_split_across_reads_survives() {
+        let bytes = [PROMPT.to_vec(), report("id=a:state=working")].concat();
+        for cut in 1..bytes.len() {
+            let mut store = StatusStore::new();
+            feed_all(&mut store, &[&bytes[..cut], &bytes[cut..]]);
+            assert!(store.get("a").is_some(), "cut at {cut}");
+        }
+    }
+
+    #[test]
+    fn prompt_with_options_and_st_terminator_counts() {
+        let mut store = StatusStore::new();
+        store.feed(&report("id=a:state=blocked"));
+        store.feed(b"\x1b]133;A;cl=m\x1b\\");
+        assert!(store.get("a").is_none());
+    }
+
+    #[test]
+    fn other_osc133_marks_are_not_prompts() {
+        let mut store = StatusStore::new();
+        store.feed(&report("id=a:state=working"));
+        store.feed(b"\x1b]133;B\x07\x1b]133;C\x07\x1b]133;D;0\x07\x1b]133;AB\x07");
+        assert!(store.get("a").is_some(), "only `A` is a prompt");
     }
 }
