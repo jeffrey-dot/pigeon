@@ -79,6 +79,8 @@ final class RemoteSession {
         allowHost: Bool = true,
         allowDegraded: Bool = true
     ) throws -> Outcome {
+        // Before any ssh runs, and not a reason to degrade: plain ssh would take it too.
+        try HostInstaller.checkDestination(host)
         var why: [String] = []
         if allowHost {
             do {
@@ -103,6 +105,7 @@ final class RemoteSession {
             } catch let failure as HostInstaller.Failure {
                 // Plain ssh cannot reach a machine the probe could not: say so, not "no host".
                 if case .unreachable = failure { throw failure }
+                if case .invalidDestination = failure { throw failure }
                 why.append("\(failure)")
             } catch {
                 why.append("\(error)")
@@ -113,7 +116,7 @@ final class RemoteSession {
         guard allowDegraded else {
             throw HostInstaller.Failure.noHost(why.joined(separator: "; "))
         }
-        let process = try spawn(["-tt", host])
+        let process = try spawn(["-tt", "--", host])
         children.append(process)
         return Outcome(
             transport: .degraded,
@@ -132,15 +135,18 @@ final class RemoteSession {
         return artifact
     }
 
-    /// Starts (or reuses) the remote host in the background; `nohup` is what lets it outlive
-    /// the ssh channel that started it.
+    /// Starts (or reuses) the remote host the way the local one is started: `--detach` asks
+    /// the socket whether a host answers, starts one in its own
+    /// process group otherwise, and returns once it is listening.
+    ///
+    /// A host already serving the socket is kept, whatever its version: replacing it would end
+    /// the user's sessions there. A major-version mismatch therefore surfaces as a refused
+    /// `hello` (`docs/remote.md` §3), not as a silent restart.
     func startDaemon(binary: String) throws {
+        let quoted = HostInstaller.shellQuote(binary)
         let script = """
-            if [ ! -x "\(binary)" ]; then exit 4; fi
-            if "\(binary)" --socket-path >/dev/null 2>&1; then :; fi
-            if pgrep -f "\(binary)" >/dev/null 2>&1; then exit 0; fi
-            nohup "\(binary)" </dev/null >/dev/null 2>&1 &
-            sleep 0.3
+            if [ ! -x \(quoted) ]; then exit 4; fi
+            exec \(quoted) --detach </dev/null >/dev/null
             """
         let result = try run(script)
         if !result.ok {
@@ -151,7 +157,7 @@ final class RemoteSession {
 
     /// The remote socket path, asked of the binary itself so the rule lives in one place.
     func remoteSocket(binary: String) throws -> String {
-        let result = try run("\"\(binary)\" --socket-path")
+        let result = try run("\(HostInstaller.shellQuote(binary)) --socket-path")
         guard result.ok else {
             throw HostInstaller.Failure.command(result.error)
         }
@@ -159,7 +165,7 @@ final class RemoteSession {
     }
 
     private func probeProxy(binary: String) throws -> HostClient? {
-        let process = try spawn([host, "\"\(binary)\" --proxy"])
+        let process = try spawn(["--", host, "\(HostInstaller.shellQuote(binary)) --proxy"])
         guard let ends = Self.pipeEnds(process) else {
             process.terminate()
             return nil
@@ -177,7 +183,7 @@ final class RemoteSession {
     private func probeForward(socket: String) throws -> HostClient? {
         let local = NSTemporaryDirectory() + "pigeon-remote-\(UUID().uuidString.prefix(8)).sock"
         try? FileManager.default.removeItem(atPath: local)
-        let process = try spawn(["-N", "-L", "\(local):\(socket)", host])
+        let process = try spawn(["-N", "-L", "\(local):\(socket)", "--", host])
         defer {
             // The classic trick: keep the forward alive only as long as it is useful.
             if !children.contains(where: { $0 === process }) { process.terminate() }

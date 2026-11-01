@@ -206,7 +206,7 @@ final class RemoteSessionTests: XCTestCase {
         let host = try sshHost()
         let session = RemoteSession(host: host, spawn: { arguments in
             // Refuse the bridge the way a host that cannot run `--proxy` would.
-            if arguments.count == 2, arguments[1].contains("--proxy") {
+            if arguments.last?.contains("--proxy") == true {
                 let refusal = Process()
                 refusal.executableURL = URL(fileURLWithPath: "/usr/bin/false")
                 try refusal.run()
