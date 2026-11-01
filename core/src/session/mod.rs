@@ -16,7 +16,6 @@ pub use backlog::Backlog;
 #[cfg_attr(not(feature = "internals"), allow(unused_imports))]
 pub use pane_meta::PaneMeta;
 #[cfg_attr(not(feature = "internals"), allow(unused_imports))]
-#[cfg_attr(not(feature = "internals"), allow(unused_imports))]
 pub use session_state::{empty_layout_message, SessionState};
 #[cfg_attr(not(feature = "internals"), allow(unused_imports))]
 pub use size_policy::SizePolicy;
