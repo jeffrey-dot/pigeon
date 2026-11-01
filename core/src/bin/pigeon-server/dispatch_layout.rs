@@ -93,6 +93,7 @@ pub async fn focus(host: &HostState, client_id: u32, pane_id: u32) -> Option<Mes
     session.layout.focus(pane_id);
     // `latest`: focusing is what makes a window the one that owns the size.
     if session.vote.focus(client_id) {
+        host.votes_changed();
         session.refit();
     }
     apply_layout(session_id, session, &host.events);
@@ -112,6 +113,7 @@ pub async fn resize_pane(
     // The box this client's grid implies for the whole session.
     let wanted = session.box_for(pane_id, cols, rows)?;
     session.vote.report(client_id, wanted);
+    host.votes_changed();
     if session.refit() {
         apply_layout(session_id, session, &host.events);
     } else {
