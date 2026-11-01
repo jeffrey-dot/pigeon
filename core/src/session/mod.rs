@@ -43,6 +43,8 @@ pub struct PaneState {
     status: StatusStore,
     /// Deltas already sent, for a reconnecting client's `attach.since`.
     backlog: Backlog,
+    /// `false` when the embedder turned OSC 7501 off (`PgConfig.osc7501_enabled`).
+    status_enabled: bool,
 }
 
 impl PaneState {
@@ -55,6 +57,7 @@ impl PaneState {
             term: Box::new(AlacrittyTerm::new(cols, rows, scrollback)),
             status: StatusStore::new(),
             backlog: Backlog::default(),
+            status_enabled: true,
         }
     }
 
@@ -68,6 +71,7 @@ impl PaneState {
             term: Box::new(FrozenTerm::new(snapshot)),
             status: StatusStore::new(),
             backlog: Backlog::default(),
+            status_enabled: true,
         }
     }
 
@@ -200,7 +204,10 @@ impl PaneState {
     /// `scrollback` capability.
     pub fn snapshot_message(&mut self, with_history: bool) -> Message {
         let snapshot = if with_history {
-            self.term.snapshot()
+            // Only the rows that fit the frame budget are converted at all.
+            let (cols, _) = self.size();
+            self.term
+                .snapshot_with_recent_history(history_rows_that_fit(cols))
         } else {
             self.term.screen_snapshot()
         };
@@ -213,15 +220,12 @@ impl PaneState {
         if dirty.is_empty() {
             return None;
         }
-        let snapshot = self.term.screen_snapshot();
-        let rows: Vec<Row> = dirty
-            .iter()
-            .filter_map(|row| {
-                let y = *row;
-                snapshot.screen.get(usize::from(y)).map(|cells| Row {
-                    y,
-                    cells: cells.iter().map(to_proto_cell).collect(),
-                })
+        let (changed, snapshot) = self.term.screen_rows(&dirty);
+        let rows: Vec<Row> = changed
+            .into_iter()
+            .map(|(y, cells)| Row {
+                y,
+                cells: cells.iter().map(to_proto_cell).collect(),
             })
             .collect();
         if rows.is_empty() {
@@ -249,7 +253,12 @@ impl PaneState {
     }
 
     fn status_enabled(&self) -> bool {
-        true
+        self.status_enabled
+    }
+
+    /// Turns OSC 7501 parsing on or off for bytes fed from now on.
+    pub fn set_status_enabled(&mut self, enabled: bool) {
+        self.status_enabled = enabled;
     }
 }
 
@@ -291,11 +300,15 @@ fn message_from_snapshot(
 /// blow past it and turn `attach` into a hard failure. Keep the newest rows that fit,
 /// dropping the oldest — an incomplete history beats no snapshot.
 fn history_window(history: &[Vec<crate::term::Cell>], cols: u16) -> &[Vec<crate::term::Cell>] {
+    let keep = history.len().min(history_rows_that_fit(cols));
+    &history[history.len() - keep..]
+}
+
+/// How many history rows of a `cols`-wide pane fit in [`HISTORY_BUDGET`].
+fn history_rows_that_fit(cols: u16) -> usize {
     // ~20 bytes per cell on the wire (uint32 fields plus CBOR headers), plus a row header.
     let per_row = usize::from(cols).saturating_mul(20).saturating_add(16);
-    let fit = HISTORY_BUDGET / per_row.max(1);
-    let keep = history.len().min(fit);
-    &history[history.len() - keep..]
+    HISTORY_BUDGET / per_row.max(1)
 }
 
 fn cursor_of(snapshot: &Snapshot) -> ProtoCursor {
@@ -665,6 +678,57 @@ mod tests {
             panic!("delta");
         };
         assert_eq!(alt, Some(true));
+    }
+
+    /// Deltas and history snapshots convert only the rows they send; what they send must
+    /// still equal the slow path (full conversion, then pick the rows).
+    #[test]
+    fn partial_conversion_matches_the_full_picture() {
+        let bytes: Vec<u8> = (0..30)
+            .flat_map(|line| format!("\x1b[3{}mline {line}\x1b[0m \u{4f60}\r\n", line % 8).into_bytes())
+            .chain(b"\x1b[2;3Hx\x1b[5;1Hyz".iter().copied())
+            .collect();
+        let mut fast = PaneState::new(1, 12, 6, 100);
+        let mut slow = PaneState::new(1, 12, 6, 100);
+        fast.feed(&bytes);
+        slow.feed(&bytes);
+        let dirty = slow.take_damage();
+        let picture = slow.snapshot();
+        let Some(Message::Delta { rows, cursor, alt, .. }) = fast.delta_message() else {
+            panic!("expected a delta");
+        };
+        let expected: Vec<_> = dirty
+            .iter()
+            .filter_map(|y| picture.screen.get(usize::from(*y)).map(|cells| (*y, cells)))
+            .map(|(y, cells)| (y, cells.iter().map(to_proto_cell).collect::<Vec<_>>()))
+            .collect();
+        let got: Vec<_> = rows.into_iter().map(|row| (row.y, row.cells)).collect();
+        assert_eq!(got, expected);
+        assert_eq!(cursor.map(|c| (c.x, c.y)), Some((picture.cursor.x, picture.cursor.y)));
+        assert_eq!(alt, Some(picture.alt));
+
+        // 500 columns: the history is trimmed to the frame budget.
+        let mut wide = PaneState::new(2, 500, 4, 2000);
+        for line in 0..600 {
+            wide.feed(format!("row {line}\r\n").as_bytes());
+        }
+        let full = wide.snapshot();
+        let window = super::history_window(&full.history, full.cols);
+        assert!(window.len() < full.history.len(), "the budget trims this history");
+        let Message::Snapshot { history, screen, .. } = wide.snapshot_message(true) else {
+            panic!("expected a snapshot");
+        };
+        let expected: Vec<Vec<_>> = window
+            .iter()
+            .map(|row| row.iter().map(to_proto_cell).collect())
+            .collect();
+        assert_eq!(history, Some(expected));
+        let expected: Vec<Vec<_>> = full
+            .screen
+            .iter()
+            .map(|row| row.iter().map(to_proto_cell).collect())
+            .collect();
+        assert_eq!(screen, expected);
     }
 
     #[test]

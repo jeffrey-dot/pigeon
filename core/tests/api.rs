@@ -2,9 +2,9 @@
 //! client would; `abi.rs` covers the same behaviour through the C face.
 
 use pigeon_core::api::{
-    encode_frame, layout_focus, layout_rects, layout_splits, offers_feature, snapshot_of, Axis,
-    Config, Core, Message, Node, PgError, Scroll, SplitAxis, SplitNode, StatusState, WireCell,
-    WireCursor, PROTO_VERSION,
+    delta_of, encode_frame, layout_focus, layout_rects, layout_splits, layout_zoom, offers_feature,
+    sessions_of, snapshot_of, Axis, Config, Core, Message, Node, PgError, Row, Scroll, SessionInfo,
+    SplitAxis, SplitNode, StatusState, WireCell, WireCursor, PROTO_VERSION,
 };
 
 fn core_with_pane(cols: u16, rows: u16) -> (Core, u32) {
@@ -219,4 +219,164 @@ fn a_hello_ack_says_which_features_the_host_offers() {
     // Only a hello_ack carries the negotiated set.
     let other = Message::Pong { ts: 1 };
     assert_eq!(offers_feature(&other, "delta"), Err(PgError::InvalidArg));
+}
+
+#[test]
+fn replies_can_be_peeked_and_consumed_in_parts() {
+    let (mut core, pane) = core_with_pane(20, 4);
+    core.feed(pane, b"\x1b[6n").expect("feed");
+    assert_eq!(core.peek_replies(pane).expect("peek"), b"\x1b[1;1R");
+    assert_eq!(
+        core.peek_replies(pane).expect("peek"),
+        b"\x1b[1;1R",
+        "peeking keeps them"
+    );
+    core.consume_replies(pane, 2).expect("consume");
+    core.feed(pane, b"\x1b[6n").expect("feed");
+    assert_eq!(
+        core.take_replies(pane).expect("take"),
+        b"1;1R\x1b[1;1R",
+        "the rest stays ahead of newer replies"
+    );
+}
+
+#[test]
+fn dirty_rows_can_be_peeked_and_consumed_in_parts() {
+    let (mut core, pane) = core_with_pane(10, 4);
+    core.feed(pane, b"a\r\nb\r\nc").expect("feed");
+    let pending = core.peek_dirty_rows(pane).expect("peek").to_vec();
+    assert!(pending.len() >= 3);
+    core.consume_dirty_rows(pane, 1).expect("consume");
+    assert_eq!(core.take_dirty_rows(pane).expect("take"), pending[1..]);
+}
+
+#[test]
+fn osc7501_can_be_turned_off() {
+    assert!(
+        Config::default().osc7501_enabled,
+        "on unless asked otherwise"
+    );
+    let mut core = Core::new(Config {
+        osc7501_enabled: false,
+        ..Config::default()
+    });
+    let pane = core.new_pane(20, 4).expect("pane");
+    core.feed(pane, b"\x1b]7501;state=working\x07")
+        .expect("feed");
+    let second = core.split(pane, Axis::Vertical, 0.5).expect("split");
+    core.feed(second, b"\x1b]7501;state=working\x07")
+        .expect("feed");
+    let (_, records) = core.focused_status().expect("status");
+    assert_eq!(records.count(), 0, "split panes follow the config too");
+    core.focus(pane).expect("focus");
+    let (_, records) = core.focused_status().expect("status");
+    assert_eq!(records.count(), 0);
+}
+
+#[test]
+fn split_sizes_follow_the_ratio_and_resize_clamps_against_the_window() {
+    let (mut core, first) = core_with_pane(100, 30);
+    let second = core.split(first, Axis::Horizontal, 0.5).expect("split");
+    assert_eq!(core.snapshot(first).expect("snap").rows, 15);
+    assert_eq!(core.snapshot(second).expect("snap").rows, 15);
+    let third = core.split(second, Axis::Vertical, 0.3).expect("split");
+    assert_eq!(core.snapshot(second).expect("snap").cols, 30);
+    assert_eq!(core.snapshot(third).expect("snap").cols, 70);
+
+    // The focused pane is 15 rows tall; the outer split divides the 30-row window, so
+    // 3-row minimums allow 0.9 (measured against the pane it would stop at 0.8).
+    let outer = core.split_of(first).expect("split_of").expect("split");
+    core.set_split_ratio(outer, 0.9).expect("resize");
+    let rects = core.rects().expect("rects");
+    assert!((rects[0].1.h - 0.9).abs() < 1e-5, "got {}", rects[0].1.h);
+    assert_eq!(core.snapshot(first).expect("snap").rows, 27);
+
+    // Closing gives the sibling the whole box back, in cells too.
+    core.close(third).expect("close");
+    assert_eq!(core.snapshot(second).expect("snap").cols, 100);
+}
+
+#[test]
+fn a_status_record_with_an_id_is_acked_by_seq_like_the_host_does() {
+    let (mut core, pane) = core_with_pane(40, 6);
+    core.feed(pane, b"\x1b]7501;state=done:id=w1\x07")
+        .expect("feed");
+    let seq = {
+        let (_, mut records) = core.focused_status().expect("status");
+        records.next().expect("record").seq
+    };
+    assert!(core.ack_status(pane, seq).expect("ack"));
+    let (_, mut records) = core.focused_status().expect("status");
+    assert!(records.next().expect("record").acked);
+}
+
+#[test]
+fn a_delta_message_decodes_into_rows() {
+    let message = Message::Delta {
+        pane_id: 3,
+        seq: 9,
+        rows: vec![Row {
+            y: 1,
+            cells: vec![wire_cell('中'), wire_cell(' '), wire_cell('a')],
+        }],
+        cursor: Some(WireCursor {
+            x: 2,
+            y: 1,
+            visible: true,
+            shape: 0,
+        }),
+        scroll: None,
+        links: None,
+        alt: Some(true),
+        modes: None,
+    };
+    let delta = delta_of(&message).expect("delta");
+    assert_eq!((delta.pane_id, delta.seq, delta.alt), (3, 9, Some(true)));
+    assert_eq!(delta.rows.len(), 1);
+    let (y, cells) = &delta.rows[0];
+    assert_eq!(*y, 1);
+    assert_eq!((cells[0].width, cells[1].width, cells[2].width), (2, 0, 1));
+    assert_eq!(delta.cursor.map(|cursor| cursor.x), Some(2));
+    assert_eq!(delta_of(&layout_message()).err(), Some(PgError::InvalidArg));
+}
+
+#[test]
+fn layout_zoom_and_sessions_are_read_through_the_api() {
+    let Message::Layout {
+        session_id, tree, ..
+    } = layout_message()
+    else {
+        panic!("layout");
+    };
+    let zoomed = Message::Layout {
+        session_id,
+        tree,
+        zoom: Some(2),
+        focus: None,
+    };
+    assert_eq!(layout_zoom(&zoomed), Ok(Some(2)));
+    assert_eq!(layout_zoom(&layout_message()), Ok(None));
+    assert_eq!(
+        layout_zoom(&Message::Pong { ts: 1 }).err(),
+        Some(PgError::InvalidArg)
+    );
+
+    let sessions = Message::Sessions {
+        items: vec![SessionInfo {
+            session_id: 4,
+            title: "t".into(),
+            cwd: "/tmp".into(),
+            panes: vec![5, 6],
+            active_pane: Some(6),
+            active_title: None,
+            active_program: Some("vim".into()),
+        }],
+    };
+    let items = sessions_of(&sessions).expect("sessions");
+    assert_eq!(items.len(), 1);
+    assert_eq!((items[0].session_id, &items[0].panes[..]), (4, &[5, 6][..]));
+    assert_eq!(
+        sessions_of(&Message::Pong { ts: 1 }).err(),
+        Some(PgError::InvalidArg)
+    );
 }

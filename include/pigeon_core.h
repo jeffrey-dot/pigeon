@@ -185,6 +185,9 @@ typedef struct PgConfig {
      * 0 = core default (10000 lines); capped at 100000.
      */
     uint32_t scrollback_lines;
+    /**
+     * 0: OSC 7501 reports are ignored and `pg_status_*` stays empty.
+     */
     uint8_t osc7501_enabled;
 } PgConfig;
 
@@ -427,6 +430,10 @@ bool pg_pane_resize(PgCore *core, uint32_t pane_id, uint16_t cols, uint16_t rows
 
 /**
  * Pulls pending terminal replies (DA/DSR/…); returns bytes written.
+ *
+ * `out == NULL` returns how many bytes are pending without consuming them. When
+ * `cap` is too small nothing is consumed: the call fails with `PG_ERR_OVERFLOW`
+ * and the replies stay queued for a retry with a larger buffer.
  */
 size_t pg_pane_respond(PgCore *core, uint32_t pane_id, uint8_t *out, size_t cap);
 
@@ -436,7 +443,11 @@ size_t pg_pane_respond(PgCore *core, uint32_t pane_id, uint8_t *out, size_t cap)
 struct PgSnapshot *pg_pane_snapshot(PgCore *core, uint32_t pane_id);
 
 /**
- * Fills row indices dirty since the last call; returns how many were written.
+ * Fills row indices dirty since the last call (ascending, no duplicates); returns
+ * how many were written.
+ *
+ * `out == NULL` returns how many rows are pending without consuming them. Rows
+ * that do not fit in `cap` stay pending and come back on the next call.
  */
 size_t pg_pane_dirty_rows(PgCore *core, uint32_t pane_id, uint16_t *out, size_t cap);
 

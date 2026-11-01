@@ -429,3 +429,174 @@ fn a_non_delta_message_yields_no_delta() {
     pg_msg_free(msg);
     pg_msg_free(empty);
 }
+
+#[test]
+fn a_reply_that_does_not_fit_stays_queued() {
+    let core = pg_core_new(ptr::null());
+    let pane = pg_pane_new(core, &pane_options(20, 4));
+    // DSR: "\x1b[1;1R" is 6 bytes.
+    assert!(pg_pane_feed(core, pane, b"\x1b[6n".as_ptr(), 4));
+    // NULL is a length query; it consumes nothing.
+    assert_eq!(pg_pane_respond(core, pane, ptr::null_mut(), 0), 6);
+    assert_eq!(pg_last_error_code(), PgErrorCode::PG_OK);
+    let mut small = [0u8; 2];
+    assert_eq!(
+        pg_pane_respond(core, pane, small.as_mut_ptr(), small.len()),
+        0
+    );
+    assert_eq!(pg_last_error_code(), PgErrorCode::PG_ERR_OVERFLOW);
+    let mut buffer = [0u8; 16];
+    let written = pg_pane_respond(core, pane, buffer.as_mut_ptr(), buffer.len());
+    assert_eq!(
+        &buffer[..written],
+        b"\x1b[1;1R",
+        "the overflowed reply is not lost"
+    );
+    assert_eq!(
+        pg_pane_respond(core, pane, buffer.as_mut_ptr(), buffer.len()),
+        0
+    );
+    pg_core_free(core);
+}
+
+#[test]
+fn dirty_rows_beyond_the_buffer_are_kept_for_the_next_call() {
+    let core = pg_core_new(ptr::null());
+    let pane = pg_pane_new(core, &pane_options(10, 4));
+    let text = b"a\r\nb\r\nc\r\nd";
+    assert!(pg_pane_feed(core, pane, text.as_ptr(), text.len()));
+    let pending = pg_pane_dirty_rows(core, pane, ptr::null_mut(), 0);
+    assert_eq!(pending, 4, "NULL reports the count without consuming");
+    let mut first = [u16::MAX; 3];
+    assert_eq!(
+        pg_pane_dirty_rows(core, pane, first.as_mut_ptr(), first.len()),
+        3
+    );
+    let mut rest = [u16::MAX; 8];
+    let more = pg_pane_dirty_rows(core, pane, rest.as_mut_ptr(), rest.len());
+    let mut seen: Vec<u16> = first.iter().chain(&rest[..more]).copied().collect();
+    seen.sort_unstable();
+    seen.dedup();
+    assert_eq!(
+        seen,
+        [0, 1, 2, 3],
+        "every dirty row is delivered once the caller asks again"
+    );
+    pg_core_free(core);
+}
+
+#[test]
+fn osc7501_disabled_in_the_config_keeps_status_empty() {
+    let feed_status = |enabled: u8| {
+        let cfg = PgConfig {
+            size: std::mem::size_of::<PgConfig>() as u32,
+            version: 1,
+            scrollback_lines: 0,
+            osc7501_enabled: enabled,
+        };
+        let core = pg_core_new(&cfg);
+        assert!(!core.is_null());
+        let pane = pg_pane_new(core, &pane_options(20, 4));
+        let report = b"\x1b]7501;state=working\x07";
+        assert!(pg_pane_feed(core, pane, report.as_ptr(), report.len()));
+        let count = pg_status_count(core);
+        pg_core_free(core);
+        count
+    };
+    assert_eq!(feed_status(1), 1);
+    assert_eq!(feed_status(0), 0, "osc7501_enabled = 0 must reach the core");
+}
+
+#[test]
+fn layout_resize_clamps_against_the_window_and_split_honours_the_ratio() {
+    use pigeon_core::ffi::{pg_layout_resize, pg_layout_split, pg_layout_split_of, PgAxis};
+
+    let core = pg_core_new(ptr::null());
+    let first = pg_pane_new(core, &pane_options(100, 30));
+    let second = pg_layout_split(core, first, PgAxis::PG_AXIS_VERTICAL, 0.25);
+    assert!(second > 0);
+    let cols_of = |pane: u32| {
+        let snapshot = pg_pane_snapshot(core, pane);
+        assert!(!snapshot.is_null());
+        // SAFETY: owned here, freed right after.
+        let cols = unsafe { (*snapshot).cols };
+        pg_snapshot_free(snapshot);
+        cols
+    };
+    assert_eq!(cols_of(first), 25, "the old pane keeps the ratio's share");
+    assert_eq!(
+        cols_of(second),
+        75,
+        "the new pane gets the rest, not cols/2"
+    );
+
+    // The new, focused pane is not the window: the clamp must measure the 100 columns.
+    assert_eq!(pg_layout_focused(core), second);
+    let split = pg_layout_split_of(core, first);
+    assert!(pg_layout_resize(core, split, 0.85));
+    let blank = PgRect {
+        size: std::mem::size_of::<PgRect>() as u32,
+        pane_id: 0,
+        x: 0.0,
+        y: 0.0,
+        w: 0.0,
+        h: 0.0,
+    };
+    let mut rects = [blank; 2];
+    assert_eq!(pg_layout_rects(core, rects.as_mut_ptr(), rects.len()), 2);
+    assert!((rects[0].w - 0.85).abs() < 1e-5, "got {}", rects[0].w);
+    assert_eq!(cols_of(first), 85, "panes follow the new ratio");
+    pg_core_free(core);
+}
+
+#[test]
+fn sessions_and_zoom_are_read_through_the_api_helpers() {
+    use pigeon_core::api::{Message, Node, SessionInfo};
+    use pigeon_core::ffi::{
+        pg_msg_decode_frame, pg_msg_free, pg_msg_layout_zoom, pg_msg_session_panes,
+        pg_msg_sessions_count,
+    };
+
+    let decode = |message: &Message| {
+        let frame = pigeon_core::api::encode_frame(message).expect("frame");
+        let mut consumed = 0usize;
+        let handle = pg_msg_decode_frame(frame.as_ptr(), frame.len(), &mut consumed);
+        assert!(!handle.is_null());
+        handle
+    };
+    let sessions = decode(&Message::Sessions {
+        items: vec![SessionInfo {
+            session_id: 1,
+            title: "t".into(),
+            cwd: "/".into(),
+            panes: vec![5, 6, 7],
+            active_pane: None,
+            active_title: None,
+            active_program: None,
+        }],
+    });
+    assert_eq!(pg_msg_sessions_count(sessions), 1);
+    let mut panes = [0u32; 2];
+    assert_eq!(
+        pg_msg_session_panes(sessions, 0, panes.as_mut_ptr(), panes.len()),
+        2
+    );
+    assert_eq!(panes, [5, 6]);
+    assert_eq!(
+        pg_msg_session_panes(sessions, 1, panes.as_mut_ptr(), panes.len()),
+        0
+    );
+    assert_eq!(pg_last_error_code(), PgErrorCode::PG_ERR_INVALID_ARG);
+
+    let layout = decode(&Message::Layout {
+        session_id: 1,
+        tree: Node::Leaf { leaf: 5 },
+        zoom: Some(5),
+        focus: None,
+    });
+    assert_eq!(pg_msg_layout_zoom(layout), 5);
+    assert_eq!(pg_msg_sessions_count(layout), 0, "not a sessions message");
+    assert_eq!(pg_last_error_code(), PgErrorCode::PG_ERR_INVALID_ARG);
+    pg_msg_free(sessions);
+    pg_msg_free(layout);
+}

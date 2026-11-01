@@ -16,10 +16,12 @@
 
 mod core;
 mod msg;
+mod outbox;
 
 pub use self::core::{Config, Core};
 pub use self::msg::{
-    layout_focus, layout_rects, layout_splits, offers_feature, snapshot_of, Split,
+    delta_of, layout_focus, layout_rects, layout_splits, layout_zoom, offers_feature, sessions_of,
+    snapshot_of, Delta, Split,
 };
 
 pub use crate::error::{PgError, PgResult};

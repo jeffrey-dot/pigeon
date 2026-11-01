@@ -116,7 +116,7 @@ pub struct Colour {
 }
 
 impl Colour {
-    pub fn from_rgb(value: u32) -> Self {
+    pub const fn from_rgb(value: u32) -> Self {
         Self {
             r: ((value >> 16) & 0xff) as u8,
             g: ((value >> 8) & 0xff) as u8,
@@ -142,16 +142,23 @@ impl Palette {
     /// answers with before any client has told it otherwise. Once a client sends
     /// `appearance`, that palette is the only source — this is a pre-client fallback, not a
     /// second palette the panes switch between.
-    pub fn default_dark() -> Self {
-        Self::from_rgb(
-            0x00e6_e6e6,
-            0x000e_0f11,
-            &[
-                0x616161, 0xFF8272, 0xB4FA72, 0xFEFDC2, 0xA5D5FE, 0xFF8FFD, 0xD0D1FE, 0xF1F1F1,
-                0x8E8E8E, 0xFFC4BD, 0xD6FCB9, 0xFEFDD5, 0xC1E3FE, 0xFFB1FE, 0xE5E6FE, 0xFEFFFF,
-            ],
-        )
-        .expect("default palette is well-formed")
+    pub const fn default_dark() -> Self {
+        const ANSI: [u32; 16] = [
+            0x616161, 0xFF8272, 0xB4FA72, 0xFEFDC2, 0xA5D5FE, 0xFF8FFD, 0xD0D1FE, 0xF1F1F1,
+            0x8E8E8E, 0xFFC4BD, 0xD6FCB9, 0xFEFDD5, 0xC1E3FE, 0xFFB1FE, 0xE5E6FE, 0xFEFFFF,
+        ];
+        // Built at compile time from a fixed-size table, so there is no length to get wrong.
+        let mut ansi = [Colour { r: 0, g: 0, b: 0 }; 16];
+        let mut index = 0;
+        while index < ANSI.len() {
+            ansi[index] = Colour::from_rgb(ANSI[index]);
+            index += 1;
+        }
+        Self {
+            fg: Colour::from_rgb(0x00e6_e6e6),
+            bg: Colour::from_rgb(0x000e_0f11),
+            ansi,
+        }
     }
 
     /// Builds a palette from the wire values; a wrong-length ANSI list is rejected rather
@@ -212,6 +219,25 @@ pub trait Term {
         let mut snapshot = self.snapshot();
         snapshot.history.clear();
         snapshot
+    }
+    /// The screen plus only the newest `max_history` scrollback rows (oldest first): what
+    /// a history `attach` can fit in one frame, without converting the rows it would drop.
+    fn snapshot_with_recent_history(&self, max_history: usize) -> Snapshot {
+        let mut snapshot = self.snapshot();
+        let drop = snapshot.history.len().saturating_sub(max_history);
+        snapshot.history.drain(..drop);
+        snapshot
+    }
+    /// The given screen rows (out-of-range ones skipped) and a picture without `screen` or
+    /// `history` for the cursor/alt/scroll fields. A delta converts one row, not the grid.
+    fn screen_rows(&self, rows: &[u16]) -> (Vec<(u16, Vec<Cell>)>, Snapshot) {
+        let mut snapshot = self.screen_snapshot();
+        let picked = rows
+            .iter()
+            .filter_map(|y| snapshot.screen.get(usize::from(*y)).map(|cells| (*y, cells.clone())))
+            .collect();
+        snapshot.screen.clear();
+        (picked, snapshot)
     }
     /// The screen scrolled back `offset` lines (clamped to the history), plus the history
     /// length; equal to `snapshot().scrolled(offset)` without `history`. Engines override it
