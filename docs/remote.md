@@ -99,6 +99,13 @@ cargo build --release --manifest-path core/Cargo.toml --bin pigeon-server \
   目录结构：`~/.pigeon/server/<version>/pigeon-server`、`~/.pigeon/state/`（socket、日志）。
   绝不写 `/usr/local`、不用 sudo、不改 PATH 与 rc。
 - **版本目录并存**：升级只推新目录（`host/3.2.1/`），老会话继续跑老版本直到重启；保留最近 2 个版本并 GC。
+- **启动走 `--detach`**（与本机一致）：问 socket 有没有宿主在答，而不是 `pgrep` 进程表；没有才在独立进程组里起一个，
+  等它监听后返回。已在服务的宿主不论版本都保留，不替换（替换就等于结束用户的会话）。
+- **已知缺口：大版本升级无法交接。** 老宿主占着 `~/.pigeon/state/pigeon.sock`，新二进制的 `--detach` / `--proxy`
+  都会连到它，`hello` 因大版本不同被拒，客户端只能提示。宿主没有 pidfile，`shutdown` 又必须在 `hello` 成功之后才收，
+  所以新二进制没有办法让旧宿主退出。PTY 进程属于旧宿主，换宿主必然结束这些会话，只能由用户确认。
+  建议的最小方案（需改协议，未实现）：把 `shutdown` 定为**跨大版本冻结**的消息，`hello_error{reason:"version"}`
+  之后仍接受；客户端遇到版本不符时问“结束远端 N 个旧会话并升级？”，确认后发 `shutdown`，再用新二进制 `--detach`。
 - **先问一次**：首次连接弹确认（“将在 host 上安装 pigeon-server 4.1 MB 到 `~/.pigeon/`”），可勾选“以后不再问”；
   `--no-remote-install` 全局关闭。
 - **卸载**：`rm -rf ~/.pigeon` 就是卸载，远端不留任何其它痕迹。

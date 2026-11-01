@@ -140,16 +140,18 @@ final class RemoteSession {
         return artifact
     }
 
-    /// Starts (or reuses) the remote host in the background; `nohup` is what lets it outlive
-    /// the ssh channel that started it.
+    /// Starts (or reuses) the remote host the way the local one is started: `--detach` asks
+    /// the socket whether a host answers (not the process table), starts one in its own
+    /// process group otherwise, and returns once it is listening.
+    ///
+    /// A host already serving the socket is kept, whatever its version: replacing it would end
+    /// the user's sessions there. A major-version mismatch therefore surfaces as a refused
+    /// `hello` (`docs/remote.md` §3), not as a silent restart.
     func startDaemon(binary: String) throws {
         let quoted = HostInstaller.shellQuote(binary)
         let script = """
             if [ ! -x \(quoted) ]; then exit 4; fi
-            if \(quoted) --socket-path >/dev/null 2>&1; then :; fi
-            if pgrep -f \(quoted) >/dev/null 2>&1; then exit 0; fi
-            nohup \(quoted) </dev/null >/dev/null 2>&1 &
-            sleep 0.3
+            exec \(quoted) --detach </dev/null >/dev/null
             """
         let result = try run(script)
         if !result.ok {

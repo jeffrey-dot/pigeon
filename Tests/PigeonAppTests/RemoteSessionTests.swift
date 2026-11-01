@@ -89,6 +89,26 @@ final class RemoteSessionTests: XCTestCase {
         XCTAssertEqual(HostInstaller.shellQuote("it's"), "'it'\\''s'")
     }
 
+    /// The remote host is started the way the local one is: `--detach` asks the socket, not
+    /// the process table, whether a host is up, so another binary that merely has the same
+    /// path in its arguments cannot pass for one, and a fresh host gets its own process group.
+    func testTheRemoteHostIsStartedWithDetach() throws {
+        var scripts: [String] = []
+        let session = RemoteSession(
+            host: "far",
+            run: { script in
+                scripts.append(script)
+                return HostInstaller.Result(status: 0, output: "", error: "")
+            },
+            spawn: { _ in Process() }
+        )
+        try session.startDaemon(binary: "/home/u/.pigeon/server/v/pigeon-server")
+        let script = try XCTUnwrap(scripts.first)
+        XCTAssertTrue(script.contains("'/home/u/.pigeon/server/v/pigeon-server' --detach"), script)
+        XCTAssertFalse(script.contains("pgrep"), script)
+        XCTAssertFalse(script.contains("nohup"), script)
+    }
+
     /// Mode A end to end, without ssh: the "remote" is a local host serving its stdio, so a
     /// working handshake is the same bytes a real `--proxy` would carry.
     func testTheBridgeIsChosenWhenAProtocolPeerAnswers() throws {
