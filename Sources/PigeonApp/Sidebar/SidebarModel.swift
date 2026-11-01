@@ -253,6 +253,12 @@ public enum SidebarModel {
         return session.app
     }
 
+    /// Whether a session list should start a session by itself: only a machine's first list,
+    /// and only when it is empty. Closing the last session must quit, not respawn one.
+    public static func shouldStartFirstSession(listIsEmpty: Bool, firstList: Bool) -> Bool {
+        listIsEmpty && firstList
+    }
+
     /// Whether closing a session left nothing to show: no session on any connected machine,
     /// and no `new_session` still waiting for its answer.
     public static func shouldQuitAfterClose(remainingSessions: Int, creatingSession: Bool) -> Bool {

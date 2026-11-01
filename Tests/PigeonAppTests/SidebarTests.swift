@@ -100,6 +100,16 @@ final class SidebarOrderingTests: XCTestCase {
         XCTAssertNil(SidebarModel.nextNeedsYou([row(7, .idle)], after: nil))
     }
 
+    /// The bug: a machine that launched with sessions never had its first list marked, so
+    /// closing the last one got a fresh session instead of quitting.
+    func testOnlyAMachinesFirstEmptyListStartsASession() {
+        XCTAssertTrue(SidebarModel.shouldStartFirstSession(listIsEmpty: true, firstList: true))
+        XCTAssertFalse(
+            SidebarModel.shouldStartFirstSession(listIsEmpty: true, firstList: false),
+            "an empty list after the first one means the user closed everything")
+        XCTAssertFalse(SidebarModel.shouldStartFirstSession(listIsEmpty: false, firstList: true))
+    }
+
     func testClosingTheLastSessionQuitsUnlessOneIsBeingCreated() {
         XCTAssertTrue(SidebarModel.shouldQuitAfterClose(remainingSessions: 0, creatingSession: false))
         XCTAssertFalse(SidebarModel.shouldQuitAfterClose(remainingSessions: 1, creatingSession: false))

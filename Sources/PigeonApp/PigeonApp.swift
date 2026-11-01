@@ -86,8 +86,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// connection (`docs/remote.md` §4: one ssh per machine, N sessions on it).
     /// Session created by `+` / ⌘T: select it once the refreshed list contains it.
     private var pendingSelectSession: Int?
-    /// Hosts that already got their "empty host, one session" treatment.
-    private var createdInitialSessionFor: Set<String> = []
+    /// Hosts whose first session list has arrived. Only that first list may start a session
+    /// on its own: a later empty list means the user closed them all.
+    private var listedHosts: Set<String> = []
 
     private var appearanceObservation: NSKeyValueObservation?
     private let store = SidebarStore()
@@ -1447,9 +1448,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let apps = rows.values.map { "\($0.id):\($0.app)" }.sorted().joined(separator: " ")
             FileHandle.standardError.write(Data("pigeon: sessions apps=\(apps)\n".utf8))
         }
-        if rows.isEmpty, !createdInitialSessionFor.contains(activeHost) {
+        let firstList = listedHosts.insert(activeHost).inserted
+        if SidebarModel.shouldStartFirstSession(listIsEmpty: rows.isEmpty, firstList: firstList) {
             // An empty host gets one session instead of an empty group.
-            createdInitialSessionFor.insert(activeHost)
             debugLog("no sessions on \(activeHost): creating one")
             sendNewSession(cwd: nil)
             return
