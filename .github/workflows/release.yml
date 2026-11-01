@@ -22,6 +22,7 @@ permissions:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           # Linux: static musl + rust-lld, one per CPU covers every distribution. Pure Rust,
@@ -50,15 +51,16 @@ jobs:
         run: |
           triple=${{ matrix.triple }}
           case "$triple" in
-            *-linux-musl)
+            *-linux-musl*)
+              # Cargo reads the linker from CARGO_TARGET_<TRIPLE>_LINKER: no quoting games.
               host=$(rustc -vV | sed -n 's/^host: //p')
-              lld=$(ls "$(rustc --print sysroot)/lib/rustlib/$host/bin/rust-lld")
-              config="--config target.$triple.linker=\"$lld\""
+              lld="$(rustc --print sysroot)/lib/rustlib/$host/bin/rust-lld"
+              var="CARGO_TARGET_$(echo "$triple" | tr 'a-z-' 'A-Z_')_LINKER"
+              export "$var=$lld"
               ;;
-            *) config="" ;;
           esac
-          eval cargo build --release --manifest-path core/Cargo.toml \
-            --bin pigeon-server --target "$triple" $config
+          cargo build --release --manifest-path core/Cargo.toml \
+            --bin pigeon-server --target "$triple"
           bin=core/target/$triple/release/pigeon-server
           size=$(stat -f%z "$bin" 2>/dev/null || stat -c%s "$bin")
           echo "pigeon-server ($triple): $size bytes"
