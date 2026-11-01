@@ -485,18 +485,24 @@ pub fn encode_frame(message: &Message) -> PgResult<Vec<u8>> {
 /// `Ok(None)` means "need more bytes" — the caller keeps accumulating. On
 /// success the returned length says how many bytes were consumed.
 pub fn decode_frame(buf: &[u8]) -> PgResult<Option<(Message, usize)>> {
-    if buf.len() < 4 {
+    let Some((payload, used)) = split_frame(buf)? else {
         return Ok(None);
-    }
-    let length = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
+    };
+    Ok(Some((decode(payload)?, used)))
+}
+
+/// The payload of the frame at the front of `buf` and the bytes that frame takes, without
+/// decoding it: a reader that gets [`PgError::Unsupported`] from [`decode`] still knows
+/// exactly how much to skip (protocol §2 rule 7: an unknown `t` costs one frame).
+pub fn split_frame(buf: &[u8]) -> PgResult<Option<(&[u8], usize)>> {
+    let Some(header) = buf.get(..4) else {
+        return Ok(None);
+    };
+    let length = u32::from_le_bytes([header[0], header[1], header[2], header[3]]) as usize;
     if length > MAX_FRAME {
         return Err(PgError::Overflow);
     }
-    if buf.len() < 4 + length {
-        return Ok(None);
-    }
-    let message = decode(&buf[4..4 + length])?;
-    Ok(Some((message, 4 + length)))
+    Ok(buf.get(4..4 + length).map(|payload| (payload, 4 + length)))
 }
 
 fn is_known(tag: &str) -> bool {
@@ -865,6 +871,33 @@ mod tests {
         let (message, consumed) = decode_frame(&frame).expect("decode").expect("complete");
         assert_eq!(message, Message::Ping { ts: 7 });
         assert_eq!(consumed, frame.len());
+    }
+
+    #[test]
+    fn an_unknown_frame_still_reports_its_length() {
+        let payload = encode(&Message::Ping { ts: 1 }).expect("encode");
+        let unknown = {
+            let value = Value::Map(vec![(
+                Value::Text("t".into()),
+                Value::Text("from_the_future".into()),
+            )]);
+            let mut body = Vec::new();
+            ciborium::into_writer(&value, &mut body).expect("encode");
+            body
+        };
+        let mut buf = (unknown.len() as u32).to_le_bytes().to_vec();
+        buf.extend_from_slice(&unknown);
+        buf.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        buf.extend_from_slice(&payload);
+        let (first, used) = split_frame(&buf).expect("ok").expect("complete");
+        assert_eq!(decode(first), Err(PgError::Unsupported));
+        assert_eq!(used, 4 + unknown.len());
+        let (next, _) = decode_frame(&buf[used..]).expect("ok").expect("complete");
+        assert_eq!(next, Message::Ping { ts: 1 });
+        // A malformed header is still an error, not a skip.
+        let mut huge = ((MAX_FRAME + 1) as u32).to_le_bytes().to_vec();
+        huge.push(0);
+        assert_eq!(split_frame(&huge), Err(PgError::Overflow));
     }
 
     #[test]

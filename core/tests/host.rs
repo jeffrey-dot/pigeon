@@ -484,6 +484,16 @@ fn unknown_message_gets_unsupported_and_the_connection_survives() {
         unreachable!()
     };
     assert_eq!(ts, 9);
+
+    // Arriving in the same read as the next frame, it must cost exactly one frame.
+    let mut both = frame.clone();
+    both.extend_from_slice(&proto::encode_frame(&Message::Ping { ts: 10 }).expect("encode"));
+    client.writer.write_all(&both).expect("write");
+    let _ = client.wait_for(|m| matches!(m, Message::Unsupported { .. }));
+    let Message::Pong { ts } = client.wait_for(|m| matches!(m, Message::Pong { .. })) else {
+        unreachable!()
+    };
+    assert_eq!(ts, 10, "the frame after an unknown one is still handled");
 }
 
 #[test]

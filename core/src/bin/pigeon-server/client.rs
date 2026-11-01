@@ -105,8 +105,13 @@ async fn drain_inbox(
     outbound: &Outbound,
 ) -> Result<bool, String> {
     loop {
-        match proto::decode_frame(inbox) {
-            Ok(Some((message, used))) => {
+        let (decoded, used) = match proto::split_frame(inbox) {
+            Ok(Some((payload, used))) => (proto::decode(payload), used),
+            Ok(None) => return Ok(true),
+            Err(error) => (Err(error), 0),
+        };
+        match decoded {
+            Ok(message) => {
                 inbox.drain(..used);
                 if std::env::var_os("PIGEON_DEBUG").is_some() {
                     eprintln!("pigeon-server: <- {}", message.name());
@@ -119,11 +124,11 @@ async fn drain_inbox(
                     outbound.send(&frame)?;
                 }
             }
-            Ok(None) => return Ok(true),
+            // Protocol §2 rule 7: answer, skip exactly this frame, keep going.
             Err(PgError::Unsupported) => {
-                let t_of = type_tag(inbox).unwrap_or_default();
+                let t_of = inbox.get(4..used).and_then(type_tag).unwrap_or_default();
                 outbound.send(&Message::Unsupported { t_of })?;
-                inbox.clear();
+                inbox.drain(..used);
             }
             Err(error) => {
                 let detail = format!("{error}");
@@ -235,9 +240,8 @@ async fn sessions_or_error(host: &HostState, state: &ClientState) -> Message {
     }
 }
 
-/// The `t` of a frame this build cannot decode, for the `unsupported` reply.
-fn type_tag(buf: &[u8]) -> Option<String> {
-    let payload = buf.get(4..)?;
+/// The `t` of a payload this build cannot decode, for the `unsupported` reply.
+fn type_tag(payload: &[u8]) -> Option<String> {
     let value: ciborium::value::Value = ciborium::from_reader(payload).ok()?;
     let ciborium::value::Value::Map(entries) = value else {
         return None;
