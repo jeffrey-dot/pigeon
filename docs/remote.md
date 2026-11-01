@@ -153,7 +153,10 @@ cargo build --release --manifest-path core/Cargo.toml --bin pigeon-server \
 
 - 只经 `ssh`；`pigeon-server` **只监听 unix socket**，权限 0700：装在 `~/.pigeon/server/` 下的远端宿主用
   `~/.pigeon/state/pigeon.sock`（`$XDG_RUNTIME_DIR` 会在用户最后一个登录会话结束时被 systemd 删掉，宿主就成了孤儿）；
-  其它情况（本机、开发构建）用 `$XDG_RUNTIME_DIR/pigeon.sock`，回退 `/tmp/pigeon-<uid>.sock`。
+  其它情况（本机、开发构建）用 `$XDG_RUNTIME_DIR/pigeon.sock`，回退 `/tmp/pigeon-<uid>/pigeon.sock`（与 tmux 的
+  `/tmp/tmux-<uid>/` 同理：目录 0700 且属于当前用户，别人事先建好的同名目录会被拒绝，不会被沿用）。
+  宿主与客户端都用 `lstat` 校验目录与 socket 的属主和类型，连上后再比对端 uid（详见 `docs/protocol.md` §1）。
+  同一路径只允许一个宿主：绑定前先对 `<socket>.lock` 加 `flock`。
 - `--proxy` 只转发协议帧：不接受任意命令、不做 shell 展开。
 - `--remote-install` / `--no-remote-install` 永不静默安装；打印完整命令与版本；不修改远端 shell 配置。
 - 认证/密钥/known_hosts 全部交给系统 `ssh`；pigeon 不读、不缓存任何凭据。

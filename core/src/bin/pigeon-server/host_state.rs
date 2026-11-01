@@ -2,6 +2,7 @@
 //! the palette, plus the session-wide steps that touch more than one of them.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use tokio::sync::{broadcast, mpsc, Mutex};
@@ -33,6 +34,10 @@ pub struct HostState {
     pub shell: String,
     /// Fired by `shutdown`: `serve` stops, ends every pane and removes its socket.
     pub stop: Arc<tokio::sync::Notify>,
+    /// Bumped whenever any session's size vote changes. A connection whose last
+    /// `note_activity` changed nothing can skip the next one (and the global lock it takes
+    /// on every keystroke) until this moves.
+    pub vote_epoch: Arc<AtomicU64>,
 }
 
 impl HostState {
@@ -47,6 +52,7 @@ impl HostState {
             exits: Arc::new(std::sync::Mutex::new(HashMap::new())),
             shell,
             stop: Arc::new(tokio::sync::Notify::new()),
+            vote_epoch: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -61,8 +67,27 @@ impl HostState {
         self.exits.lock().ok()?.get(&pane_id).copied()
     }
 
+    /// The current vote epoch, and a way to move it after changing a vote.
+    pub fn epoch(&self) -> u64 {
+        self.vote_epoch.load(Ordering::Acquire)
+    }
+
+    pub fn votes_changed(&self) {
+        self.vote_epoch.fetch_add(1, Ordering::AcqRel);
+    }
+
     /// Protocol §6 `latest`: whoever last focused, typed or resized owns the size.
-    pub async fn note_activity(&self, client_id: u32, pane_id: u32) {
+    /// `settled` is the caller's cache: `(pane, epoch)` after which typing into `pane`
+    /// changed nothing; while the epoch stands, nothing can have changed since.
+    pub async fn note_activity(
+        &self,
+        client_id: u32,
+        pane_id: u32,
+        settled: &mut Option<(u32, u64)>,
+    ) {
+        if *settled == Some((pane_id, self.epoch())) {
+            return;
+        }
         let mut map = self.sessions.lock().await;
         let Some(session_id) = session_of(&map, pane_id) else {
             return;
@@ -70,9 +95,14 @@ impl HostState {
         let Some(session) = map.get_mut(&session_id) else {
             return;
         };
-        if session.vote.activity(client_id) && session.refit() {
-            apply_layout(session_id, session, &self.events);
+        if session.vote.activity(client_id) {
+            self.votes_changed();
+            if session.refit() {
+                apply_layout(session_id, session, &self.events);
+            }
         }
+        // Read under the lock: every vote change happens under it too.
+        *settled = Some((pane_id, self.epoch()));
     }
 
     /// Drops a closed connection from every session and re-fits whatever the remaining
@@ -80,8 +110,11 @@ impl HostState {
     pub async fn forget_client(&self, client_id: u32) {
         let mut map = self.sessions.lock().await;
         for (session_id, session) in map.iter_mut() {
-            if session.vote.leave(client_id) && session.refit() {
-                apply_layout(*session_id, session, &self.events);
+            if session.vote.leave(client_id) {
+                self.votes_changed();
+                if session.refit() {
+                    apply_layout(*session_id, session, &self.events);
+                }
             }
         }
     }
@@ -110,7 +143,7 @@ pub fn apply_layout(session_id: u32, session: &Session, events: &broadcast::Send
 /// clients, so each window can show who is in charge.
 pub fn broadcast_size(session_id: u32, session: &Session, events: &broadcast::Sender<Event>) {
     let clients = session.vote.clients();
-    if clients > 1 && std::env::var_os("PIGEON_DEBUG").is_some() {
+    if clients > 1 && crate::debug() {
         let (cols, rows) = session.size();
         eprintln!(
             "pigeon-server: size_state session={session_id} clients={clients} source={} box={cols}x{rows}",

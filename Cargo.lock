@@ -319,6 +319,7 @@ dependencies = [
  "alacritty_terminal",
  "base64 0.23.1",
  "ciborium",
+ "nix",
  "portable-pty",
  "serde",
  "serde_bytes",

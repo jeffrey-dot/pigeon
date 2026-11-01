@@ -8,7 +8,7 @@
 
 | 项 | 规定 |
 |---|---|
-| 传输 | 本机 unix socket（`/tmp/pigeon-<uid>.sock`，`0700`）；远端为同一协议的 stdio（`ssh host pigeon-server --proxy`） |
+| 传输 | 本机 unix socket（`$XDG_RUNTIME_DIR/pigeon.sock`，否则 `/tmp/pigeon-<uid>/pigeon.sock`；socket `0700`，所在目录必须属于当前用户且组/其他人不可写，或是 root 所有且带 sticky 位；双方用 `lstat` 校验属主与类型，不跟随符号链接；宿主用对端凭据、客户端用 `getpeereid` 确认对方是同一 uid，否则拒绝）；远端为同一协议的 stdio（`ssh host pigeon-server --proxy`） |
 | 帧 | `u32` 小端长度 `L` + 恰好 `L` 字节 payload。`L` **不含自身**；payload 为单个 CBOR map。不用换行分隔 |
 | 上限 | 单帧 ≤ 8 MiB（8388608）。超限即断开并回 `error{code:"frame_too_large"}`，payload 不进解析器 |
 | 半包 | 读端必须能处理“长度够但 payload 不足”的中间态，累积到 `L` 字节再解 |

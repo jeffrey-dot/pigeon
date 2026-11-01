@@ -56,13 +56,15 @@ pub async fn dispatch(
         } => layout::resize_split(host, id, split_id, ratio).await,
         Message::Focus { pane_id } => layout::focus(host, state.client_id, pane_id).await,
         Message::Keys { pane_id, bytes } => {
-            pane::send(host, pane_id, Cmd::Input(bytes)).await;
-            host.note_activity(state.client_id, pane_id).await;
+            pane::type_into(host, state, pane_id, Cmd::Input(bytes)).await;
+            host.note_activity(state.client_id, pane_id, &mut state.settled)
+                .await;
             None
         }
         Message::Paste { pane_id, text } => {
-            pane::send(host, pane_id, Cmd::Paste(text)).await;
-            host.note_activity(state.client_id, pane_id).await;
+            pane::type_into(host, state, pane_id, Cmd::Paste(text)).await;
+            host.note_activity(state.client_id, pane_id, &mut state.settled)
+                .await;
             None
         }
         Message::Scroll { pane_id, offset } => pane::scroll(host, state, pane_id, offset).await,

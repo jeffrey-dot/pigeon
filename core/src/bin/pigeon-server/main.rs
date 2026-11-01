@@ -19,9 +19,19 @@ mod outbound;
 mod pane_actor;
 mod pane_query;
 mod resync;
+mod socket_lock;
+mod socket_trust;
 mod transport;
 
 use std::process::ExitCode;
+use std::sync::OnceLock;
+
+/// `PIGEON_DEBUG` set: trace frames and PTY bytes to stderr. Read once; the environment of
+/// a running host does not change, and the check sits on every frame.
+pub fn debug() -> bool {
+    static DEBUG: OnceLock<bool> = OnceLock::new();
+    *DEBUG.get_or_init(|| std::env::var_os("PIGEON_DEBUG").is_some())
+}
 
 use cli::{Command, Transport};
 use host_state::HostState;

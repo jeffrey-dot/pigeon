@@ -22,6 +22,28 @@ pub async fn send(host: &HostState, pane_id: u32, command: Cmd) {
     }
 }
 
+/// `send` for keystrokes and pastes: the pane's queue comes from this connection's cache
+/// when it is still alive, and from the sessions table otherwise.
+pub async fn type_into(host: &HostState, state: &mut ClientState, pane_id: u32, command: Cmd) {
+    let cached = state
+        .typing
+        .as_ref()
+        .filter(|(cached, _)| *cached == pane_id)
+        .and_then(|(_, weak)| weak.upgrade());
+    let sender = match cached {
+        Some(sender) => sender,
+        None => {
+            let Some(sender) = sender_of(&host.sessions, pane_id).await else {
+                state.typing = None;
+                return;
+            };
+            state.typing = Some((pane_id, sender.downgrade()));
+            sender
+        }
+    };
+    let _ = sender.send(command).await;
+}
+
 pub async fn new_session(
     host: &HostState,
     id: u32,
@@ -95,6 +117,7 @@ pub async fn attach(
         let policy = SizePolicy::from_name(size_policy.as_deref());
         let current = session.size();
         session.vote.join(state.client_id, policy, current);
+        host.votes_changed();
         // The tree follows the snapshot, so a reconnecting window redraws
         // the same split geometry and learns who owns the size.
         if let Some(frame) = encode(&session.layout_message(session_id)) {

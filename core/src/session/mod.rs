@@ -82,6 +82,16 @@ impl PaneState {
         }
     }
 
+    /// When an open synchronized update must be shown anyway (see [`Term::sync_deadline`]).
+    pub fn sync_deadline(&self) -> Option<std::time::Instant> {
+        self.term.sync_deadline()
+    }
+
+    /// Shows what an expired synchronized update buffered.
+    pub fn flush_sync(&mut self) {
+        self.term.flush_sync();
+    }
+
     /// The client's colours, so `OSC 4/10/11` can be answered (`None` keeps them silent).
     pub fn set_palette(&mut self, palette: Option<crate::term::Palette>) {
         self.term.set_palette(palette);
@@ -92,7 +102,7 @@ impl PaneState {
         self.rows = rows;
         self.term.resize(cols, rows);
         // Rows sent before the resize no longer fit the grid; only a snapshot can.
-        self.backlog.clear();
+        self.backlog.reset_at(self.seq);
     }
 
     /// Current cell size of this pane.
