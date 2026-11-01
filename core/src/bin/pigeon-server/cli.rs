@@ -34,6 +34,7 @@ pub enum Command {
 
 const USAGE: &str = "usage: pigeon-server [--socket PATH] [--shell PATH] [--stdio|--proxy]
   --socket-path  print the default socket path and exit
+  --version  print the version and exit
   --stdio  also serve one client on stdin/stdout (start a remote host)
   --proxy  bridge stdin/stdout to a running host's socket
   --detach  start a host in the background (own process group) and return
@@ -65,11 +66,19 @@ pub fn parse(mut args: impl Iterator<Item = String>) -> Result<Command, String> 
             }
             "--proxy" => options.transport = Transport::Proxy,
             "--detach" => options.transport = Transport::Detach,
+            // The client compares this line with its own version to decide whether the
+            // installed server can be used as is (`docs/remote.md`).
+            "--version" => return Ok(Command::Print(version_line())),
             "-h" | "--help" => return Ok(Command::Print(USAGE.to_owned())),
             other => return Err(format!("unknown argument: {other}")),
         }
     }
     Ok(Command::Run(options))
+}
+
+/// `pigeon-server <version>`, one line.
+pub fn version_line() -> String {
+    format!("pigeon-server {}\n", pigeon_core::api::VERSION)
 }
 
 /// Where the socket lives (protocol §1, `docs/remote.md` §2):
@@ -115,8 +124,25 @@ fn runtime_socket_path() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::state_dir_for;
+    use super::{parse, state_dir_for, version_line, Command};
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn version_prints_one_line_with_the_crate_version() {
+        let Ok(Command::Print(text)) = parse(["--version".to_owned()].into_iter()) else {
+            panic!("--version prints");
+        };
+        assert_eq!(
+            text,
+            format!("pigeon-server {}\n", env!("CARGO_PKG_VERSION"))
+        );
+        assert_eq!(text, version_line());
+    }
+
+    #[test]
+    fn a_misspelt_version_flag_is_an_error() {
+        assert!(parse(["--versio".to_owned()].into_iter()).is_err());
+    }
 
     #[test]
     fn an_installed_remote_host_keeps_its_socket_under_dot_pigeon() {

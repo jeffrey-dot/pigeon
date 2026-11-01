@@ -34,19 +34,20 @@ stdin/stdout 上说话（首次安装后的第一次启动用它）；之后它�
 首次连接某个主机时，客户端自己在 ssh 上完成安装，不需要 root、不需要 PATH、不改 rc：
 
 1. `ssh host 'uname -sm'` → 选对应架构的内嵌产物（Linux x86_64/aarch64、macOS arm64/x86_64）；
-2. 检查 `~/.pigeon/server/<version>/pigeon-server` 是否存在且哈希匹配；
-3. 缺失就把二进制**从同一条 ssh 连接流过去**（不依赖 scp/ftp）：
+2. 跑 `~/.pigeon/server/<版本>/pigeon-server --version`：能执行、输出 `pigeon-server <版本>` 与客户端内核版本一致就直接用，
+   **不算哈希，也不需要本机有这个文件**（所以已经装好的机器连接时不下载）；
+3. 不存在、跑不起来或版本不对，才去取本机的产物，把二进制**从同一条 ssh 连接流过去**（不依赖 scp/ftp）：
 
    ```sh
-   ssh host 'mkdir -p ~/.pigeon/server/3.2.0 \
-     && cat > ~/.pigeon/server/3.2.0/pigeon-server.tmp \
-     && chmod +x ~/.pigeon/server/3.2.0/pigeon-server.tmp \
-     && mv ~/.pigeon/server/3.2.0/pigeon-server.tmp ~/.pigeon/server/3.2.0/pigeon-server' \
+   ssh host 'mkdir -p ~/.pigeon/server/0.1.0 \
+     && cat > ~/.pigeon/server/0.1.0/pigeon-server.tmp \
+     && chmod +x ~/.pigeon/server/0.1.0/pigeon-server.tmp \
+     && mv ~/.pigeon/server/0.1.0/pigeon-server.tmp ~/.pigeon/server/0.1.0/pigeon-server' \
      < pigeon-server
    ```
 
-4. 校验 sha256（客户端内嵌期望值，远端 `shasum -a 256` 比对；不一致就删文件并报错）；
-5. 启动：`ssh host ~/.pigeon/server/3.2.0/pigeon-server --proxy`（宿主已在远端常驻，桥接它的 unix socket；socket 上没人监听时 `--proxy` 先拉起一个宿主——无共享 stdio、独立进程组，ssh 断开不会带走它——再桥接，所以重启后的第一次连接也只需要这一条命令）。
+4. 在远端执行一次 `pigeon-server.tmp --version`：输出不是期望的版本行（传输被截断、架构不对）就删文件并报错，通过了才 `mv` 上线；
+5. 启动：`ssh host ~/.pigeon/server/0.1.0/pigeon-server --proxy`（宿主已在远端常驻，桥接它的 unix socket；socket 上没人监听时 `--proxy` 先拉起一个宿主——无共享 stdio、独立进程组，ssh 断开不会带走它——再桥接，所以重启后的第一次连接也只需要这一条命令）。
 
 ### 远端产物从哪来（GitHub Release，按需下载）
 
@@ -66,7 +67,7 @@ stdin/stdout 上说话（首次安装后的第一次启动用它）；之后它�
 外加一个 `SHA256SUMS`。Linux 全是 musl 静态链接（纯 Rust，`rust-lld` 直接链，不要交叉 C 工具链），
 一个 CPU 一份就覆盖所有发行版。对照表在 `HostInstaller.platforms`，`ServerDownloadTests` 会比对它与工作流矩阵，两边不许漂移。
 
-客户端（`ServerDownload.swift`）第一次连到某个平台时：取 `releases/download/v<App 版本>/SHA256SUMS` →
+远端缺这个版本、本机缓存里也没有对应平台的产物时，客户端（`ServerDownload.swift`）才下载：取 `releases/download/v<App 版本>/SHA256SUMS` →
 下载对应 `.gz` → **校验哈希后**才解压、`chmod +x`、改名进 `~/.cache/pigeon/server/<版本>/`；
 校验不过什么都不留。同一版本同一平台只下一次。`PIGEON_SERVER_URL` 可指向镜像（内网 / 访问 GitHub 困难的地区）。
 下载失败时退回普通 ssh 模式（不持久），界面照常说明。
@@ -83,9 +84,9 @@ cargo build --release --manifest-path core/Cargo.toml --bin pigeon-server \
 
 ### 自动安装怎么做
 
-`Sources/PigeonApp/Net/HostInstaller.swift`：`ssh uname -sm` 探测平台 → 本地算 sha256，
-版本目录名就是哈希前 16 位 → 远端有同名同哈希就**不传**，否则把二进制流进
-`~/.pigeon/server/<version>/pigeon-server.tmp`，**在远端**校验哈希后才 `mv` 成正式文件，
+`Sources/PigeonApp/Net/HostInstaller.swift`：`ssh uname -sm` 探测平台 → 版本目录名就是版本号（`pg_core_version()`）→
+远端那个文件能跑且 `--version` 对得上就**不传**，否则才向本机要产物，把二进制流进
+`~/.pigeon/server/<版本>/pigeon-server.tmp`，**在远端**跑通 `--version` 后才 `mv` 成正式文件，
 并只保留最新两个版本。远端的登录 shell 可能是 fish/csh，所以命令行走 base64 + `sh`，
 不假设是 POSIX sh。实跑记录见 `docs/m4-checklist.md`。
 
@@ -94,7 +95,7 @@ cargo build --release --manifest-path core/Cargo.toml --bin pigeon-server \
 - **安装在远端用户的家目录**：`$HOME/.pigeon/`（用 `$HOME` 展开，不假设家目录路径），
   目录结构：`~/.pigeon/server/<version>/pigeon-server`、`~/.pigeon/state/`（socket、日志）。
   绝不写 `/usr/local`、不用 sudo、不改 PATH 与 rc。
-- **版本目录并存**：升级只推新目录（`host/3.2.1/`），老会话继续跑老版本直到重启；保留最近 2 个版本并 GC。
+- **版本目录并存**：升级只推新目录（`server/0.2.0/`），老会话继续跑老版本直到重启；保留最近 2 个版本并 GC。
 - **先问一次**：首次连接弹确认（“将在 host 上安装 pigeon-server 4.1 MB 到 `~/.pigeon/`”），可勾选“以后不再问”；
   `--no-remote-install` 全局关闭。
 - **卸载**：`rm -rf ~/.pigeon` 就是卸载，远端不留任何其它痕迹。
@@ -124,7 +125,7 @@ cargo build --release --manifest-path core/Cargo.toml --bin pigeon-server \
 
 ### ssh 连接复用
 
-一次连接要跑六七次 ssh（`uname`、哈希、启动宿主、`--proxy`…），每次都完整握手时远端越远越慢（实测 `arch`
+一次连接要跑六七次 ssh（`uname`、版本检查、启动宿主、`--proxy`…），每次都完整握手时远端越远越慢（实测 `arch`
 每次 ~0.6 s）。客户端给每次调用加 `ControlMaster=auto` / `ControlPath=/tmp/pigeon-<uid>-ssh/%C` /
 `ControlPersist=120`：只有第一次握手，其余复用（6 次 4.5 s → 0.5–1.3 s）。只走命令行选项，不碰用户的
 `~/.ssh/config`；目录必须属于当前用户且是 0700，否则不复用。`ssh -N -L`（B 档）不复用：经 master 的转发
@@ -152,7 +153,7 @@ cargo build --release --manifest-path core/Cargo.toml --bin pigeon-server \
   `~/.pigeon/state/pigeon.sock`（`$XDG_RUNTIME_DIR` 会在用户最后一个登录会话结束时被 systemd 删掉，宿主就成了孤儿）；
   其它情况（本机、开发构建）用 `$XDG_RUNTIME_DIR/pigeon.sock`，回退 `/tmp/pigeon-<uid>.sock`。
 - `--proxy` 只转发协议帧：不接受任意命令、不做 shell 展开。
-- `--remote-install` / `--no-remote-install` 永不静默安装；打印完整命令与哈希；不修改远端 shell 配置。
+- `--remote-install` / `--no-remote-install` 永不静默安装；打印完整命令与版本；不修改远端 shell 配置。
 - 认证/密钥/known_hosts 全部交给系统 `ssh`；pigeon 不读、不缓存任何凭据。
 - 远端进程以普通用户身份运行，与用户手敲命令同权限。
 
@@ -168,7 +169,7 @@ cargo build --release --manifest-path core/Cargo.toml --bin pigeon-server \
 | 里程碑 | 内容 |
 |---|---|
 | M2 | 协议 + 快照（本机后台进程），`hello`/`features` 先定好，避免远端返工 |
-| M4（已落地） | `--stdio` / `--proxy`、宿主自动推送与安装（内容哈希版本目录）、A→B→C 探测、多主机侧栏分组；断网 30s 后屏幕与滚动一致。验收与实跑记录见 `docs/m4-checklist.md` |
+| M4（已落地） | `--stdio` / `--proxy`、宿主自动推送与安装（按版本号分目录）、A→B→C 探测、多主机侧栏分组；断网 30s 后屏幕与滚动一致。验收与实跑记录见 `docs/m4-checklist.md` |
 | M5 | Linux 客户端复用同一协议；远端也可是 Linux |
 
 ## 8. 验收

@@ -23,6 +23,10 @@ pub use self::msg::{
 };
 
 pub use crate::error::{PgError, PgResult};
+
+/// This build's version (`core/Cargo.toml`). `pigeon-server --version` prints the same, so a
+/// client can tell whether the server on a remote machine is the one it expects.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub use crate::layout::{Axis, PaneId, Rect, SplitId};
 pub use crate::proto::{
     decode, decode_frame, encode, encode_frame, Cell as WireCell, Cursor as WireCursor, Link,

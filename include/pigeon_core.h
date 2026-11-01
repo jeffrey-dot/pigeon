@@ -389,6 +389,12 @@ enum PgErrorCode pg_last_error_code(void);
 uint32_t pg_core_abi_version(void);
 
 /**
+ * This build's version, e.g. `0.1.0`; what `pigeon-server --version` reports. Static: the
+ * pointer stays valid for the life of the process.
+ */
+struct PgStr pg_core_version(void);
+
+/**
  * Returns NULL on failure. `cfg == NULL` means defaults.
  */
 PgCore *pg_core_new(const struct PgConfig *cfg);

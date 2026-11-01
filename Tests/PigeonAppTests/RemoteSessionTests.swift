@@ -39,12 +39,10 @@ final class RemoteSessionTests: XCTestCase {
                 if script.contains("uname -sm") {
                     return HostInstaller.Result(status: 0, output: "Linux x86_64", error: "")
                 }
-                if script.contains("[ -f ") {
-                    return HostInstaller.Result(status: 0, output: "", error: "")
-                }
                 return HostInstaller.Result(
-                    status: 0, output: "/home/u/.pigeon/server/v/pigeon-server", error: "")
-            }, hash: { _ in String(repeating: "a", count: 64) }),
+                    status: 0, output: "/home/u/.pigeon/server/9.9.9/pigeon-server\n"
+                        + "pigeon-server 9.9.9\n", error: "")
+            }, version: "9.9.9"),
             run: { script in
                 if script.contains("uname -sm") {
                     return HostInstaller.Result(status: 0, output: "Linux x86_64", error: "")
@@ -64,9 +62,11 @@ final class RemoteSessionTests: XCTestCase {
                 started.append(process)
                 return process
             },
-            // The installer is faked above; any existing file stands in for the Linux build,
-            // which a macOS CI runner does not have.
-            artifact: { _ in host }
+            // The remote already has this version, so nothing is uploaded or downloaded.
+            artifact: { _ in
+                XCTFail("a usable remote binary needs no local one")
+                return nil
+            }
         )
         let outcome = try session.connect()
         defer {
@@ -227,14 +227,14 @@ final class RemoteSessionTests: XCTestCase {
     /// and do not open a plain ssh window that would fail the same way.
     func testAnUnreachableMachineSaysItCannotConnect() {
         var spawned = false
+        let refused = HostInstaller.Result(
+            status: 255, output: "",
+            error: "kex_exchange_identification: Connection closed by remote host\n"
+                + "Connection closed by 198.18.0.54 port 17263\n")
         let session = RemoteSession(
             host: "far",
-            run: { _ in
-                HostInstaller.Result(
-                    status: 255, output: "",
-                    error: "kex_exchange_identification: Connection closed by remote host\n"
-                        + "Connection closed by 198.18.0.54 port 17263\n")
-            },
+            installer: HostInstaller(run: { _, _, _ in refused }),
+            run: { _ in refused },
             spawn: { _ in
                 spawned = true
                 return Process()
@@ -253,6 +253,9 @@ final class RemoteSessionTests: XCTestCase {
     func testAFailingRemoteCommandStillDegrades() throws {
         let session = RemoteSession(
             host: "far",
+            installer: HostInstaller(run: { _, _, _ in
+                HostInstaller.Result(status: 127, output: "", error: "uname: not found")
+            }),
             run: { _ in HostInstaller.Result(status: 127, output: "", error: "uname: not found") },
             spawn: { _ in Process() },
             artifact: { _ in nil }

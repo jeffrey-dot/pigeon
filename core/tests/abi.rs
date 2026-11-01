@@ -4,8 +4,8 @@
 use std::ptr;
 
 use pigeon_core::ffi::{
-    pg_core_abi_version, pg_core_free, pg_core_new, pg_last_error, pg_last_error_code, PgConfig,
-    PgErrorCode, PgStr,
+    pg_core_abi_version, pg_core_free, pg_core_new, pg_core_version, pg_last_error,
+    pg_last_error_code, PgConfig, PgErrorCode, PgStr,
 };
 
 fn error_text() -> String {
@@ -19,6 +19,15 @@ fn error_text() -> String {
 #[test]
 fn abi_version_is_one() {
     assert_eq!(pg_core_abi_version(), 1);
+}
+
+#[test]
+fn version_is_the_crate_version() {
+    let raw = pg_core_version();
+    // SAFETY: a static string, valid for the life of the process.
+    let bytes = unsafe { std::slice::from_raw_parts(raw.ptr, raw.len) };
+    assert_eq!(bytes, env!("CARGO_PKG_VERSION").as_bytes());
+    assert_eq!(bytes, pigeon_core::api::VERSION.as_bytes());
 }
 
 #[test]

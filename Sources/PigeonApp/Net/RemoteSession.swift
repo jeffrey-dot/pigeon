@@ -83,7 +83,7 @@ final class RemoteSession {
         if allowHost {
             do {
                 let remote = try installer.install(
-                    host: host, artifact: try installArtifact(), allowInstall: allowInstall)
+                    host: host, allowInstall: allowInstall, artifact: localArtifact)
                 try startDaemon(binary: remote.path)
                 if let client = try probeProxy(binary: remote.path) {
                     return Outcome(
@@ -124,13 +124,8 @@ final class RemoteSession {
             detail: why.joined(separator: "; "))
     }
 
-    /// A host to push: the one for the remote's own platform, if we have it built.
-    private func installArtifact() throws -> URL {
-        let probe = try run("uname -sm")
-        if probe.unreachable {
-            throw HostInstaller.Failure.unreachable(host: host, detail: probe.reason)
-        }
-        let platform = probe.output.trimmingCharacters(in: .whitespacesAndNewlines)
+    /// The build to push to a remote whose `pigeon-server` is missing or out of date.
+    private func localArtifact(platform: String) throws -> URL {
         guard let artifact = try artifact(platform) else {
             throw HostInstaller.Failure.noArtifact(platform)
         }

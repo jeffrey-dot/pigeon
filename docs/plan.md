@@ -158,8 +158,8 @@ tmux attach（前台，一个普通程序）
 
 1. **三种对接**（自动探测并明示）：`ssh host pigeon-server --proxy`（stdio 桥接，推荐）→ unix socket 直转 →
    退化模式（普通 ssh，仍能显示 OSC 7501 状态，但没有远端持久化）。
-2. **安装**：客户端首次连接时自动推送并安装（先打印命令与哈希再执行，`--no-remote-install` 可关）；
-   推对应架构的静态二进制 + sha256 校验；不静默覆盖已有版本、不改远端 shell 配置。
+2. **安装**：客户端首次连接时自动推送并安装（先打印命令与版本再执行，`--no-remote-install` 可关）；
+   远端已有同版本且能执行就直接用；否则推对应架构的静态二进制，在远端跑通 `--version` 才上线；不静默覆盖已有版本、不改远端 shell 配置。
 3. **安全**：只经 ssh，不开端口；远端只监听 0700 的 unix socket；`--proxy` 只转发协议帧；
    认证/密钥/known_hosts 全交给系统 `ssh`。
 
@@ -271,7 +271,7 @@ M2 落地后仍在的洞（M2 的验收记录见 `docs/m2-checklist.md`）。
 | 布局只有单 pane | `core/src/layout/` 的布局树 + `pg_layout_*` 全实现；宿主每 pane 独立 PTY/actor；客户端按 `PgRect` 分屏 |
 | 滚动回看（翻页） | **宿主侧**回看：`scroll{pane_id, offset}`（负=往历史看，0=回到底部）由宿主在 10,000 行滚动缓冲里切片，回给客户端的是一屏 `snapshot`（`Snapshot::scrolled`），历史不再整段过线；每连接的 offset 独立，回看期间该 pane 的实时帧暂停。客户端只把滚轮/PageUp·PageDown 换成 `scroll` 请求。`scroll` 答复额外带 `history_len`/`offset`，侧栏位置条据此绘制；`scrollback` 仍随 `attach` 下发（重连要原样画回来） |
 | VT 对账（`tools/vt-parity`） | `run.sh` + `core/examples/vt-dump`：同一段字节喂内核与 tmux `capture-pane` 逐行比较，8 条语料（basic/cursor/erase/wide/scroll-region/alt-screen/insert-delete/wrap）全 ok；`--record` 重录 golden；顺带修掉 tab 占位符漏进快照的真 bug |
-| 远端（M4） | `pigeon-server --stdio`（ssh 通道 + socket 双入口）、`--proxy`（stdio↔socket 帧桥）、`--socket-path`；客户端 `HostInstaller`（uname 探测 → 平台匹配产物 → 内容哈希版本目录 → 远端校验后才上线 → 只留两版）与 `RemoteSession`（A `--proxy` / B `ssh -L` / C plain ssh + 客户端本地 VT 的 A→B→C 探测）；多主机侧栏分组 `host / project` + `Hosts` 菜单 + 侧栏 `Machines` 分组（每台主机一行、connected/connecting/offline）、`~/.config/pigeon/hosts.json`、窗口级断线重连（远端模式重新探测 A→B→C）。在 `ssh arch`（Linux x86_64、fish 登录 shell）上实跑：首传/命中/篡改拒绝、A、B 退化、30s 断连后 200 行逐行一致。见 `docs/m4-checklist.md` |
+| 远端（M4） | `pigeon-server --stdio`（ssh 通道 + socket 双入口）、`--proxy`（stdio↔socket 帧桥）、`--socket-path`；客户端 `HostInstaller`（uname 探测 → 平台匹配产物 → 版本号目录 → 能跑且版本一致就复用、否则上传并在远端跑通后才上线 → 只留两版）与 `RemoteSession`（A `--proxy` / B `ssh -L` / C plain ssh + 客户端本地 VT 的 A→B→C 探测）；多主机侧栏分组 `host / project` + `Hosts` 菜单 + 侧栏 `Machines` 分组（每台主机一行、connected/connecting/offline）、`~/.config/pigeon/hosts.json`、窗口级断线重连（远端模式重新探测 A→B→C）。在 `ssh arch`（Linux x86_64、fish 登录 shell）上实跑：首传/命中/坏文件拒绝、A、B 退化、30s 断连后 200 行逐行一致。见 `docs/m4-checklist.md` |
 | `zoom_pane` / `unzoom` | 布局树 `zoom` 字段 + 宿主两个 handler + `layout.zoom` 下发；客户端 ⌘⇧↩ 切换、兄弟 pane 隐藏但保活（unzoom 立即还原嵌套比例）；`pg_msg_layout_zoom` 进 C ABI |
 | 多客户端尺寸策略与 `size_state` | 宿主实现 `latest`/`smallest`/`locked`（策略由首个 `attach` 决定、`locked` 只认 owner、`latest` 跟最后一个 focus/keys），每次尺寸变化广播 `size_state{pane_id, cols, rows, source, clients}`；`hello_ack.client_id` 也换成真实的每连接 id。侧栏在 age 位显示 `2× latest`。见 `docs/m2-checklist.md` |
 | 程序的颜色查询（OSC 4/10/11） | 客户端通过 `appearance` 把当前色板交给宿主，宿主用 `Event::ColorRequest` 的 formatter 回 `rgb:rrrr/gggg/bbbb`；TUI（pi 等）因此能自己选亮/深主题；见 `docs/protocol.md` §3 与 `core/tests/host.rs` 的 `appearance_reaches_existing_panes_and_a_malformed_one_keeps_the_previous` |

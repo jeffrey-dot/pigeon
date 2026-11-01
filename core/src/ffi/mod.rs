@@ -136,6 +136,17 @@ pub extern "C" fn pg_core_abi_version() -> u32 {
     PG_CORE_ABI_VERSION
 }
 
+/// This build's version, e.g. `0.1.0`; what `pigeon-server --version` reports. Static: the
+/// pointer stays valid for the life of the process.
+#[no_mangle]
+pub extern "C" fn pg_core_version() -> PgStr {
+    PgStr {
+        size: std::mem::size_of::<PgStr>() as u32,
+        ptr: api::VERSION.as_ptr(),
+        len: api::VERSION.len(),
+    }
+}
+
 // -------------------------------------------------------------- lifetime
 
 /// Opaque session container (one core owns N panes).
