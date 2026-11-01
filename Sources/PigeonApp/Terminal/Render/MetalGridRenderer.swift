@@ -39,9 +39,9 @@ final class MetalGridRenderer: @unchecked Sendable {
     private var glyphs: GlyphCache?
     private var glyphsScale: Float = 0
     private var instances = GridInstances()
-    /// Per slot: backgrounds, glyphs, decorations, overlays (cursor, selection, thumb).
+    /// Per slot: backgrounds, glyphs, decorations, cursor, cursor glyph, selection + thumb.
     private var buffers: [[MTLBuffer?]] = Array(
-        repeating: Array(repeating: nil, count: 4), count: MetalGridRenderer.inFlight)
+        repeating: Array(repeating: nil, count: 6), count: MetalGridRenderer.inFlight)
     /// Which `GridInstances.version` each slot's first three buffers hold.
     private var uploaded = Array(repeating: -1, count: MetalGridRenderer.inFlight)
     private var slot = 0
@@ -234,6 +234,9 @@ final class MetalGridRenderer: @unchecked Sendable {
         // may already hold the current version (cursor blink, selection drag, thumb).
         let fresh = uploaded[slot] == instances.version
         let overlays = GridInstances.overlays(for: frame)
+        let cursorGlyph = GridInstances.cursorGlyph(for: frame) { key in
+            glyphs.slot(for: key, metrics: frame.metrics)
+        }
 
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = drawable.texture
@@ -258,7 +261,13 @@ final class MetalGridRenderer: @unchecked Sendable {
         draw(instances.glyphs, buffer: 1, reuse: fresh, encoder: encoder)
         encoder.setRenderPipelineState(rectPipeline)
         draw(instances.decorations, buffer: 2, reuse: fresh, encoder: encoder)
-        draw(overlays, buffer: 3, reuse: false, encoder: encoder)
+        draw(overlays.cursor, buffer: 3, reuse: false, encoder: encoder)
+        if let cursorGlyph {
+            encoder.setRenderPipelineState(glyphPipeline)
+            draw([cursorGlyph], buffer: 4, reuse: false, encoder: encoder)
+            encoder.setRenderPipelineState(rectPipeline)
+        }
+        draw(overlays.rest, buffer: 5, reuse: false, encoder: encoder)
         encoder.endEncoding()
         uploaded[slot] = instances.version
 

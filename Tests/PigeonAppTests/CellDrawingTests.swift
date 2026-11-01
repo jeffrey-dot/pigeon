@@ -36,6 +36,39 @@ final class CellDrawingTests: XCTestCase {
         XCTAssertEqual(GridInstances.cursorRects(for: frame(blanks(4), cols: 4, cursor: cursor)).count, 4)
     }
 
+    /// The block cursor used to be a 35% wash of the fg over the glyph, which left the
+    /// character under it low-contrast. It is now solid, and the glyph is drawn on top in the
+    /// cell's background colour.
+    func testABlockCursorIsSolidAndRedrawsItsGlyphInTheBackgroundColour() throws {
+        var cells = blanks(4)
+        cells[1] = PaneView.Cell(codepoint: 65, attrs: 0, fg: 0, bg: 0, width: 1)
+        var cursor = PaneView.Cursor(x: 1, y: 0, visible: true, shape: .block)
+        let shown = frame(cells, cols: 4, cursor: cursor)
+        let block = GridInstances.cursorRects(for: shown)
+        XCTAssertEqual(block.first?.color, CellPalette.components(palette.foreground))
+        let slot = AtlasSlot(x: 3, y: 4, width: 10, height: 20, colored: false, bearingX: 1, bearingY: 2)
+        let glyph = try XCTUnwrap(GridInstances.cursorGlyph(for: shown) { _ in slot })
+        XCTAssertEqual(glyph.color, CellPalette.components(palette.background))
+        XCTAssertEqual(glyph.origin, SIMD2(17, 2))
+        XCTAssertEqual(glyph.uv, SIMD2(3, 4))
+
+        var boxed = cells
+        boxed[1].codepoint = 0x2500
+        let box = GridInstances.overlays(for: frame(boxed, cols: 4, cursor: cursor)).cursor
+        XCTAssertEqual(box.count, 3, "the block, then the line's two arms in the background colour")
+        XCTAssertEqual(box.last?.color, CellPalette.components(palette.background))
+
+        cursor.shape = .bar
+        XCTAssertNil(GridInstances.cursorGlyph(for: frame(cells, cols: 4, cursor: cursor)) { _ in slot })
+        cursor.shape = .block
+        cursor.hollow = true
+        XCTAssertNil(GridInstances.cursorGlyph(for: frame(cells, cols: 4, cursor: cursor)) { _ in slot },
+                     "an unfocused outline leaves the glyph as it is")
+        cursor = PaneView.Cursor(x: 0, y: 0, visible: true, shape: .block)
+        XCTAssertNil(GridInstances.cursorGlyph(for: frame(cells, cols: 4, cursor: cursor)) { _ in slot },
+                     "a blank cell has no glyph")
+    }
+
     func testTheCursorCoversBothHalvesOfAWideCharacter() {
         var cells = blanks(4)
         cells[0] = PaneView.Cell(codepoint: 0x4e2d, attrs: 0, fg: 0, bg: 0, width: 2)
