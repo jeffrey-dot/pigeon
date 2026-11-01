@@ -113,3 +113,20 @@ final class TerminalPaletteTests: XCTestCase {
             CoreTextRenderer.cellSize().height, CGFloat(config.size * config.lineHeight), accuracy: 0.01)
     }
 }
+
+/// The bold face is first asked for by the render thread's rasterizer, so it must be derived
+/// without main-thread AppKit (`NSFontManager`).
+final class BoldFontTests: XCTestCase {
+    func testABoldVariantIsDerivedOffTheMainThread() throws {
+        let menlo = try XCTUnwrap(NSFont(name: "Menlo-Regular", size: 13))
+        var traits: NSFontDescriptor.SymbolicTraits = []
+        let done = expectation(description: "derived")
+        DispatchQueue.global().async {
+            traits = CoreTextRenderer.boldVariant(of: menlo).fontDescriptor.symbolicTraits
+            _ = CoreTextRenderer.font(bold: true)
+            done.fulfill()
+        }
+        wait(for: [done], timeout: 5)
+        XCTAssertTrue(traits.contains(.bold))
+    }
+}

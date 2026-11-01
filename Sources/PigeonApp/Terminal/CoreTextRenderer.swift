@@ -25,13 +25,21 @@ enum CoreTextRenderer {
     }()
 
     /// The configured family when it is installed, otherwise the system monospace (SF Mono).
+    /// Bold is derived with CoreText rather than `NSFontManager`: the render thread is the
+    /// first to ask for it, and `NSFontManager` is main-thread AppKit.
     private static func loadFont(bold: Bool) -> NSFont {
-        let weight: NSFont.Weight = bold ? .bold : .regular
-        guard !config.family.isEmpty,
-              let named = NSFont(name: config.family, size: fontSize)
-        else { return NSFont.monospacedSystemFont(ofSize: fontSize, weight: weight) }
-        guard bold else { return named }
-        return NSFontManager.shared.convert(named, toHaveTrait: .boldFontMask)
+        guard !config.family.isEmpty, let named = NSFont(name: config.family, size: fontSize)
+        else { return NSFont.monospacedSystemFont(ofSize: fontSize, weight: bold ? .bold : .regular) }
+        return bold ? boldVariant(of: named) : named
+    }
+
+    /// `font` with the bold trait, or `font` itself when the family has no bold face.
+    static func boldVariant(of font: NSFont) -> NSFont {
+        guard let derived = CTFontCreateCopyWithSymbolicTraits(
+            font as CTFont, 0, nil, .traitBold, .traitBold)
+        else { return font }
+        // CTFont and NSFont are toll-free bridged.
+        return derived as NSFont
     }
 
     static func cellSize() -> CGSize { cachedCellSize }
