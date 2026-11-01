@@ -339,51 +339,6 @@ final class PaneView: NSView {
         return true
     }
 
-    /// The container still sees every click first (focus, divider drags); the pane then
-    /// starts a selection of its own.
-    override func mouseDown(with event: NSEvent) {
-        nextResponder?.mouseDown(with: event)
-        if reportsMouse(event) {
-            clearSelection()
-            report(.left, .press, event)
-            return
-        }
-        beginSelection(with: event)
-    }
-
-    override func mouseDragged(with event: NSEvent) {
-        if reportsMouse(event) {
-            report(.left, .drag, event)
-            return
-        }
-        extendSelection(with: event)
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        nextResponder?.mouseUp(with: event)
-        if reportsMouse(event) { report(.left, .release, event) }
-    }
-
-    override func rightMouseDown(with event: NSEvent) {
-        guard reportsMouse(event) else { return super.rightMouseDown(with: event) }
-        report(.right, .press, event)
-    }
-
-    override func rightMouseUp(with event: NSEvent) {
-        guard reportsMouse(event) else { return super.rightMouseUp(with: event) }
-        report(.right, .release, event)
-    }
-
-    override func otherMouseDown(with event: NSEvent) {
-        guard reportsMouse(event) else { return super.otherMouseDown(with: event) }
-        report(.middle, .press, event)
-    }
-
-    override func otherMouseUp(with event: NSEvent) {
-        guard reportsMouse(event) else { return super.otherMouseUp(with: event) }
-        report(.middle, .release, event)
-    }
-
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 116, !hasMarkedText(), page(1) { return }
         if event.keyCode == 121, !hasMarkedText(), page(-1) { return }
