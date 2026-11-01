@@ -110,7 +110,7 @@ pub fn apply_layout(session_id: u32, session: &Session, events: &broadcast::Send
 /// clients, so each window can show who is in charge.
 pub fn broadcast_size(session_id: u32, session: &Session, events: &broadcast::Sender<Event>) {
     let clients = session.vote.clients();
-    if clients > 1 && std::env::var_os("PIGEON_DEBUG").is_some() {
+    if clients > 1 && crate::debug() {
         let (cols, rows) = session.size();
         eprintln!(
             "pigeon-server: size_state session={session_id} clients={clients} source={} box={cols}x{rows}",

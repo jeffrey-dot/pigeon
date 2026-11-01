@@ -87,7 +87,7 @@ where
                 match event {
                     Ok(event) => forward(event, host, &state, outbound).await?,
                     Err(RecvError::Lagged(missed)) => {
-                        if std::env::var_os("PIGEON_DEBUG").is_some() {
+                        if crate::debug() {
                             eprintln!("pigeon-server: client {client_id} lagged by {missed} events");
                         }
                         // What is still queued predates the state about to be sent: skip it,
@@ -127,7 +127,7 @@ async fn drain_inbox(
         match decoded {
             Ok(message) => {
                 inbox.drain(..used);
-                if std::env::var_os("PIGEON_DEBUG").is_some() {
+                if crate::debug() {
                     eprintln!("pigeon-server: <- {}", message.name());
                 }
                 if let Some(reply) = dispatch(message, host, state).await {
