@@ -140,7 +140,7 @@ final class PaneView: NSView {
             let (lines, remainder) = Self.wheelLines(
                 deltaY: event.scrollingDeltaY,
                 precise: event.hasPreciseScrollingDeltas,
-                cellHeight: CoreTextRenderer.cellSize().height,
+                cellHeight: cellSize.height,
                 remainder: wheelRemainder)
             wheelRemainder = remainder
             _ = wheelOnAlternateScreen(event, lines: lines)
@@ -150,7 +150,7 @@ final class PaneView: NSView {
             alt: alt,
             deltaY: event.scrollingDeltaY,
             precise: event.hasPreciseScrollingDeltas,
-            cellHeight: CoreTextRenderer.cellSize().height,
+            cellHeight: cellSize.height,
             remainder: wheelRemainder
         )
         wheelRemainder = remainder
@@ -199,7 +199,16 @@ final class PaneView: NSView {
 
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
+        // The cell is snapped to device pixels, so a 1x↔2x move can change cols/rows.
+        syncGrid()
+        dirty = .everything
         screenChanged()
+    }
+
+    /// The cell in points on this view's display, snapped to whole device pixels. Resize,
+    /// mouse mapping, the IME rect and the GPU all use it, so they agree on every column.
+    var cellSize: CGSize {
+        CoreTextRenderer.cellSize(scale: window?.backingScaleFactor ?? 2)
     }
 
     /// Recomputes the grid from the current bounds and tells the host.
@@ -217,7 +226,7 @@ final class PaneView: NSView {
     /// its screen away, and an idle TUI never repaints — the pane would stay blank for good.
     static func gridSize(
         for bounds: CGSize,
-        cellSize: CGSize = CoreTextRenderer.cellSize()
+        cellSize: CGSize
     ) -> (cols: UInt16, rows: UInt16)? {
         guard cellSize.width > 0, cellSize.height > 0 else { return nil }
         let columns = Int(bounds.width / cellSize.width)
@@ -232,7 +241,8 @@ final class PaneView: NSView {
         // Only the *requested* size changes here. `cols`/`rows` describe the
         // cells we hold, and those must keep matching until the host answers
         // with a new snapshot — otherwise the renderer walks off the grid.
-        guard let grid = Self.gridSize(for: bounds.size), grid != reported else { return }
+        guard let grid = Self.gridSize(for: bounds.size, cellSize: cellSize), grid != reported
+        else { return }
         reported = grid
         onResize?(grid.cols, grid.rows)
     }

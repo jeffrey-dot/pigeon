@@ -66,7 +66,7 @@ extension PaneView: NSTextInputClient {
 
     /// The candidate window opens under the cursor cell (or the composing caret).
     func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
-        let cell = CoreTextRenderer.cellSize()
+        let cell = cellSize
         var column = cursor.x
         var row = cursor.y
         if let place = preedit?.placement(cursor: cursor, cols: cols, rows: rows) {

@@ -17,7 +17,8 @@ enum CoreTextRenderer {
     /// so the render thread's rasterizer can share it.
     private static let regularFont = loadFont(bold: false)
     private static let boldFont = loadFont(bold: true)
-    private static let cachedCellSize: CGSize = {
+    /// The cell in points as the font defines it, before snapping to the pixel grid.
+    private static let naturalCellSize: CGSize = {
         let advance = ("M" as NSString).size(withAttributes: [.font: regularFont])
         // Cell height is the font size times the line-height ratio, not the font's own
         // ascender/descender span: that is what gives the rows their airiness.
@@ -42,22 +43,37 @@ enum CoreTextRenderer {
         return derived as NSFont
     }
 
-    static func cellSize() -> CGSize { cachedCellSize }
+    /// The cell in points for a display of `scale`: a whole number of device pixels on each
+    /// side, as kitty and Ghostty do. A fractional advance (SF Mono 13pt is 8.04pt) would make
+    /// columns alternate between two widths and box drawing step by a pixel between
+    /// neighbours. Grid size, mouse mapping, the IME rect and drawing all use this one size.
+    static func cellSize(scale: CGFloat) -> CGSize {
+        pixelAligned(naturalCellSize, scale: scale)
+    }
+
+    /// `size` rounded to whole device pixels at `scale`, never below one pixel.
+    static func pixelAligned(_ size: CGSize, scale: CGFloat) -> CGSize {
+        let scale = scale > 0 ? scale : 1
+        return CGSize(
+            width: max((size.width * scale).rounded(), 1) / scale,
+            height: max((size.height * scale).rounded(), 1) / scale)
+    }
 
     // MARK: - glyph rasterization
 
     /// Cell geometry in device pixels for the Metal renderer.
     static func gridMetrics(scale: CGFloat) -> GridMetrics {
         let font = font(bold: false)
-        let size = cellSize()
+        let size = cellSize(scale: scale)
         let descent = CTFontGetDescent(font)
-        // The baseline sits one descender above the cell's bottom edge.
-        let baseline = size.height - descent
+        // The baseline sits one descender above the cell's bottom edge, on a whole pixel so
+        // every row's glyphs fall on the pixel grid the same way.
+        let baseline = ((size.height - descent) * scale).rounded()
         let thickness = max(CTFontGetUnderlineThickness(font), 1) * scale
         return GridMetrics(
-            cellWidth: Float(size.width * scale),
-            cellHeight: Float(size.height * scale),
-            baseline: Float(baseline * scale),
+            cellWidth: Float((size.width * scale).rounded()),
+            cellHeight: Float((size.height * scale).rounded()),
+            baseline: Float(baseline),
             lineThickness: Float(thickness.rounded()),
             strikeOffset: Float(((size.height - descent) - CTFontGetXHeight(font) / 2) * scale),
             scale: Float(scale)

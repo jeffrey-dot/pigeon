@@ -107,10 +107,32 @@ final class TerminalPaletteTests: XCTestCase {
     }
 
     func testCellHeightUsesTheConfiguredLineHeight() {
-        // Default 13pt × 1.25; the cell width still comes from the "M" advance.
+        // Default 13pt × 1.25; the cell width still comes from the "M" advance. Snapping to
+        // device pixels moves it by at most half a pixel.
         let config = CoreTextRenderer.config
         XCTAssertEqual(
-            CoreTextRenderer.cellSize().height, CGFloat(config.size * config.lineHeight), accuracy: 0.01)
+            CoreTextRenderer.cellSize(scale: 2).height, CGFloat(config.size * config.lineHeight),
+            accuracy: 0.25)
+    }
+
+    /// A fractional advance made columns alternate between two widths (`columnX` floors), so
+    /// box drawing misaligned by a pixel. The cell is now whole device pixels at every scale.
+    func testTheCellIsAWholeNumberOfDevicePixels() {
+        for scale: CGFloat in [1, 2, 3] {
+            let size = CoreTextRenderer.cellSize(scale: scale)
+            XCTAssertEqual(size.width * scale, (size.width * scale).rounded(), "scale \(scale)")
+            XCTAssertEqual(size.height * scale, (size.height * scale).rounded(), "scale \(scale)")
+            let metrics = CoreTextRenderer.gridMetrics(scale: scale)
+            XCTAssertEqual(CGFloat(metrics.cellWidth), size.width * scale)
+            XCTAssertEqual(CGFloat(metrics.cellHeight), size.height * scale)
+            XCTAssertEqual(metrics.baseline, metrics.baseline.rounded())
+            let widths = (0..<20).map { metrics.columnX($0 + 1) - metrics.columnX($0) }
+            XCTAssertEqual(Set(widths).count, 1, "every column is equally wide")
+        }
+        let snapped = CoreTextRenderer.pixelAligned(CGSize(width: 8.036, height: 16.25), scale: 2)
+        XCTAssertEqual(snapped, CGSize(width: 8, height: 16.5))
+        XCTAssertEqual(CoreTextRenderer.pixelAligned(CGSize(width: 0.1, height: 0.1), scale: 1),
+                       CGSize(width: 1, height: 1))
     }
 }
 
