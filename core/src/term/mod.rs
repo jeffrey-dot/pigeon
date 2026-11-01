@@ -116,7 +116,7 @@ pub struct Colour {
 }
 
 impl Colour {
-    pub fn from_rgb(value: u32) -> Self {
+    pub const fn from_rgb(value: u32) -> Self {
         Self {
             r: ((value >> 16) & 0xff) as u8,
             g: ((value >> 8) & 0xff) as u8,
@@ -142,16 +142,23 @@ impl Palette {
     /// answers with before any client has told it otherwise. Once a client sends
     /// `appearance`, that palette is the only source — this is a pre-client fallback, not a
     /// second palette the panes switch between.
-    pub fn default_dark() -> Self {
-        Self::from_rgb(
-            0x00e6_e6e6,
-            0x000e_0f11,
-            &[
-                0x616161, 0xFF8272, 0xB4FA72, 0xFEFDC2, 0xA5D5FE, 0xFF8FFD, 0xD0D1FE, 0xF1F1F1,
-                0x8E8E8E, 0xFFC4BD, 0xD6FCB9, 0xFEFDD5, 0xC1E3FE, 0xFFB1FE, 0xE5E6FE, 0xFEFFFF,
-            ],
-        )
-        .expect("default palette is well-formed")
+    pub const fn default_dark() -> Self {
+        const ANSI: [u32; 16] = [
+            0x616161, 0xFF8272, 0xB4FA72, 0xFEFDC2, 0xA5D5FE, 0xFF8FFD, 0xD0D1FE, 0xF1F1F1,
+            0x8E8E8E, 0xFFC4BD, 0xD6FCB9, 0xFEFDD5, 0xC1E3FE, 0xFFB1FE, 0xE5E6FE, 0xFEFFFF,
+        ];
+        // Built at compile time from a fixed-size table, so there is no length to get wrong.
+        let mut ansi = [Colour { r: 0, g: 0, b: 0 }; 16];
+        let mut index = 0;
+        while index < ANSI.len() {
+            ansi[index] = Colour::from_rgb(ANSI[index]);
+            index += 1;
+        }
+        Self {
+            fg: Colour::from_rgb(0x00e6_e6e6),
+            bg: Colour::from_rgb(0x000e_0f11),
+            ansi,
+        }
     }
 
     /// Builds a palette from the wire values; a wrong-length ANSI list is rejected rather
