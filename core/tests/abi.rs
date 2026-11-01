@@ -415,3 +415,58 @@ fn a_non_delta_message_yields_no_delta() {
     pg_msg_free(msg);
     pg_msg_free(empty);
 }
+
+#[test]
+fn a_reply_that_does_not_fit_stays_queued() {
+    let core = pg_core_new(ptr::null());
+    let pane = pg_pane_new(core, &pane_options(20, 4));
+    // DSR: "\x1b[1;1R" is 6 bytes.
+    assert!(pg_pane_feed(core, pane, b"\x1b[6n".as_ptr(), 4));
+    // NULL is a length query; it consumes nothing.
+    assert_eq!(pg_pane_respond(core, pane, ptr::null_mut(), 0), 6);
+    assert_eq!(pg_last_error_code(), PgErrorCode::PG_OK);
+    let mut small = [0u8; 2];
+    assert_eq!(
+        pg_pane_respond(core, pane, small.as_mut_ptr(), small.len()),
+        0
+    );
+    assert_eq!(pg_last_error_code(), PgErrorCode::PG_ERR_OVERFLOW);
+    let mut buffer = [0u8; 16];
+    let written = pg_pane_respond(core, pane, buffer.as_mut_ptr(), buffer.len());
+    assert_eq!(
+        &buffer[..written],
+        b"\x1b[1;1R",
+        "the overflowed reply is not lost"
+    );
+    assert_eq!(
+        pg_pane_respond(core, pane, buffer.as_mut_ptr(), buffer.len()),
+        0
+    );
+    pg_core_free(core);
+}
+
+#[test]
+fn dirty_rows_beyond_the_buffer_are_kept_for_the_next_call() {
+    let core = pg_core_new(ptr::null());
+    let pane = pg_pane_new(core, &pane_options(10, 4));
+    let text = b"a\r\nb\r\nc\r\nd";
+    assert!(pg_pane_feed(core, pane, text.as_ptr(), text.len()));
+    let pending = pg_pane_dirty_rows(core, pane, ptr::null_mut(), 0);
+    assert_eq!(pending, 4, "NULL reports the count without consuming");
+    let mut first = [u16::MAX; 3];
+    assert_eq!(
+        pg_pane_dirty_rows(core, pane, first.as_mut_ptr(), first.len()),
+        3
+    );
+    let mut rest = [u16::MAX; 8];
+    let more = pg_pane_dirty_rows(core, pane, rest.as_mut_ptr(), rest.len());
+    let mut seen: Vec<u16> = first.iter().chain(&rest[..more]).copied().collect();
+    seen.sort_unstable();
+    seen.dedup();
+    assert_eq!(
+        seen,
+        [0, 1, 2, 3],
+        "every dirty row is delivered once the caller asks again"
+    );
+    pg_core_free(core);
+}

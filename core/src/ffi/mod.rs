@@ -255,6 +255,10 @@ pub extern "C" fn pg_pane_resize(core: *mut PgCore, pane_id: u32, cols: u16, row
 }
 
 /// Pulls pending terminal replies (DA/DSR/…); returns bytes written.
+///
+/// `out == NULL` returns how many bytes are pending without consuming them. When
+/// `cap` is too small nothing is consumed: the call fails with `PG_ERR_OVERFLOW`
+/// and the replies stay queued for a retry with a larger buffer.
 #[no_mangle]
 pub extern "C" fn pg_pane_respond(
     core: *mut PgCore,
@@ -263,16 +267,19 @@ pub extern "C" fn pg_pane_respond(
     cap: usize,
 ) -> usize {
     ffi_call(0, || {
-        let replies = unsafe_mut(core)?.take_replies(pane_id)?;
-        if replies.is_empty() {
-            return Ok(0);
+        let core = unsafe_mut(core)?;
+        let replies = core.peek_replies(pane_id)?;
+        let len = replies.len();
+        if out.is_null() || len == 0 {
+            return Ok(len);
         }
-        if out.is_null() || cap < replies.len() {
+        if cap < len {
             return Err(PgError::Overflow);
         }
         // SAFETY: caller provided `cap` writable bytes.
-        unsafe { ptr::copy_nonoverlapping(replies.as_ptr(), out, replies.len()) };
-        Ok(replies.len())
+        unsafe { ptr::copy_nonoverlapping(replies.as_ptr(), out, len) };
+        core.consume_replies(pane_id, len)?;
+        Ok(len)
     })
 }
 
@@ -354,7 +361,11 @@ pub extern "C" fn pg_pane_snapshot(core: *mut PgCore, pane_id: u32) -> *mut PgSn
     })
 }
 
-/// Fills row indices dirty since the last call; returns how many were written.
+/// Fills row indices dirty since the last call (ascending, no duplicates); returns
+/// how many were written.
+///
+/// `out == NULL` returns how many rows are pending without consuming them. Rows
+/// that do not fit in `cap` stay pending and come back on the next call.
 #[no_mangle]
 pub extern "C" fn pg_pane_dirty_rows(
     core: *mut PgCore,
@@ -363,15 +374,17 @@ pub extern "C" fn pg_pane_dirty_rows(
     cap: usize,
 ) -> usize {
     ffi_call(0, || {
-        let dirty = unsafe_mut(core)?.take_dirty_rows(pane_id)?;
-        if out.is_null() && !dirty.is_empty() {
-            return Err(PgError::InvalidArg);
+        let core = unsafe_mut(core)?;
+        let dirty = core.peek_dirty_rows(pane_id)?;
+        if out.is_null() {
+            return Ok(dirty.len());
         }
         let written = dirty.len().min(cap);
         if written > 0 {
             // SAFETY: caller provided `cap` writable entries.
             unsafe { ptr::copy_nonoverlapping(dirty.as_ptr(), out, written) };
         }
+        core.consume_dirty_rows(pane_id, written)?;
         Ok(written)
     })
 }

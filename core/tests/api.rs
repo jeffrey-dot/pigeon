@@ -220,3 +220,32 @@ fn a_hello_ack_says_which_features_the_host_offers() {
     let other = Message::Pong { ts: 1 };
     assert_eq!(offers_feature(&other, "delta"), Err(PgError::InvalidArg));
 }
+
+#[test]
+fn replies_can_be_peeked_and_consumed_in_parts() {
+    let (mut core, pane) = core_with_pane(20, 4);
+    core.feed(pane, b"\x1b[6n").expect("feed");
+    assert_eq!(core.peek_replies(pane).expect("peek"), b"\x1b[1;1R");
+    assert_eq!(
+        core.peek_replies(pane).expect("peek"),
+        b"\x1b[1;1R",
+        "peeking keeps them"
+    );
+    core.consume_replies(pane, 2).expect("consume");
+    core.feed(pane, b"\x1b[6n").expect("feed");
+    assert_eq!(
+        core.take_replies(pane).expect("take"),
+        b"1;1R\x1b[1;1R",
+        "the rest stays ahead of newer replies"
+    );
+}
+
+#[test]
+fn dirty_rows_can_be_peeked_and_consumed_in_parts() {
+    let (mut core, pane) = core_with_pane(10, 4);
+    core.feed(pane, b"a\r\nb\r\nc").expect("feed");
+    let pending = core.peek_dirty_rows(pane).expect("peek").to_vec();
+    assert!(pending.len() >= 3);
+    core.consume_dirty_rows(pane, 1).expect("consume");
+    assert_eq!(core.take_dirty_rows(pane).expect("take"), pending[1..]);
+}

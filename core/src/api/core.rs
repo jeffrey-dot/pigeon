@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 
+use super::outbox::Outbox;
 use crate::error::{PgError, PgResult};
 use crate::layout::{Axis, Layout, PaneId, Rect, SplitId};
 use crate::session::PaneState;
@@ -23,6 +24,8 @@ pub struct Config {
 pub struct Core {
     config: Config,
     panes: BTreeMap<PaneId, PaneState>,
+    /// Replies and damage drained from each pane but not yet taken by the client.
+    outboxes: BTreeMap<PaneId, Outbox>,
     /// Geometry and focus live in the layout tree; the map only holds panes.
     layout: Option<Layout>,
     next_pane: PaneId,
@@ -33,6 +36,7 @@ impl Core {
         Self {
             config,
             panes: BTreeMap::new(),
+            outboxes: BTreeMap::new(),
             layout: None,
             next_pane: 1,
         }
@@ -56,6 +60,7 @@ impl Core {
     /// (the last pane, say) is not an error.
     pub fn free_pane(&mut self, pane_id: PaneId) -> PgResult<()> {
         self.panes.remove(&pane_id).ok_or(PgError::NoSuchPane)?;
+        self.outboxes.remove(&pane_id);
         if let Some(layout) = self.layout.as_mut() {
             let _ = layout.close(pane_id);
         }
@@ -69,13 +74,30 @@ impl Core {
     }
 
     pub fn resize(&mut self, pane_id: PaneId, cols: u16, rows: u16) -> PgResult<()> {
-        self.pane_mut(pane_id)?.resize(cols, rows);
+        let pane = self.panes.get_mut(&pane_id).ok_or(PgError::NoSuchPane)?;
+        pane.resize(cols, rows);
+        let (_, rows) = pane.size();
+        if let Some(outbox) = self.outboxes.get_mut(&pane_id) {
+            outbox.clip_rows(rows);
+        }
         Ok(())
     }
 
     /// Pending terminal replies (DA/DSR/…) the caller must write to the PTY.
     pub fn take_replies(&mut self, pane_id: PaneId) -> PgResult<Vec<u8>> {
-        Ok(self.pane_mut(pane_id)?.take_replies())
+        Ok(self.outbox(pane_id)?.take_replies())
+    }
+
+    /// The same replies without consuming them, so a caller whose buffer is too small
+    /// can ask again; follow with [`Core::consume_replies`].
+    pub fn peek_replies(&mut self, pane_id: PaneId) -> PgResult<&[u8]> {
+        Ok(self.outbox(pane_id)?.replies())
+    }
+
+    /// Drops the first `count` pending reply bytes (clamped to what is pending).
+    pub fn consume_replies(&mut self, pane_id: PaneId, count: usize) -> PgResult<()> {
+        self.outbox(pane_id)?.consume_replies(count);
+        Ok(())
     }
 
     /// Full picture of a pane, history included.
@@ -83,9 +105,20 @@ impl Core {
         Ok(self.pane_mut(pane_id)?.snapshot())
     }
 
-    /// Row indices dirty since the last call.
+    /// Row indices dirty since the last call, ascending and without duplicates.
     pub fn take_dirty_rows(&mut self, pane_id: PaneId) -> PgResult<Vec<u16>> {
-        Ok(self.pane_mut(pane_id)?.take_damage())
+        Ok(self.outbox(pane_id)?.take_dirty())
+    }
+
+    /// The same rows without consuming them; follow with [`Core::consume_dirty_rows`].
+    pub fn peek_dirty_rows(&mut self, pane_id: PaneId) -> PgResult<&[u16]> {
+        Ok(self.outbox(pane_id)?.dirty())
+    }
+
+    /// Drops the first `count` pending dirty rows (clamped to what is pending).
+    pub fn consume_dirty_rows(&mut self, pane_id: PaneId, count: usize) -> PgResult<()> {
+        self.outbox(pane_id)?.consume_dirty(count);
+        Ok(())
     }
 
     /// The focused pane and its OSC 7501 records.
@@ -122,6 +155,7 @@ impl Core {
     /// Closes a pane; its sibling takes over the parent rect.
     pub fn close(&mut self, pane_id: PaneId) -> PgResult<()> {
         self.panes.remove(&pane_id).ok_or(PgError::NoSuchPane)?;
+        self.outboxes.remove(&pane_id);
         if let Some(layout) = self.layout.as_mut() {
             layout.close(pane_id)?;
         }
@@ -175,6 +209,15 @@ impl Core {
 
     fn pane_mut(&mut self, pane_id: PaneId) -> PgResult<&mut PaneState> {
         self.panes.get_mut(&pane_id).ok_or(PgError::NoSuchPane)
+    }
+
+    /// The pane's outbox, topped up with whatever the terminal produced since.
+    fn outbox(&mut self, pane_id: PaneId) -> PgResult<&mut Outbox> {
+        let pane = self.panes.get_mut(&pane_id).ok_or(PgError::NoSuchPane)?;
+        let outbox = self.outboxes.entry(pane_id).or_default();
+        outbox.push_replies(pane.take_replies());
+        outbox.push_dirty(pane.take_damage());
+        Ok(outbox)
     }
 
     fn focused_pane(&self) -> PgResult<&PaneState> {

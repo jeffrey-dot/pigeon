@@ -16,6 +16,7 @@
 
 mod core;
 mod msg;
+mod outbox;
 
 pub use self::core::{Config, Core};
 pub use self::msg::{
