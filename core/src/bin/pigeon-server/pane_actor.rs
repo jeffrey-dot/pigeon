@@ -22,6 +22,9 @@ const SCROLLBACK: usize = 10_000;
 /// many small PTY reads, and one delta each would repaint the whole screen dozens of times
 /// per frame and flood an ssh link; a lone keystroke still goes out immediately.
 const FRAME: Duration = Duration::from_millis(16);
+/// How long an exited child's PTY may stay open (a background job still holding it)
+/// before the exit is announced anyway.
+const EXIT_GRACE: Duration = Duration::from_millis(500);
 
 /// Pane ids are unique for the whole process, not per session.
 pub static NEXT_PANE: AtomicU32 = AtomicU32::new(1);
@@ -153,6 +156,12 @@ impl PaneActor {
         let mut ticker = interval(Duration::from_millis(150));
         ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
         let mut commands_open = true;
+        let mut output_open = true;
+        // The child's exit code once reaped, and when: the exit is announced only after
+        // the PTY has delivered its last bytes (or a grace period, for a background job
+        // that keeps the PTY open), so the final screen includes the final output.
+        let mut reaped: Option<(i32, Instant)> = None;
+        let mut announced = false;
         loop {
             tokio::select! {
                 _ = sleep_until(self.last_flush + FRAME), if self.dirty => {
@@ -164,24 +173,36 @@ impl PaneActor {
                         None => commands_open = false,
                     }
                 }
-                _ = ticker.tick() => {
-                    if let Ok(Some(status)) = self.child.try_wait() {
-                        self.exited(status.exit_code() as i32);
-                        break;
+                _ = ticker.tick(), if !announced => {
+                    if reaped.is_none() {
+                        if let Ok(Some(status)) = self.child.try_wait() {
+                            reaped = Some((status.exit_code() as i32, Instant::now()));
+                        }
                     }
                 }
-                chunk = pty_rx.recv() => {
-                    let Some(chunk) = chunk else {
-                        let code = self
-                            .child
-                            .wait()
-                            .map(|status| status.exit_code() as i32)
-                            .unwrap_or(-1);
-                        self.exited(code);
-                        break;
-                    };
-                    self.output(&chunk).await;
+                chunk = pty_rx.recv(), if output_open => {
+                    match chunk {
+                        Some(chunk) => self.output(&chunk).await,
+                        None => output_open = false,
+                    }
                 }
+            }
+            if let Some((code, at)) = reaped.filter(|_| !announced) {
+                if !output_open || at.elapsed() >= EXIT_GRACE {
+                    while let Ok(chunk) = pty_rx.try_recv() {
+                        self.output(&chunk).await;
+                    }
+                    if self.dirty {
+                        self.flush_now();
+                    }
+                    self.exited(code);
+                    announced = true;
+                }
+            }
+            // Like tmux `remain-on-exit`: an exited pane keeps answering snapshot, scroll
+            // and status requests until `close_pane` drops its last sender.
+            if !commands_open && announced {
+                break;
             }
         }
     }

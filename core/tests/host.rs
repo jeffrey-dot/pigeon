@@ -2981,3 +2981,43 @@ fn shutdown_before_hello_is_a_protocol_error() {
         "the host keeps running"
     );
 }
+
+/// Protocol §3.2: an exited pane stays until `close_pane`, and attaching to it gives its
+/// last screen followed by `pane_exited` (like tmux `remain-on-exit`).
+#[test]
+fn attach_after_exit_gets_the_final_output_and_the_exit_code() {
+    let _serial = one_at_a_time();
+    let pane = script("#!/bin/sh\nprintf 'final words\\n'\nexit 3\n");
+    let host = start_host_with(pane.to_str().expect("utf8"));
+    let mut client = Client::connect(&host.socket);
+    hello(&mut client);
+    client.send(&Message::NewSession {
+        id: 1,
+        cwd: None,
+        shell: None,
+        env: None,
+    });
+    let Message::Created { pane_id, .. } =
+        client.wait_for(|m| matches!(m, Message::Created { .. }))
+    else {
+        unreachable!()
+    };
+    // Long enough for the child to finish and the host to notice.
+    std::thread::sleep(Duration::from_millis(800));
+    client.send(&Message::Attach {
+        id: 2,
+        pane_id,
+        size_policy: None,
+        history: None,
+        since: None,
+    });
+    let reply = client.wait_for(|m| matches!(m, Message::Snapshot { .. } | Message::Error { .. }));
+    assert!(
+        matches!(reply, Message::Snapshot { .. }),
+        "attach after exit must return the screen, got {reply:?}"
+    );
+    assert!(screen_text(&reply).contains("final words"));
+    let exited = client.wait_for(|m| matches!(m, Message::PaneExited { .. }));
+    assert!(matches!(exited, Message::PaneExited { code: 3, .. }));
+    let _ = std::fs::remove_file(&pane);
+}
