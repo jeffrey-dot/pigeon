@@ -55,7 +55,7 @@ struct RowInstances: Equatable {
                     pixelHeight: pixelHeight)
                 if let slot = glyph(key) {
                     out.glyphs.append(GlyphInstance(
-                        origin: SIMD2(left, top),
+                        origin: SIMD2(left + Float(slot.bearingX), top + Float(slot.bearingY)),
                         size: SIMD2(Float(slot.width), Float(slot.height)),
                         uv: SIMD2(Float(slot.x), Float(slot.y)),
                         colored: slot.colored ? 1 : 0,

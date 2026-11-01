@@ -44,6 +44,12 @@ struct GlyphAtlas {
         return slot
     }
 
+    /// Replaces the placement data of an allocated slot (its bearings), keeping its texels.
+    mutating func update(_ key: GlyphKey, _ slot: AtlasSlot) {
+        guard slots[key] != nil else { return }
+        slots[key] = slot
+    }
+
     /// Forgets every glyph; slots handed out before this are no longer valid.
     mutating func reset() {
         slots = [:]

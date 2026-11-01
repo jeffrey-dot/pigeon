@@ -44,9 +44,16 @@ final class GlyphCache {
         let allocated = bitmap.colored
             ? colorAtlas.allocate(key, width: bitmap.width, height: bitmap.height, colored: true)
             : maskAtlas.allocate(key, width: bitmap.width, height: bitmap.height, colored: false)
-        guard let slot = allocated else {
+        guard var slot = allocated else {
             overflowed = true
             return nil
+        }
+        slot.bearingX = bitmap.bearingX
+        slot.bearingY = bitmap.bearingY
+        if bitmap.colored {
+            colorAtlas.update(key, slot)
+        } else {
+            maskAtlas.update(key, slot)
         }
         let texture = bitmap.colored ? color : mask
         bitmap.bytes.withUnsafeBytes { buffer in

@@ -81,21 +81,33 @@ enum CoreTextRenderer {
     }
 
     /// A rasterized glyph: `width`×`height` texels, one byte per texel for a mask glyph,
-    /// BGRA premultiplied for a colour one.
+    /// BGRA premultiplied for a colour one. The bitmap covers the glyph's ink, not the cell;
+    /// `bearingX`/`bearingY` place its top-left corner relative to the cell's, in pixels.
     struct GlyphBitmap {
         var width: Int
         var height: Int
         var colored: Bool
         var bytes: [UInt8]
+        var bearingX = 0
+        var bearingY = 0
     }
 
-    /// Rasterizes one glyph into a cell-sized bitmap (`span` columns wide), baseline placed
-    /// where the grid expects it. Characters the font lacks go through CoreText's fallback
-    /// cascade, so CJK and emoji come from the system's fonts.
+    /// Where a glyph's pen goes and how much it is shrunk, in points from the cell's top-left.
+    private struct Placement {
+        var penX: CGFloat
+        var baseline: CGFloat
+        var factor: CGFloat
+    }
+
+    /// Rasterizes one glyph (`span` columns wide) into a bitmap sized to its ink, so italic
+    /// overhang, descenders and accents above the cap height are never cropped. Characters the
+    /// font lacks go through CoreText's fallback cascade, so CJK and emoji come from the
+    /// system's fonts; fallback, symbol (Nerd Font / Powerline) and colour glyphs larger than
+    /// their cells are scaled down to fit them.
     static func rasterize(_ key: GlyphKey, metrics: GridMetrics) -> GlyphBitmap? {
         guard let scalar = Unicode.Scalar(key.codepoint) else { return nil }
-        let (width, height) = metrics.glyphSize(span: Int(key.span))
-        guard width > 0, height > 0 else { return nil }
+        let (cellWidth, cellHeight) = metrics.glyphSize(span: Int(key.span))
+        guard cellWidth > 0, cellHeight > 0 else { return nil }
         var base = font(bold: key.bold) as CTFont
         if key.italic {
             base = CTFontCreateCopyWithSymbolicTraits(base, 0, nil, .traitItalic, .traitItalic) ?? base
@@ -109,8 +121,26 @@ enum CoreTextRenderer {
             ]
         )
         let line = CTLineCreateWithAttributedString(attributed)
-        let colored = lineIsColored(line)
+        let (colored, fallback) = runTraits(line, primary: base)
         let scale = CGFloat(metrics.scale)
+        let ink = inkBounds(line, colored: colored)
+        guard !ink.isNull, ink.width > 0, ink.height > 0 else { return nil }
+        let place = placement(
+            ink: ink,
+            cell: CGSize(width: CGFloat(cellWidth) / scale, height: CGFloat(cellHeight) / scale),
+            baseline: CGFloat(metrics.baseline) / scale,
+            fit: colored || fallback || isSymbol(key.codepoint))
+        // The ink box in device pixels from the cell's top-left (y down), with a one-pixel
+        // margin for antialiasing.
+        let left = ((place.penX + ink.minX * place.factor) * scale).rounded(.down) - 1
+        let right = ((place.penX + ink.maxX * place.factor) * scale).rounded(.up) + 1
+        let top = ((place.baseline - ink.maxY * place.factor) * scale).rounded(.down) - 1
+        let bottom = ((place.baseline - ink.minY * place.factor) * scale).rounded(.up) + 1
+        let width = Int(right - left)
+        let height = Int(bottom - top)
+        // A runaway glyph (a font's broken bounding box) must not allocate a huge bitmap.
+        guard width > 0, height > 0, width <= cellWidth * 4, height <= cellHeight * 4
+        else { return nil }
         let bytesPerRow = colored ? width * 4 : width
         var bytes = [UInt8](repeating: 0, count: bytesPerRow * height)
         let drawn = bytes.withUnsafeMutableBytes { buffer -> Bool in
@@ -130,22 +160,68 @@ enum CoreTextRenderer {
             guard let context else { return false }
             context.setAllowsFontSmoothing(false)
             context.setShouldSubpixelPositionFonts(true)
-            context.scaleBy(x: scale, y: scale)
             if !colored { context.setFillColor(gray: 1, alpha: 1) }
+            // The bitmap's origin is bottom-left; the pen sits at `penX`, `baseline` below
+            // the cell's top, both measured from the bitmap's own corner.
+            context.translateBy(
+                x: place.penX * scale - left,
+                y: CGFloat(height) - (place.baseline * scale - top))
+            context.scaleBy(x: scale * place.factor, y: scale * place.factor)
             context.textMatrix = .identity
-            // The bitmap's origin is bottom-left; the baseline sits `baseline` below the top.
-            let cellHeight = CGFloat(height) / scale
-            context.textPosition = CGPoint(x: 0, y: cellHeight - CGFloat(metrics.baseline) / scale)
+            context.textPosition = .zero
             CTLineDraw(line, context)
             return true
         }
         guard drawn else { return nil }
-        return GlyphBitmap(width: width, height: height, colored: colored, bytes: bytes)
+        return GlyphBitmap(
+            width: width, height: height, colored: colored, bytes: bytes,
+            bearingX: Int(left), bearingY: Int(top))
     }
 
-    /// True when the run CoreText picked is a colour font (Apple Color Emoji and friends).
-    private static func lineIsColored(_ line: CTLine) -> Bool {
-        guard let runs = CTLineGetGlyphRuns(line) as? [CTRun] else { return false }
+    /// Private-use (Nerd Font icons, Powerline) and the symbol/dingbat blocks: drawn by fonts
+    /// at whatever size their designers liked, so they are fitted to the cell.
+    private static func isSymbol(_ codepoint: UInt32) -> Bool {
+        (0xE000...0xF8FF).contains(codepoint) || (0xF0000...0x10FFFF).contains(codepoint)
+            || (0x2600...0x27BF).contains(codepoint) || (0x1F300...0x1FAFF).contains(codepoint)
+    }
+
+    /// The glyph's ink in points around the pen (y up). A colour (sbix) image can spill past
+    /// the bounds CoreText reports for it, so colour glyphs also take the typographic box.
+    private static func inkBounds(_ line: CTLine, colored: Bool) -> CGRect {
+        var ink = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
+        if ink.isNull || ink.width <= 0 || ink.height <= 0 { ink = CTLineGetImageBounds(line, nil) }
+        guard colored else { return ink }
+        return ink.union(CTLineGetBoundsWithOptions(line, []))
+    }
+
+    /// Where to draw a glyph whose ink is `ink` in a cell of `cell` points. A glyph from the
+    /// primary font keeps its own size and pen (its overhang just spills into the bitmap's
+    /// margin). One that must `fit` and does not is shrunk to the cell and centred.
+    private static func placement(ink: CGRect, cell: CGSize, baseline: CGFloat, fit: Bool) -> Placement {
+        let top = baseline - ink.maxY
+        let bottom = baseline - ink.minY
+        let fits = ink.minX >= -0.5 && ink.maxX <= cell.width + 0.5 && top >= -0.5
+            && bottom <= cell.height + 0.5
+        guard fit, !fits else { return Placement(penX: 0, baseline: baseline, factor: 1) }
+        let factor = min(cell.width / ink.width, cell.height / ink.height, 1)
+        let width = ink.width * factor
+        let height = ink.height * factor
+        let penX = (cell.width - width) / 2 - ink.minX * factor
+        // Keep the glyph on its baseline when it fits vertically; otherwise centre it.
+        var line = baseline
+        if baseline - ink.maxY * factor < 0 || baseline - ink.minY * factor > cell.height {
+            line = (cell.height - height) / 2 + ink.maxY * factor
+        }
+        return Placement(penX: penX, baseline: line, factor: factor)
+    }
+
+    /// Whether CoreText drew `line` with a colour font (Apple Color Emoji and friends), and
+    /// whether it fell back to a font other than `primary`.
+    private static func runTraits(_ line: CTLine, primary: CTFont) -> (colored: Bool, fallback: Bool) {
+        guard let runs = CTLineGetGlyphRuns(line) as? [CTRun] else { return (false, false) }
+        let primaryName = CTFontCopyPostScriptName(primary) as String
+        var colored = false
+        var fallback = false
         for run in runs {
             let attributes = CTRunGetAttributes(run) as NSDictionary
             guard let value = attributes[kCTFontAttributeName as String],
@@ -153,8 +229,9 @@ enum CoreTextRenderer {
             else { continue }
             // The type ID check above makes this cast unconditional.
             let runFont = unsafeBitCast(value as AnyObject, to: CTFont.self)
-            if CTFontGetSymbolicTraits(runFont).contains(.traitColorGlyphs) { return true }
+            if CTFontGetSymbolicTraits(runFont).contains(.traitColorGlyphs) { colored = true }
+            if CTFontCopyPostScriptName(runFont) as String != primaryName { fallback = true }
         }
-        return false
+        return (colored, fallback)
     }
 }

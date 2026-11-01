@@ -196,6 +196,69 @@ final class MetalRendererTests: XCTestCase {
         XCTAssertTrue(stats.gpu.isEmpty)
     }
 
+    // MARK: - glyph bounds
+
+    /// Whether any texel on the bitmap's outer border has ink: a glyph cut off by its bitmap.
+    private func touchesEdge(_ bitmap: CoreTextRenderer.GlyphBitmap) -> Bool {
+        let stride = bitmap.colored ? 4 : 1
+        func ink(_ x: Int, _ y: Int) -> Bool {
+            let base = (y * bitmap.width + x) * stride
+            return bitmap.colored ? bitmap.bytes[base + 3] > 0 : bitmap.bytes[base] > 0
+        }
+        for x in 0..<bitmap.width where ink(x, 0) || ink(x, bitmap.height - 1) { return true }
+        for y in 0..<bitmap.height where ink(0, y) || ink(bitmap.width - 1, y) { return true }
+        return false
+    }
+
+    private func edgeReport(_ bitmap: CoreTextRenderer.GlyphBitmap) -> String {
+        let s = bitmap.colored ? 4 : 1
+        func a(_ x: Int, _ y: Int) -> UInt8 { bitmap.bytes[(y * bitmap.width + x) * s + (s - 1)] }
+        let top = (0..<bitmap.width).map { a($0, 0) }.max() ?? 0
+        let bottom = (0..<bitmap.width).map { a($0, bitmap.height - 1) }.max() ?? 0
+        let l = (0..<bitmap.height).map { a(0, $0) }.max() ?? 0
+        let r = (0..<bitmap.height).map { a(bitmap.width - 1, $0) }.max() ?? 0
+        return "t\(top) b\(bottom) l\(l) r\(r)"
+    }
+
+    private func rasterized(_ codepoint: UInt32, italic: Bool = false, span: UInt8 = 1) throws
+        -> CoreTextRenderer.GlyphBitmap {
+        let metrics = CoreTextRenderer.gridMetrics(scale: 2)
+        return try XCTUnwrap(CoreTextRenderer.rasterize(
+            GlyphKey(codepoint: codepoint, bold: false, italic: italic, span: span,
+                     pixelHeight: UInt16(metrics.cellHeight)),
+            metrics: metrics))
+    }
+
+    /// Italic overhang, descenders and wide fallback glyphs used to be cropped to the cell.
+    func testGlyphBitmapsHoldTheWholeInk() throws {
+        for (codepoint, italic) in [(0x57, true), (0x66, true), (0x67, false), (0xC5, false)] {
+            let bitmap = try rasterized(UInt32(codepoint), italic: italic)
+            XCTAssertFalse(touchesEdge(bitmap), "U+\(String(codepoint, radix: 16)) is clipped")
+        }
+        let emoji = try rasterized(0x1F600, span: 1)
+        XCTAssertFalse(touchesEdge(emoji), "an emoji in one column is scaled, not cropped \(emoji.width)x\(emoji.height) \(emoji.bearingX),\(emoji.bearingY) \(edgeReport(emoji))")
+    }
+
+    /// A fallback glyph larger than its cells is scaled down to fit them (plus the 1px margin).
+    func testOversizedFallbackGlyphsAreScaledIntoTheirCells() throws {
+        let metrics = CoreTextRenderer.gridMetrics(scale: 2)
+        let emoji = try rasterized(0x1F600, span: 1)
+        XCTAssertLessThanOrEqual(Float(emoji.width), metrics.cellWidth + 2)
+        XCTAssertLessThanOrEqual(Float(emoji.height), metrics.cellHeight + 2)
+        XCTAssertGreaterThanOrEqual(emoji.bearingX, -1)
+        XCTAssertGreaterThanOrEqual(emoji.bearingY, -1)
+    }
+
+    func testAGlyphIsPlacedByItsBearings() {
+        var frame = frame("a", cols: 1)
+        frame.cells[0].codepoint = 0x61
+        let row = RowInstances.build(row: 0, of: frame, glyph: { _ in
+            AtlasSlot(x: 5, y: 6, width: 10, height: 12, colored: false, bearingX: -2, bearingY: 7)
+        }) { $0 }
+        XCTAssertEqual(row.glyphs.first?.origin, SIMD2(-2, 7))
+        XCTAssertEqual(row.glyphs.first?.size, SIMD2(10, 12))
+    }
+
     // MARK: - GPU smoke
 
     func testTheShadersCompileAndAGlyphRasterizes() throws {
