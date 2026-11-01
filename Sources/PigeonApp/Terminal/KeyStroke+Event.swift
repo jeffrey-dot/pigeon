@@ -2,7 +2,7 @@ import AppKit
 import Carbon
 
 extension KeyStroke {
-    /// Maps an AppKit event onto the pure [`KeyStroke`] model.
+    /// Maps an AppKit key event (`keyDown`, `keyUp`) onto the pure [`KeyStroke`] model.
     init?(_ event: NSEvent) {
         let modifiers = event.modifierFlags
         let control = modifiers.contains(.control)
@@ -12,6 +12,7 @@ extension KeyStroke {
 
         let key: KeyStroke.Key
         var base: Character?
+        var unshifted: Character?
         switch event.keyCode {
         case 36, 76: key = .enter
         case 48: key = .tab
@@ -57,6 +58,10 @@ extension KeyStroke {
             if first.asciiValue == nil {
                 base = Self.asciiCharacter(keyCode: event.keyCode)
             }
+            // Shift+1 types `!`; the kitty protocol reports the key as `1`.
+            if shift, let plain = event.characters(byApplyingModifiers: [])?.first, plain != first {
+                unshifted = plain
+            }
         }
 
         self.init(
@@ -65,10 +70,40 @@ extension KeyStroke {
             option: option,
             shift: shift,
             command: command,
+            capsLock: modifiers.contains(.capsLock),
             keypad: Self.keypadCodes.contains(event.keyCode),
-            base: base
+            action: event.type == .keyUp ? .release : event.isARepeat ? .repeated : .press,
+            base: base,
+            unshifted: unshifted
         )
     }
+
+    /// A `flagsChanged` event: one modifier key went down or up. Pressed is read from the
+    /// device-dependent bits, so releasing one Shift while the other is held is a release.
+    init?(modifierEvent event: NSEvent) {
+        let modifiers = event.modifierFlags
+        guard let (modifier, deviceBit) = Self.modifierKeys[event.keyCode] else { return nil }
+        let pressed = modifier == .capsLock
+            ? modifiers.contains(.capsLock)
+            : modifiers.rawValue & deviceBit != 0
+        self.init(
+            key: .modifier(modifier),
+            control: modifiers.contains(.control),
+            option: modifiers.contains(.option),
+            shift: modifiers.contains(.shift),
+            command: modifiers.contains(.command),
+            capsLock: modifiers.contains(.capsLock),
+            action: pressed ? .press : .release)
+    }
+
+    /// Modifier key codes and their `NX_DEVICE*KEYMASK` bit in `modifierFlags`.
+    private static let modifierKeys: [UInt16: (KeyStroke.Modifier, UInt)] = [
+        56: (.leftShift, 0x02), 60: (.rightShift, 0x04),
+        59: (.leftControl, 0x01), 62: (.rightControl, 0x2000),
+        58: (.leftOption, 0x20), 61: (.rightOption, 0x40),
+        55: (.leftCommand, 0x08), 54: (.rightCommand, 0x10),
+        57: (.capsLock, 0),
+    ]
 
     /// The numeric keypad's key codes (`kVK_ANSI_Keypad*`). `NSEvent.ModifierFlags.numericPad`
     /// cannot be used: AppKit sets it on the arrow keys too.

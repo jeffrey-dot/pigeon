@@ -136,6 +136,8 @@ impl AlacrittyTerm {
         };
         let config = Config {
             scrolling_history: history,
+            // Programs push `CSI > flags u`; the client encodes keys by the active flags.
+            kitty_keyboard: true,
             ..Config::default()
         };
         Self {
@@ -288,8 +290,9 @@ impl Term for AlacrittyTerm {
     fn modes(&self) -> u32 {
         use super::{
             MODE_ALTERNATE_SCROLL, MODE_APP_CURSOR, MODE_APP_KEYPAD, MODE_BRACKETED_PASTE,
-            MODE_CURSOR_BLINK, MODE_FOCUS_EVENTS, MODE_MOUSE_CLICK, MODE_MOUSE_DRAG,
-            MODE_MOUSE_MOTION, MODE_MOUSE_SGR,
+            MODE_CURSOR_BLINK, MODE_FOCUS_EVENTS, MODE_KITTY_ALL_KEYS, MODE_KITTY_ALTERNATE_KEYS,
+            MODE_KITTY_ASSOCIATED_TEXT, MODE_KITTY_DISAMBIGUATE, MODE_KITTY_EVENT_TYPES,
+            MODE_MOUSE_CLICK, MODE_MOUSE_DRAG, MODE_MOUSE_MOTION, MODE_MOUSE_SGR,
         };
         let mode = self.term.mode();
         [
@@ -302,6 +305,11 @@ impl Term for AlacrittyTerm {
             (TermMode::FOCUS_IN_OUT, MODE_FOCUS_EVENTS),
             (TermMode::APP_KEYPAD, MODE_APP_KEYPAD),
             (TermMode::ALTERNATE_SCROLL, MODE_ALTERNATE_SCROLL),
+            (TermMode::DISAMBIGUATE_ESC_CODES, MODE_KITTY_DISAMBIGUATE),
+            (TermMode::REPORT_EVENT_TYPES, MODE_KITTY_EVENT_TYPES),
+            (TermMode::REPORT_ALTERNATE_KEYS, MODE_KITTY_ALTERNATE_KEYS),
+            (TermMode::REPORT_ALL_KEYS_AS_ESC, MODE_KITTY_ALL_KEYS),
+            (TermMode::REPORT_ASSOCIATED_TEXT, MODE_KITTY_ASSOCIATED_TEXT),
         ]
         .iter()
         .filter(|(flag, _)| mode.contains(*flag))

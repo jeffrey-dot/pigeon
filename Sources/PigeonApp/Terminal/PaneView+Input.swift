@@ -31,8 +31,20 @@ extension PaneView: NSTextInputClient {
     // MARK: NSTextInputClient
 
     func insertText(_ string: Any, replacementRange: NSRange) {
+        let composed = preedit != nil
         setPreedit(nil)
-        sendText(Self.plainString(string))
+        let text = Self.plainString(string)
+        // A key that typed its own character (no composition) is still a key event for a
+        // program that asked for every key as an escape code; composed text stays text.
+        if !composed, let event = pendingKeyEvent, var stroke = KeyStroke(event),
+           KittyKeyEncoder.Flags(modes: modes).contains(.allKeys) {
+            stroke.text = text
+            if let bytes = KeyEncoder.encode(stroke, modes: modes) {
+                sendBytes(bytes)
+                return
+            }
+        }
+        sendText(text)
     }
 
     func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
@@ -92,6 +104,24 @@ extension PaneView: NSTextInputClient {
               let bytes = KeyEncoder.encode(stroke, modes: modes)
         else { return }
         sendBytes(bytes)
+    }
+
+    /// Releases only matter to a program that asked for kitty event types (flag 2).
+    override func keyUp(with event: NSEvent) {
+        guard KittyKeyEncoder.Flags(modes: modes).contains(.eventTypes), !hasMarkedText(),
+              let stroke = KeyStroke(event),
+              let bytes = KeyEncoder.encode(stroke, modes: modes)
+        else { return super.keyUp(with: event) }
+        onInput?(bytes)
+    }
+
+    /// A modifier key alone: reported only under kitty's "all keys as escape codes" (flag 8).
+    override func flagsChanged(with event: NSEvent) {
+        guard KittyKeyEncoder.Flags(modes: modes).contains(.allKeys), !hasMarkedText(),
+              let stroke = KeyStroke(modifierEvent: event),
+              let bytes = KeyEncoder.encode(stroke, modes: modes)
+        else { return super.flagsChanged(with: event) }
+        onInput?(bytes)
     }
 
     func sendBytes(_ bytes: [UInt8]) {

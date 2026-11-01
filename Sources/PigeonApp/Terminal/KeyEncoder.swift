@@ -2,15 +2,28 @@ import Foundation
 
 /// Turns a key stroke into the bytes a terminal expects: xterm's encoding, including its
 /// modifier parameter (`CSI 1;5C` for Ctrl+→) and application cursor mode (DECCKM), which
-/// is what readline, vim and fish actually bind. The kitty keyboard protocol is later.
+/// is what readline, vim and fish actually bind. Once a program pushes kitty keyboard flags,
+/// `KittyKeyEncoder` takes over and falls back here only where that protocol keeps legacy bytes.
 public enum KeyEncoder {
     /// `modes`: the `TerminalModes` bits the program turned on. DECCKM (`?1h`) sends
     /// unmodified arrows, Home and End as `SS3` (`ESC O A`) instead of `CSI`; DECKPAM
     /// (`ESC =`) sends unmodified keypad keys as `SS3` too.
     public static func encode(_ stroke: KeyStroke, modes: UInt32 = 0) -> [UInt8]? {
         // Command chords belong to the app, not the shell.
-        if stroke.command { return nil }
+        if stroke.command, !stroke.isModifierKey { return nil }
         let appCursor = modes & TerminalModes.appCursor != 0
+
+        let kitty = KittyKeyEncoder.Flags(modes: modes)
+        if !kitty.isEmpty {
+            switch KittyKeyEncoder.encode(stroke, flags: kitty) {
+            case let .bytes(bytes): return bytes
+            case .none: return nil
+            case .legacy: break
+            }
+        }
+        // Legacy terminals only see presses; modifier keys alone type nothing.
+        if stroke.action == .release { return nil }
+        if stroke.isModifierKey { return nil }
 
         if modes & TerminalModes.appKeypad != 0, let sequence = applicationKeypad(stroke) {
             return sequence
@@ -153,7 +166,7 @@ public enum KeyEncoder {
             let codes = [15, 17, 18, 19, 20, 21, 23, 24]
             guard number >= 5, number <= 12 else { return nil }
             return tildeKey(codes[number - 5], stroke)
-        case .character:
+        case .character, .modifier:
             return nil
         }
     }
