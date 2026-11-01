@@ -77,7 +77,9 @@ pub fn parse(mut args: impl Iterator<Item = String>) -> Result<Command, String> 
 /// - a host installed by the client (`~/.pigeon/server/<version>/pigeon-server`) uses
 ///   `~/.pigeon/state/pigeon.sock`. `$XDG_RUNTIME_DIR` is removed by systemd when the last
 ///   login session ends, which would orphan a host that is meant to outlive the ssh link;
-/// - otherwise `$XDG_RUNTIME_DIR/pigeon.sock`, else `/tmp/pigeon-<uid>.sock`.
+/// - otherwise `$XDG_RUNTIME_DIR/pigeon.sock`, else `/tmp/pigeon-<uid>/pigeon.sock` (a
+///   private directory like tmux's `/tmp/tmux-<uid>/`, so nobody else can plant a socket
+///   at the path before us).
 fn default_socket_path() -> PathBuf {
     let executable = std::env::current_exe().ok();
     let home = std::env::var_os("HOME").map(PathBuf::from);
@@ -96,21 +98,12 @@ pub fn state_dir_for(executable: Option<&Path>, home: Option<&Path>) -> Option<P
         .then(|| root.join("state"))
 }
 
-/// shortcut: the uid comes from `id -u` because `getuid` needs `unsafe`, which
-/// is banned outside `ffi.rs`; swap to a safe syscall wrapper when one is added.
 fn runtime_socket_path() -> PathBuf {
     if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
         return PathBuf::from(dir).join("pigeon.sock");
     }
-    let uid = std::process::Command::new("id")
-        .arg("-u")
-        .output()
-        .ok()
-        .and_then(|out| String::from_utf8(out.stdout).ok())
-        .map(|text| text.trim().to_owned())
-        .filter(|text| !text.is_empty())
-        .unwrap_or_else(|| "0".to_owned());
-    PathBuf::from(format!("/tmp/pigeon-{uid}.sock"))
+    let uid = crate::socket_trust::current_uid();
+    PathBuf::from(format!("/tmp/pigeon-{uid}/pigeon.sock"))
 }
 
 #[cfg(test)]

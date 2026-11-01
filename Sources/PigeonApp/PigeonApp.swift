@@ -683,10 +683,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private static func defaultSocketPath() -> String {
-        if let runtime = ProcessInfo.processInfo.environment["XDG_RUNTIME_DIR"] {
-            return runtime + "/pigeon.sock"
-        }
-        return "/tmp/pigeon-\(getuid()).sock"
+        SocketTrust.defaultPath(environment: ProcessInfo.processInfo.environment, uid: getuid())
     }
 
     // MARK: - host keys and sidebar ids

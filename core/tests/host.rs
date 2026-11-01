@@ -2359,6 +2359,41 @@ fn a_second_host_does_not_steal_a_live_socket() {
     );
 }
 
+/// A directory anyone can write to (and that is not sticky) lets another user swap the
+/// socket: the host refuses to serve there, and leaves a foreign file at its path alone.
+#[test]
+fn a_host_refuses_an_unsafe_socket_directory_or_a_non_socket_path() {
+    use std::os::unix::fs::PermissionsExt;
+    let _serial = one_at_a_time();
+    let dir = std::path::PathBuf::from(unique_socket()).with_extension("d");
+    std::fs::create_dir(&dir).expect("mkdir");
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).expect("chmod");
+    let run = |socket: &std::path::Path| {
+        Command::new(env!("CARGO_BIN_EXE_pigeon-server"))
+            .arg("--socket")
+            .arg(socket)
+            .args(["--shell", "/bin/sh"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("run pigeon-server")
+    };
+    let socket = dir.join("pigeon.sock");
+    assert!(!run(&socket).success(), "a world-writable directory");
+    assert!(!socket.exists());
+
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).expect("chmod");
+    std::fs::write(&socket, b"not a socket").expect("write");
+    assert!(!run(&socket).success(), "a regular file at the path");
+    assert_eq!(
+        std::fs::read(&socket).expect("still there"),
+        b"not a socket"
+    );
+    let _ = std::fs::remove_file(&socket);
+    let _ = std::fs::remove_file(socket.with_extension("lock"));
+    let _ = std::fs::remove_dir(&dir);
+}
+
 /// Hosts started at the same moment on a stale socket (a crash left it, two windows open at
 /// once) must not both take it over: exactly one serves, the others exit.
 #[test]

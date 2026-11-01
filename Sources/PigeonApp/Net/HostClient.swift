@@ -38,6 +38,12 @@ final class HostClient {
     var onClose: (() -> Void)?
 
     static func connect(path: String) throws -> HostClient {
+        let uid = getuid()
+        do {
+            try SocketTrust.checkPath(path, uid: uid)
+        } catch {
+            throw Failure.connect("\(error)")
+        }
         var address = sockaddr_un()
         address.sun_family = sa_family_t(AF_UNIX)
         let pathBytes = Array(path.utf8)
@@ -62,6 +68,13 @@ final class HostClient {
             let detail = String(cString: strerror(errno))
             Darwin.close(fd)
             throw Failure.connect(detail)
+        }
+        // The path may have been swapped between the check and `connect`: the peer decides.
+        do {
+            try SocketTrust.checkPeer(fd, uid: uid)
+        } catch {
+            Darwin.close(fd)
+            throw Failure.connect("\(error)")
         }
 
         return HostClient(read: fd, write: fd)
