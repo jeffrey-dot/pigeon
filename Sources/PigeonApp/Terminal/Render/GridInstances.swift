@@ -18,6 +18,7 @@ struct GridInstances {
     mutating func update(
         from frame: GridFrame,
         atlasGeneration generation: Int,
+        shape: RowInstances.Shaper? = nil,
         glyph: (GlyphKey) -> AtlasSlot?
     ) {
         let reshaped = frame.rows != rows.count || frame.cols != cols
@@ -33,7 +34,7 @@ struct GridInstances {
         }
         lastRebuilt = 0
         for row in 0..<frame.rows where reshaped || frame.dirty.contains(row) {
-            rows[row] = RowInstances.build(row: row, of: frame, glyph: glyph) { fg in
+            rows[row] = RowInstances.build(row: row, of: frame, glyph: glyph, shape: shape) { fg in
                 if let known = readable[fg] { return known }
                 let solved = frame.palette.readable(fg)
                 readable[fg] = solved
@@ -41,6 +42,7 @@ struct GridInstances {
             }
             lastRebuilt += 1
         }
+        if lastRebuilt > 0 { flatten() }
     }
 
     /// Forgets everything so the next update rebuilds every row (hidden pane, new atlas).
@@ -48,22 +50,29 @@ struct GridInstances {
         rows = []
         cols = 0
         readable = [:]
+        flatten()
     }
 
-    /// Background, decoration and overlay rectangles in draw order.
-    func rects(overlays: [RectInstance]) -> (backgrounds: [RectInstance], decorations: [RectInstance]) {
-        var backgrounds: [RectInstance] = []
-        var decorations: [RectInstance] = []
+    /// The rows' instances concatenated in draw order. Re-flattened only after an update that
+    /// rebuilt a row, into the same storage; a frame that only moves the cursor, blinks it or
+    /// changes the selection reuses them (and the GPU buffers holding them) untouched.
+    private(set) var backgrounds: [RectInstance] = []
+    private(set) var glyphs: [GlyphInstance] = []
+    private(set) var decorations: [RectInstance] = []
+    /// Bumped whenever the flattened lists change, so the renderer knows which of its
+    /// rotating GPU buffers already hold them.
+    private(set) var version = 0
+
+    private mutating func flatten() {
+        backgrounds.removeAll(keepingCapacity: true)
+        glyphs.removeAll(keepingCapacity: true)
+        decorations.removeAll(keepingCapacity: true)
         for row in rows {
             backgrounds.append(contentsOf: row.backgrounds)
+            glyphs.append(contentsOf: row.glyphs)
             decorations.append(contentsOf: row.decorations)
         }
-        decorations.append(contentsOf: overlays)
-        return (backgrounds, decorations)
-    }
-
-    func glyphs() -> [GlyphInstance] {
-        rows.flatMap(\.glyphs)
+        version += 1
     }
 
     /// The cursor in its shape: a translucent block, an underline or a bar, and an outline
@@ -91,9 +100,10 @@ struct GridInstances {
         }
         switch cursor.shape {
         case .block:
+            // Solid; the character under it is redrawn on top (`cursorGlyph`).
             return [RectInstance(
                 origin: SIMD2(left, top), size: SIMD2(width, height),
-                color: CellPalette.components(frame.palette.foreground, alpha: 0.35))]
+                color: CellPalette.components(frame.palette.foreground))]
         case .underline:
             return [RectInstance(origin: SIMD2(left, top + height - stroke), size: SIMD2(width, stroke), color: color)]
         case .bar:
@@ -101,13 +111,69 @@ struct GridInstances {
         }
     }
 
-    /// The cursor block and scroll thumb, which change without touching any row.
-    static func overlays(for frame: GridFrame) -> [RectInstance] {
-        var out: [RectInstance] = []
+    /// The character under a solid block cursor, drawn over the block in the cell's
+    /// background colour so it reads as inverted (as Ghostty does). Nil for other shapes,
+    /// the hollow outline, a blank cell, or a cell drawn as box-drawing rectangles.
+    static func cursorGlyph(for frame: GridFrame, glyph: (GlyphKey) -> AtlasSlot?) -> GlyphInstance? {
+        let cursor = frame.cursor
+        guard cursor.visible, !cursor.hollow, cursor.shape == .block,
+              cursor.x >= 0, cursor.y >= 0, cursor.x < frame.cols, cursor.y < frame.rows
+        else { return nil }
+        let index = cursor.y * frame.cols + cursor.x
+        guard index < frame.cells.count else { return nil }
+        let cell = frame.cells[index]
+        guard cell.width != 0, cell.codepoint > 32, cell.codepoint != 0x7f,
+              !BoxDrawing.handles(cell.codepoint)
+        else { return nil }
+        let metrics = frame.metrics
+        let key = GlyphKey(
+            codepoint: cell.codepoint,
+            bold: cell.attrs & CellAttrs.bold != 0,
+            italic: cell.attrs & CellAttrs.italic != 0,
+            span: UInt8(min(Int(cell.width), frame.cols - cursor.x)),
+            pixelHeight: UInt16(clamping: Int(metrics.cellHeight.rounded(.up))))
+        guard let slot = glyph(key) else { return nil }
+        let bg = frame.palette.colors(fg: cell.fg, bg: cell.bg, attrs: cell.attrs).bg
+        return GlyphInstance(
+            origin: SIMD2(
+                metrics.columnX(cursor.x) + Float(slot.bearingX),
+                metrics.rowY(cursor.y) + Float(slot.bearingY)),
+            size: SIMD2(Float(slot.width), Float(slot.height)),
+            uv: SIMD2(Float(slot.x), Float(slot.y)),
+            colored: slot.colored ? 1 : 0,
+            color: CellPalette.components(bg))
+    }
+
+    /// A box-drawing character under a solid block cursor, redrawn in the background colour
+    /// like `cursorGlyph` does for font glyphs.
+    private static func cursorStrokes(for frame: GridFrame) -> [RectInstance] {
+        let cursor = frame.cursor
+        guard !cursor.hollow, cursor.shape == .block else { return [] }
+        let index = cursor.y * frame.cols + cursor.x
+        guard index < frame.cells.count else { return [] }
+        let cell = frame.cells[index]
+        guard cell.width != 0 else { return [] }
+        let metrics = frame.metrics
+        let span = min(Int(cell.width), frame.cols - cursor.x)
+        let left = metrics.columnX(cursor.x)
+        let top = metrics.rowY(cursor.y)
+        let bg = frame.palette.colors(fg: cell.fg, bg: cell.bg, attrs: cell.attrs).bg
+        return BoxDrawing.rects(
+            cell.codepoint, origin: SIMD2(left, top),
+            size: SIMD2(metrics.columnX(cursor.x + span) - left, metrics.rowY(cursor.y + 1) - top),
+            thin: metrics.lineThickness, color: CellPalette.components(bg)) ?? []
+    }
+
+    /// The cursor, selection and scroll thumb, which change without touching any row. The
+    /// cursor comes apart from the rest: the glyph under a block cursor is drawn between them.
+    static func overlays(for frame: GridFrame) -> (cursor: [RectInstance], rest: [RectInstance]) {
+        var cursorRects: [RectInstance] = []
         let cursor = frame.cursor
         if cursor.visible, cursor.x >= 0, cursor.y >= 0, cursor.x < frame.cols, cursor.y < frame.rows {
-            out.append(contentsOf: cursorRects(for: frame))
+            cursorRects = Self.cursorRects(for: frame)
+            cursorRects.append(contentsOf: cursorStrokes(for: frame))
         }
+        var out: [RectInstance] = []
         let metrics = frame.metrics
         for span in frame.selection where span.row >= 0 && span.row < frame.rows {
             let first = max(span.first, 0)
@@ -123,6 +189,6 @@ struct GridInstances {
         if let thumb = frame.thumb {
             out.append(RectInstance(origin: thumb.origin, size: thumb.size, color: frame.thumbColor))
         }
-        return out
+        return (cursorRects, out)
     }
 }

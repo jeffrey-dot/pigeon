@@ -23,8 +23,7 @@ extension PaneView: NSTextInputClient {
     private func setPreedit(_ value: Preedit?) {
         guard value != preedit else { return }
         preedit = value
-        // The overlay may have moved off a row, which then has to be redrawn as the grid.
-        dirty.markAll()
+        // `postFrame` marks the row the overlay left and the row it now covers.
         screenChanged()
     }
 
@@ -48,8 +47,12 @@ extension PaneView: NSTextInputClient {
     }
 
     func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
-        let text = Self.plainString(string)
-        setPreedit(text.isEmpty ? nil : Preedit(text: text, caret: selectedRange.location))
+        // The replacement range is within the composition; the grid is not a text store the
+        // input method can edit, so outside a composition it means "replace all of it".
+        let (text, offset) = Preedit.replacement(
+            replacementRange, in: preedit?.text, with: Self.plainString(string))
+        let caret = selectedRange.location == NSNotFound ? text.utf16.count : offset + selectedRange.location
+        setPreedit(text.isEmpty ? nil : Preedit(text: text, caret: min(caret, text.utf16.count)))
     }
 
     /// AppKit asks to finish composition (focus change, click): keep what was typed.
@@ -80,7 +83,7 @@ extension PaneView: NSTextInputClient {
 
     /// The candidate window opens under the cursor cell (or the composing caret).
     func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
-        let cell = CoreTextRenderer.cellSize()
+        let cell = cellSize
         var column = cursor.x
         var row = cursor.y
         if let place = preedit?.placement(cursor: cursor, cols: cols, rows: rows) {

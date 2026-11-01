@@ -1,3 +1,5 @@
+import Foundation
+
 /// Text an input method is still composing (pinyin before a candidate is picked, a dead key
 /// before its vowel). It is drawn over the grid at the cursor, underlined, and never reaches
 /// the host until the input method commits it. Pure, so placement is unit-tested.
@@ -48,6 +50,41 @@ struct Preedit: Equatable {
         return Placement(
             row: row, column: column, cells: cells,
             caretColumn: min(column + caretAt, cols - 1))
+    }
+
+    /// The rows whose drawing differs when the overlay moves from `previous` to `current`:
+    /// the row it left (back to the grid) and the row it now covers. Out-of-grid rows (a
+    /// resize shrank the grid since) are dropped.
+    static func rowsToRedraw(previous: Int?, current: Int?, rows: Int) -> [Int] {
+        var out: [Int] = []
+        for row in [previous, current].compactMap({ $0 }) where row >= 0 && row < rows {
+            if !out.contains(row) { out.append(row) }
+        }
+        return out
+    }
+
+    /// The composition after the input method replaces `range` (UTF-16 units) of the text
+    /// being composed with `text`. AppKit sends `NSNotFound` for "replace the whole marked
+    /// text", which is also what a range outside the composition falls back to.
+    static func replacing(
+        _ range: NSRange, in current: String?, with text: String
+    ) -> String {
+        replacement(range, in: current, with: text).text
+    }
+
+    /// `replacing`, plus where `text` starts in the result (UTF-16 units): the input method's
+    /// selected range is relative to `text`, so the caret is shifted by this much.
+    static func replacement(
+        _ range: NSRange, in current: String?, with text: String
+    ) -> (text: String, offset: Int) {
+        guard let current, range.location != NSNotFound else { return (text, 0) }
+        let units = Array(current.utf16)
+        guard range.location >= 0, range.length >= 0, range.location + range.length <= units.count
+        else { return (text, 0) }
+        let head = String(utf16CodeUnits: Array(units[..<range.location]), count: range.location)
+        let tailStart = range.location + range.length
+        let tail = String(utf16CodeUnits: Array(units[tailStart...]), count: units.count - tailStart)
+        return (head + text + tail, range.location)
     }
 
     /// `cells` with the overlay written in, and the cursor moved to the composing caret.

@@ -39,6 +39,38 @@ final class InputMethodTests: XCTestCase {
         XCTAssertEqual(place.cells.last?.width, 0)
     }
 
+    /// Every preedit change used to invalidate the whole grid; only the row the overlay left
+    /// and the row it covers need redrawing.
+    func testAPreeditChangeRedrawsOnlyTheRowsItTouches() {
+        XCTAssertEqual(Preedit.rowsToRedraw(previous: nil, current: 3, rows: 10), [3])
+        XCTAssertEqual(Preedit.rowsToRedraw(previous: 3, current: 3, rows: 10), [3])
+        XCTAssertEqual(Preedit.rowsToRedraw(previous: 3, current: 5, rows: 10), [3, 5])
+        XCTAssertEqual(Preedit.rowsToRedraw(previous: 3, current: nil, rows: 10), [3])
+        XCTAssertEqual(Preedit.rowsToRedraw(previous: nil, current: nil, rows: 10), [])
+        XCTAssertEqual(Preedit.rowsToRedraw(previous: 12, current: 2, rows: 10), [2], "a row lost to a resize")
+    }
+
+    @MainActor
+    func testAPreeditChangeLeavesTheOtherRowsClean() {
+        let view = PaneView(frame: .zero)
+        view.dirty = .none
+        view.setMarkedText("ni", selectedRange: NSRange(location: 2, length: 0),
+                           replacementRange: NSRange(location: NSNotFound, length: 0))
+        XCTAssertFalse(view.dirty.all, "the whole grid is not invalidated")
+    }
+
+    /// `setMarkedText`'s replacement range used to be ignored, so an input method that
+    /// rewrites part of its composition (reconversion, a corrected syllable) lost the rest.
+    func testAReplacementRangeEditsOnlyThatPartOfTheComposition() {
+        let whole = NSRange(location: NSNotFound, length: 0)
+        XCTAssertEqual(Preedit.replacing(whole, in: "nihao", with: "ni"), "ni")
+        XCTAssertEqual(Preedit.replacing(NSRange(location: 2, length: 3), in: "nihao", with: "好"), "ni好")
+        XCTAssertEqual(Preedit.replacing(NSRange(location: 0, length: 0), in: "中", with: "a"), "a中")
+        XCTAssertEqual(Preedit.replacing(NSRange(location: 1, length: 0), in: nil, with: "x"), "x")
+        // A range past the end of the composition is not trusted.
+        XCTAssertEqual(Preedit.replacing(NSRange(location: 4, length: 9), in: "ab", with: "z"), "z")
+    }
+
     func testMalformedGeometryDrawsNothing() {
         let preedit = Preedit(text: "ni", caret: 2)
         XCTAssertNil(preedit.placement(cursor: .init(x: 0, y: 0, visible: true), cols: 0, rows: 0))

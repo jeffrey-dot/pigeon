@@ -1,12 +1,12 @@
 /// Shelf packing for the glyph texture. Pure bookkeeping: rasterizing and uploading belong
 /// to the backend, so the packing rules are testable without a GPU.
 ///
-/// Terminal glyphs are all one cell tall, so shelves waste almost nothing. When the texture
-/// is full the whole atlas is dropped and rebuilt from what is on screen (`generation` bumps),
-/// which is cheaper to get right than per-glyph eviction and only happens on huge glyph sets.
+/// Terminal glyphs are all about one cell tall, so shelves waste little. A full texture first
+/// grows (`grow`); only one already at the device limit is dropped and rebuilt from what is
+/// on screen (`generation` bumps), which is cheaper to get right than per-glyph eviction.
 struct GlyphAtlas {
-    let width: Int
-    let height: Int
+    private(set) var width: Int
+    private(set) var height: Int
     /// Texels kept free around each glyph so linear sampling never bleeds a neighbour in.
     static let padding = 1
 
@@ -42,6 +42,19 @@ struct GlyphAtlas {
         shelfHeight = max(shelfHeight, paddedHeight)
         slots[key] = slot
         return slot
+    }
+
+    /// Enlarges the texture to `width`×`height` (never shrinks). Every slot keeps its texels,
+    /// so nothing handed out before is invalidated; the open shelf simply gets longer.
+    mutating func grow(width newWidth: Int, height newHeight: Int) {
+        width = max(width, newWidth)
+        height = max(height, newHeight)
+    }
+
+    /// Replaces the placement data of an allocated slot (its bearings), keeping its texels.
+    mutating func update(_ key: GlyphKey, _ slot: AtlasSlot) {
+        guard slots[key] != nil else { return }
+        slots[key] = slot
     }
 
     /// Forgets every glyph; slots handed out before this are no longer valid.

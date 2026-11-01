@@ -57,6 +57,52 @@ final class MetalRendererTests: XCTestCase {
         XCTAssertEqual(atlas.allocate(key(66), width: 18, height: 18, colored: false)?.x, 0)
     }
 
+    func testAGrownAtlasKeepsItsSlotsAndTakesMore() {
+        var atlas = GlyphAtlas(width: 20, height: 20)
+        let first = atlas.allocate(key(65), width: 18, height: 18, colored: false)
+        XCTAssertNil(atlas.allocate(key(66), width: 18, height: 18, colored: false))
+        atlas.grow(width: 40, height: 40)
+        XCTAssertEqual(atlas.slot(for: key(65)), first, "growing moves nothing")
+        XCTAssertEqual(atlas.generation, 0)
+        XCTAssertNotNil(atlas.allocate(key(66), width: 18, height: 18, colored: false))
+    }
+
+    /// A full atlas used to be reset, re-rasterizing the whole screen; it now doubles first,
+    /// and panes on the same display share one cache.
+    func testTheGlyphCacheGrowsBeforeResettingAndIsShared() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else { throw XCTSkip("no Metal device") }
+        let metrics = CoreTextRenderer.gridMetrics(scale: 2)
+        let cache = try XCTUnwrap(GlyphCache(device: device, side: 64, maxSide: 256))
+        let pixelHeight = UInt16(metrics.cellHeight)
+        var slots: [GlyphKey: AtlasSlot] = [:]
+        for codepoint in UInt32(0x41)...0x5A {
+            let glyph = GlyphKey(codepoint: codepoint, bold: false, italic: false, span: 1, pixelHeight: pixelHeight)
+            slots[glyph] = cache.slot(for: glyph, metrics: metrics)
+        }
+        XCTAssertEqual(slots.values.count, 26)
+        XCTAssertGreaterThan(cache.textures().mask.width, 64, "doubled instead of reset")
+        XCTAssertEqual(cache.generation, 0)
+        XCTAssertFalse(cache.resetIfOverflowed())
+        for (glyph, slot) in slots {
+            XCTAssertEqual(cache.slot(for: glyph, metrics: metrics), slot, "slots survive growth")
+        }
+        // Past the cap, a reset is the last resort.
+        let before = cache.textures().mask
+        for codepoint in UInt32(0x4E00)...0x4F00 {
+            _ = cache.slot(for: GlyphKey(
+                codepoint: codepoint, bold: false, italic: false, span: 2, pixelHeight: pixelHeight),
+                metrics: metrics)
+        }
+        XCTAssertTrue(cache.resetIfOverflowed())
+        XCTAssertFalse(cache.textures().mask === before, "a reset never rewrites a texture in use")
+        XCTAssertEqual(cache.generation, 1)
+
+        let a = GlyphCache.shared(device: device, scale: 2)
+        let b = GlyphCache.shared(device: device, scale: 2)
+        XCTAssertTrue(a != nil && a === b, "one cache per display scale")
+        XCTAssertFalse(a === GlyphCache.shared(device: device, scale: 1))
+    }
+
     // MARK: - dirty rows
 
     func testDirtyRowsMergeWithoutLosingAnything() {
@@ -85,6 +131,27 @@ final class MetalRendererTests: XCTestCase {
         XCTAssertEqual(taken?.dirty.contains(0), true)
         XCTAssertEqual(taken?.dirty.contains(1), true)
         XCTAssertNil(mailbox.poll())
+    }
+
+    /// Only a post into an empty mailbox wakes the render thread; later ones ride along.
+    func testOnlyThePostIntoAnEmptyMailboxAsksForAWakeup() {
+        let mailbox = FrameMailbox()
+        XCTAssertTrue(mailbox.post(frame("ab", cols: 1)))
+        XCTAssertFalse(mailbox.post(frame("cd", cols: 1)))
+        _ = mailbox.poll()
+        XCTAssertTrue(mailbox.post(frame("ef", cols: 1)))
+    }
+
+    /// Every delta used to post a frame at once, so the mailbox shared `cells` and the next
+    /// delta copied the whole grid. Changes now coalesce into one post per run-loop turn.
+    @MainActor
+    func testScreenChangesCoalesceIntoOnePostPerRunLoopTurn() {
+        let view = PaneView(frame: .zero)
+        view.screenChanged()
+        view.screenChanged()
+        XCTAssertTrue(view.postScheduled)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        XCTAssertFalse(view.postScheduled, "the scheduled post ran once and cleared the flag")
     }
 
     func testARestoredFrameNeverOverwritesANewerOne() {
@@ -123,6 +190,25 @@ final class MetalRendererTests: XCTestCase {
         XCTAssertEqual(grid.rows[1].glyphs.map(\.uv.x), [120, 121])
         grid.update(from: frame("abxy", cols: 2, dirty: .none), atlasGeneration: 1, glyph: slot)
         XCTAssertEqual(grid.lastRebuilt, 2, "an atlas reset invalidates every row's slots")
+    }
+
+    /// The flattened instance lists used to be rebuilt into fresh arrays every frame; a frame
+    /// that only moves or blinks the cursor must now leave them (and their version) alone.
+    func testACursorOnlyFrameReusesTheFlattenedInstances() {
+        var grid = GridInstances()
+        grid.update(from: frame("abcd", cols: 2), atlasGeneration: 0, glyph: slot)
+        XCTAssertEqual(grid.glyphs.count, 4)
+        let version = grid.version
+        var blink = frame("abcd", cols: 2, dirty: .none)
+        blink.cursor = PaneView.Cursor(x: 1, y: 1, visible: true)
+        grid.update(from: blink, atlasGeneration: 0, glyph: slot)
+        XCTAssertEqual(grid.lastRebuilt, 0)
+        XCTAssertEqual(grid.version, version, "nothing to re-flatten or re-upload")
+        var dirty = DirtyRows.none
+        dirty.mark(0)
+        grid.update(from: frame("xycd", cols: 2, dirty: dirty), atlasGeneration: 0, glyph: slot)
+        XCTAssertEqual(grid.version, version + 1)
+        XCTAssertEqual(grid.glyphs.map(\.uv.x), [120, 121, 99, 100])
     }
 
     func testBlanksDrawNothingAndThemeBackgroundsAreLeftToTheClearColour() {
@@ -194,6 +280,117 @@ final class MetalRendererTests: XCTestCase {
         stats.reportIfDue(now: 1_000_001_000)
         XCTAssertTrue(stats.cpu.isEmpty)
         XCTAssertTrue(stats.gpu.isEmpty)
+    }
+
+    // MARK: - glyph bounds
+
+    /// Whether any texel on the bitmap's outer border has ink: a glyph cut off by its bitmap.
+    private func touchesEdge(_ bitmap: CoreTextRenderer.GlyphBitmap) -> Bool {
+        let stride = bitmap.colored ? 4 : 1
+        func ink(_ x: Int, _ y: Int) -> Bool {
+            let base = (y * bitmap.width + x) * stride
+            return bitmap.colored ? bitmap.bytes[base + 3] > 0 : bitmap.bytes[base] > 0
+        }
+        for x in 0..<bitmap.width where ink(x, 0) || ink(x, bitmap.height - 1) { return true }
+        for y in 0..<bitmap.height where ink(0, y) || ink(bitmap.width - 1, y) { return true }
+        return false
+    }
+
+    private func edgeReport(_ bitmap: CoreTextRenderer.GlyphBitmap) -> String {
+        let s = bitmap.colored ? 4 : 1
+        func a(_ x: Int, _ y: Int) -> UInt8 { bitmap.bytes[(y * bitmap.width + x) * s + (s - 1)] }
+        let top = (0..<bitmap.width).map { a($0, 0) }.max() ?? 0
+        let bottom = (0..<bitmap.width).map { a($0, bitmap.height - 1) }.max() ?? 0
+        let l = (0..<bitmap.height).map { a(0, $0) }.max() ?? 0
+        let r = (0..<bitmap.height).map { a(bitmap.width - 1, $0) }.max() ?? 0
+        return "t\(top) b\(bottom) l\(l) r\(r)"
+    }
+
+    private func rasterized(_ codepoint: UInt32, italic: Bool = false, span: UInt8 = 1) throws
+        -> CoreTextRenderer.GlyphBitmap {
+        let metrics = CoreTextRenderer.gridMetrics(scale: 2)
+        return try XCTUnwrap(CoreTextRenderer.rasterize(
+            GlyphKey(codepoint: codepoint, bold: false, italic: italic, span: span,
+                     pixelHeight: UInt16(metrics.cellHeight)),
+            metrics: metrics))
+    }
+
+    /// Italic overhang, descenders and wide fallback glyphs used to be cropped to the cell.
+    func testGlyphBitmapsHoldTheWholeInk() throws {
+        for (codepoint, italic) in [(0x57, true), (0x66, true), (0x67, false), (0xC5, false)] {
+            let bitmap = try rasterized(UInt32(codepoint), italic: italic)
+            XCTAssertFalse(touchesEdge(bitmap), "U+\(String(codepoint, radix: 16)) is clipped")
+        }
+        let emoji = try rasterized(0x1F600, span: 1)
+        XCTAssertFalse(touchesEdge(emoji), "an emoji in one column is scaled, not cropped \(emoji.width)x\(emoji.height) \(emoji.bearingX),\(emoji.bearingY) \(edgeReport(emoji))")
+    }
+
+    /// A fallback glyph larger than its cells is scaled down to fit them (plus the 1px margin).
+    func testOversizedFallbackGlyphsAreScaledIntoTheirCells() throws {
+        let metrics = CoreTextRenderer.gridMetrics(scale: 2)
+        let emoji = try rasterized(0x1F600, span: 1)
+        XCTAssertLessThanOrEqual(Float(emoji.width), metrics.cellWidth + 2)
+        XCTAssertLessThanOrEqual(Float(emoji.height), metrics.cellHeight + 2)
+        XCTAssertGreaterThanOrEqual(emoji.bearingX, -1)
+        XCTAssertGreaterThanOrEqual(emoji.bearingY, -1)
+    }
+
+    func testAGlyphIsPlacedByItsBearings() {
+        var frame = frame("a", cols: 1)
+        frame.cells[0].codepoint = 0x61
+        let row = RowInstances.build(row: 0, of: frame, glyph: { _ in
+            AtlasSlot(x: 5, y: 6, width: 10, height: 12, colored: false, bearingX: -2, bearingY: 7)
+        }) { $0 }
+        XCTAssertEqual(row.glyphs.first?.origin, SIMD2(-2, 7))
+        XCTAssertEqual(row.glyphs.first?.size, SIMD2(10, 12))
+    }
+
+    // MARK: - ligatures
+
+    func testOnlyPunctuationRunsOfOneStyleAreOfferedForShaping() {
+        var asked: [String] = []
+        var cells = frame("a->b !==x", cols: 9).cells
+        cells[5].attrs = CellAttrs.bold   // "!" in bold splits "!==" into "!" and "=="
+        let shaped = RowInstances.ligatures(cells[...]) { text, _, _ in
+            asked.append(text)
+            return Array(repeating: 7, count: text.count)
+        }
+        XCTAssertEqual(asked, ["->", "=="])
+        XCTAssertEqual(shaped.keys.sorted(), [1, 2, 6, 7])
+    }
+
+    func testAShapedRunDrawsItsGlyphsAndSkipsCoveredCells() {
+        var keys: [GlyphKey] = []
+        let row = RowInstances.build(row: 0, of: frame("=>", cols: 2), glyph: { key in
+            keys.append(key)
+            return self.slot(key)
+        }, shape: { _, _, _ in [GlyphKey.noGlyph - 1, GlyphKey.noGlyph] }) { $0 }
+        XCTAssertEqual(keys.map(\.glyph), [GlyphKey.noGlyph - 1], "the covered cell draws nothing")
+        XCTAssertEqual(row.glyphs.count, 1)
+        // Without shaping (the setting off, or a font without ligatures) nothing changes.
+        keys = []
+        _ = RowInstances.build(row: 0, of: frame("=>", cols: 2), glyph: { key in
+            keys.append(key)
+            return self.slot(key)
+        }) { $0 }
+        XCTAssertEqual(keys.map(\.glyph), [0, 0])
+    }
+
+    func testShapingIsANoOpForFontsWithoutLigaturesAndRefusesNonASCII() {
+        XCTAssertNil(CoreTextRenderer.shapeLigatures("é=", bold: false, italic: false))
+        XCTAssertNil(CoreTextRenderer.shapeLigatures("=", bold: false, italic: false), "one cell")
+        XCTAssertNil(CoreTextRenderer.shapeLigatures("", bold: false, italic: false))
+    }
+
+    func testAProgrammingFontsLigatureIsShapedIntoOneCellPerCharacter() throws {
+        guard let jetbrains = NSFont(name: "JetBrainsMonoNF-Regular", size: 13)
+            ?? NSFont(name: "JetBrainsMono-Regular", size: 13)
+        else { throw XCTSkip("JetBrains Mono is not installed") }
+        let arrow = try XCTUnwrap(CoreTextRenderer.shape("->", in: jetbrains), "JetBrains Mono has a -> ligature")
+        XCTAssertEqual(arrow.count, 2, "one glyph per cell keeps the grid")
+        XCTAssertNil(CoreTextRenderer.shape("a,", in: jetbrains), "no ligature, no shaping")
+        let menlo = try XCTUnwrap(NSFont(name: "Menlo-Regular", size: 13))
+        XCTAssertNil(CoreTextRenderer.shape("->", in: menlo), "Menlo has no ligatures")
     }
 
     // MARK: - GPU smoke
