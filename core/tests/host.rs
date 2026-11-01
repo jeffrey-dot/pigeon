@@ -3021,3 +3021,34 @@ fn attach_after_exit_gets_the_final_output_and_the_exit_code() {
     assert!(matches!(exited, Message::PaneExited { code: 3, .. }));
     let _ = std::fs::remove_file(&pane);
 }
+
+/// DEC 2026: a program that begins a synchronized update and never ends it must not freeze
+/// the pane; the buffered output shows up after the timeout.
+#[test]
+fn an_unterminated_synchronized_update_shows_after_the_timeout() {
+    let _serial = one_at_a_time();
+    let pane = script("#!/bin/sh\nprintf '\\033[?2026hstuck in sync'\nexec sleep 60\n");
+    let host = start_host_with(pane.to_str().expect("utf8"));
+    let mut client = Client::connect(&host.socket);
+    hello(&mut client);
+    let pane_id = attach_first(&mut client);
+    let started = Instant::now();
+    let found = loop {
+        client.send(&Message::Attach {
+            id: 3,
+            pane_id,
+            size_policy: None,
+            history: Some(false),
+            since: None,
+        });
+        if screen_text(&snapshot(&mut client)).contains("stuck in sync") {
+            break true;
+        }
+        if started.elapsed() > Duration::from_secs(5) {
+            break false;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    assert!(found, "the synchronized update never timed out");
+    let _ = std::fs::remove_file(&pane);
+}

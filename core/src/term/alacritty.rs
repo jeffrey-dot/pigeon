@@ -15,6 +15,7 @@ use alacritty_terminal::term::color::Colors;
 use alacritty_terminal::term::{Config, Term as VtTerm, TermDamage, TermMode};
 use alacritty_terminal::vte::ansi::{Color, CursorShape, NamedColor, Processor, Rgb};
 
+use super::sync_timeout::SyncTimeout;
 use super::{
     Cell, Cursor, Snapshot, Term, ATTR_BOLD, ATTR_DIM, ATTR_ITALIC, ATTR_REVERSE,
     ATTR_STRIKETHROUGH, ATTR_UNDERLINE,
@@ -110,7 +111,7 @@ impl EventListener for ReplySink {
 /// One pane's terminal state.
 pub struct AlacrittyTerm {
     term: VtTerm<ReplySink>,
-    parser: Processor,
+    parser: Processor<SyncTimeout>,
     replies: Arc<Mutex<Vec<u8>>>,
     size: Arc<Mutex<GridSize>>,
     title: Arc<Mutex<Option<String>>>,
@@ -140,7 +141,7 @@ impl AlacrittyTerm {
         };
         Self {
             term: VtTerm::new(config, &size, sink),
-            parser: Processor::new(),
+            parser: Processor::<SyncTimeout>::new(),
             replies,
             size: size_cell,
             title,
@@ -221,6 +222,14 @@ impl AlacrittyTerm {
 impl Term for AlacrittyTerm {
     fn feed(&mut self, bytes: &[u8]) {
         self.parser.advance(&mut self.term, bytes);
+    }
+
+    fn sync_deadline(&self) -> Option<std::time::Instant> {
+        self.parser.sync_timeout().deadline()
+    }
+
+    fn flush_sync(&mut self) {
+        self.parser.stop_sync(&mut self.term);
     }
 
     fn resize(&mut self, cols: u16, rows: u16) {

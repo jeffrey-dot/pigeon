@@ -163,7 +163,12 @@ impl PaneActor {
         let mut reaped: Option<(i32, Instant)> = None;
         let mut announced = false;
         loop {
+            let sync_deadline = self.pane.sync_deadline().map(Instant::from_std);
             tokio::select! {
+                _ = sleep_until(sync_deadline.unwrap_or_else(Instant::now)), if sync_deadline.is_some() => {
+                    self.pane.flush_sync();
+                    self.after_feed().await;
+                }
                 _ = sleep_until(self.last_flush + FRAME), if self.dirty => {
                     self.flush_now();
                 }
@@ -273,8 +278,13 @@ impl PaneActor {
     }
 
     async fn output(&mut self, chunk: &[u8]) {
-        let pane_id = self.pane.pane_id;
         self.pane.feed(chunk);
+        self.after_feed().await;
+    }
+
+    /// What follows any change to the terminal: metadata, status, query answers, a frame.
+    async fn after_feed(&mut self) {
+        let pane_id = self.pane.pane_id;
         let cwd = self.pane.cwd().map(str::to_owned);
         let title = self.pane.title();
         if cwd.is_some() || title.is_some() {

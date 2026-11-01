@@ -6,6 +6,7 @@
 
 pub mod alacritty;
 pub mod frozen;
+pub mod sync_timeout;
 
 /// Attribute bits, mirrored by `PG_ATTR_*` in the C ABI and by the protocol's
 /// `cell[1]`.
@@ -239,6 +240,15 @@ pub trait Term {
     fn modes(&self) -> u32 {
         0
     }
+
+    /// When an open synchronized update (DEC 2026) must be shown even without its end
+    /// marker; `None` when no update is open. The driver calls [`Term::flush_sync`] then.
+    fn sync_deadline(&self) -> Option<std::time::Instant> {
+        None
+    }
+
+    /// Applies whatever an open synchronized update has buffered and ends it.
+    fn flush_sync(&mut self) {}
 }
 
 /// Arrow keys send `ESC O A` instead of `ESC [ A` (DECCKM, `?1`).
