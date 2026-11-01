@@ -93,3 +93,43 @@ final class KeyEncoderModeTests: XCTestCase {
         XCTAssertEqual(KeyEncoder.encode(KeyStroke(key: .backspace, option: true)), [0x1b, 0x7f])
     }
 }
+
+/// Ctrl chords on layouts whose letters are not ASCII (Russian, Greek, Hebrew…).
+final class KeyEncoderLayoutTests: XCTestCase {
+    func testControlOnACyrillicLetterUsesTheASCIILayoutKey() {
+        let stroke = KeyStroke(key: .character("с"), control: true, base: "c")
+        XCTAssertEqual(KeyEncoder.encode(stroke), [0x03])
+        let meta = KeyStroke(key: .character("с"), control: true, option: true, base: "c")
+        XCTAssertEqual(KeyEncoder.encode(meta), [0x1b, 0x03])
+    }
+
+    func testWithoutControlTheLayoutCharacterIsTyped() {
+        let stroke = KeyStroke(key: .character("с"), base: "c")
+        XCTAssertEqual(KeyEncoder.encode(stroke), Array("с".utf8))
+    }
+
+    /// Edge: no ASCII-layout key known (translation failed) → the character itself, never
+    /// a made-up control byte.
+    func testControlWithoutABaseKeyFallsBackToTheCharacter() {
+        let stroke = KeyStroke(key: .character("с"), control: true)
+        XCTAssertEqual(KeyEncoder.encode(stroke), Array("с".utf8))
+    }
+
+    /// The real layout lookup: whatever ASCII layout the machine has, key code 8 (the
+    /// physical C key) types an ASCII letter.
+    func testTheASCIILayoutTranslatesAPhysicalLetterKey() throws {
+        let character = try XCTUnwrap(KeyStroke.asciiCharacter(keyCode: 8))
+        XCTAssertNotNil(character.asciiValue)
+        XCTAssertTrue(character.isLetter)
+    }
+
+    func testARussianControlEventCarriesTheBaseKey() throws {
+        let event = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: .control, timestamp: 0,
+            windowNumber: 0, context: nil, characters: "с", charactersIgnoringModifiers: "с",
+            isARepeat: false, keyCode: 8))
+        let stroke = try XCTUnwrap(KeyStroke(event))
+        XCTAssertEqual(stroke.key, .character("с"))
+        XCTAssertNotNil(stroke.base)
+    }
+}

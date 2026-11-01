@@ -1,47 +1,5 @@
 import Foundation
 
-/// One key press, already decoded from AppKit. Pure data so it can be tested
-/// without a window server.
-public struct KeyStroke: Equatable {
-    public enum Key: Equatable {
-        case character(Character)
-        case enter
-        case tab
-        case backspace
-        case escape
-        case delete
-        case up
-        case down
-        case left
-        case right
-        case home
-        case end
-        case pageUp
-        case pageDown
-        case function(Int)
-    }
-
-    public var key: Key
-    public var control: Bool
-    public var option: Bool
-    public var shift: Bool
-    public var command: Bool
-
-    public init(
-        key: Key,
-        control: Bool = false,
-        option: Bool = false,
-        shift: Bool = false,
-        command: Bool = false
-    ) {
-        self.key = key
-        self.control = control
-        self.option = option
-        self.shift = shift
-        self.command = command
-    }
-}
-
 /// Turns a key stroke into the bytes a terminal expects: xterm's encoding, including its
 /// modifier parameter (`CSI 1;5C` for Ctrl+→) and application cursor mode (DECCKM), which
 /// is what readline, vim and fish actually bind. The kitty keyboard protocol is later.
@@ -56,7 +14,12 @@ public enum KeyEncoder {
             return sequence
         }
 
-        guard case let .character(character) = stroke.key else { return nil }
+        guard case var .character(character) = stroke.key else { return nil }
+
+        // Ctrl+С on a Russian layout means Ctrl+C: control bytes only exist for ASCII.
+        if stroke.control, character.asciiValue == nil, let base = stroke.base {
+            character = base
+        }
 
         if stroke.control, let byte = controlByte(character) {
             return stroke.option ? [0x1b, byte] : [byte]
