@@ -112,9 +112,8 @@ pigeon/
 是后续里程碑（M1/M3）的落点；M0 只建了 `Terminal/{PaneView,CoreTextRenderer,KeyEncoder}.swift`、
 `Net/{HostClient,Wire}.swift`、`Sidebar/{SidebarModel,Grouping}.swift`。
 
-后两个之前存在的 Swift 模块（`PigeonShared` / `PigeonHost`）已取消：协议与宿主现在只存在于 `core/src/proto/`
-与 `core/src/bin/pigeon-server/`。理由：宿主必须是 3–8MB 静态单文件（`docs/remote.md`），Swift 运行时做不到；
-而协议只留一处实现，客户端通过 C ABI 编解码（见 `docs/protocol.md` §9）。
+协议与宿主只存在于 `core/src/proto/` 与 `core/src/bin/pigeon-server/`，没有 Swift 版：宿主必须是 3–8MB
+静态单文件（`docs/remote.md`），Swift 运行时做不到；协议只留一处实现，客户端通过 C ABI 编解码（见 `docs/protocol.md` §9）。
 
 ### 新增代码放哪里（判定表）
 

@@ -1,10 +1,7 @@
 # pigeon 开发计划（原生终端 + 隐形后台会话进程）
 
-> 2026-10-27 改版。上一版是「fork Kitty + 用 tmux 承载 pane」；实测后放弃：
-> Kitty 的界面是 C/OpenGL 画的固定控件，做不出原生侧栏；tmux 又会把它不认识的 OSC 7501 丢掉，
-> 状态还得靠旁路 client 抢。结论：**自己做终端 + 自己做最小 multiplexer**，参考成熟项目而不是 fork。
->
-> 历史与证据：`~/dev/gmux/docs/tmux-integration.md`（tmux 交互与配置影响）、`~/dev/gmux/docs/kitty-fork-status.md`（fork 阶段实测）。
+> **自己做终端 + 自己做最小 multiplexer**，参考成熟项目而不是 fork：fork 来的终端界面做不出原生侧栏，
+> tmux 会丢掉它不认识的 OSC 7501。
 
 ## 1. 产品范围
 
