@@ -68,7 +68,7 @@ jobs:
           echo "pigeon-server ($triple): $size bytes"
           test "$size" -le 8388608
           case "$triple" in
-            *-linux-musl*) file "$bin" | tee /dev/stderr | grep -q "statically linked" ;;
+            *-linux-musl*) file "$bin" | tee /dev/stderr | grep -qE "statically linked|static-pie linked" ;;
           esac
           mkdir -p dist
           gzip -9 -n -c "$bin" > "dist/pigeon-server-$triple.gz"
