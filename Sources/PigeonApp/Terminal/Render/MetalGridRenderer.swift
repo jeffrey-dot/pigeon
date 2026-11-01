@@ -35,7 +35,9 @@ final class MetalGridRenderer: @unchecked Sendable {
     private var linkDelegate: AnyObject?
 
     // Render-thread state.
+    /// Shared with every pane on a display of the same scale (`GlyphCache.shared`).
     private var glyphs: GlyphCache?
+    private var glyphsScale: Float = 0
     private var instances = GridInstances()
     private var buffers: [[MTLBuffer?]] = Array(
         repeating: [nil, nil, nil], count: MetalGridRenderer.inFlight)
@@ -191,19 +193,27 @@ final class MetalGridRenderer: @unchecked Sendable {
                 return
             }
         }
-        if glyphs == nil { glyphs = GlyphCache(device: device) }
+        if glyphsScale != frame.metrics.scale {
+            // Moved to a display of another scale: that display's panes share another cache.
+            glyphs = GlyphCache.shared(device: device, scale: frame.metrics.scale)
+            glyphsScale = frame.metrics.scale
+        }
         guard let glyphs else { return }
 
         let start = Self.debug || FrameStats.enabled ? DispatchTime.now().uptimeNanoseconds : 0
-        instances.update(from: frame, atlasGeneration: glyphs.generation) { key in
-            glyphs.slot(for: key, metrics: frame.metrics)
-        }
-        // A frame that filled the atlas would draw with missing glyphs: start the atlas over
-        // and rebuild every row once against the empty one.
-        if glyphs.resetIfOverflowed() {
-            instances.update(from: frame, atlasGeneration: glyphs.generation) { key in
+        var atlas = glyphs.textures()
+        // Two passes at most: a frame that filled the atlas at its cap would draw with missing
+        // glyphs, so the atlas starts over and every row is rebuilt once against the empty one.
+        // The same rebuild covers another pane's thread resetting the shared atlas mid-frame.
+        for _ in 0..<2 {
+            instances.update(from: frame, atlasGeneration: atlas.generation) { key in
                 glyphs.slot(for: key, metrics: frame.metrics)
             }
+            _ = glyphs.resetIfOverflowed()
+            // Read after building: a texture that grew meanwhile holds every slot used here.
+            let built = atlas.generation
+            atlas = glyphs.textures()
+            if atlas.generation == built { break }
         }
 
         slots.wait()
@@ -236,8 +246,8 @@ final class MetalGridRenderer: @unchecked Sendable {
         encoder.setRenderPipelineState(rectPipeline)
         draw(backgrounds, buffer: 0, encoder: encoder)
         encoder.setRenderPipelineState(glyphPipeline)
-        encoder.setFragmentTexture(glyphs.mask, index: 0)
-        encoder.setFragmentTexture(glyphs.color, index: 1)
+        encoder.setFragmentTexture(atlas.mask, index: 0)
+        encoder.setFragmentTexture(atlas.color, index: 1)
         draw(glyphList, buffer: 1, encoder: encoder)
         encoder.setRenderPipelineState(rectPipeline)
         draw(decorations, buffer: 2, encoder: encoder)

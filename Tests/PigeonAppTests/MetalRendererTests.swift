@@ -57,6 +57,52 @@ final class MetalRendererTests: XCTestCase {
         XCTAssertEqual(atlas.allocate(key(66), width: 18, height: 18, colored: false)?.x, 0)
     }
 
+    func testAGrownAtlasKeepsItsSlotsAndTakesMore() {
+        var atlas = GlyphAtlas(width: 20, height: 20)
+        let first = atlas.allocate(key(65), width: 18, height: 18, colored: false)
+        XCTAssertNil(atlas.allocate(key(66), width: 18, height: 18, colored: false))
+        atlas.grow(width: 40, height: 40)
+        XCTAssertEqual(atlas.slot(for: key(65)), first, "growing moves nothing")
+        XCTAssertEqual(atlas.generation, 0)
+        XCTAssertNotNil(atlas.allocate(key(66), width: 18, height: 18, colored: false))
+    }
+
+    /// A full atlas used to be reset, re-rasterizing the whole screen; it now doubles first,
+    /// and panes on the same display share one cache.
+    func testTheGlyphCacheGrowsBeforeResettingAndIsShared() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else { throw XCTSkip("no Metal device") }
+        let metrics = CoreTextRenderer.gridMetrics(scale: 2)
+        let cache = try XCTUnwrap(GlyphCache(device: device, side: 64, maxSide: 256))
+        let pixelHeight = UInt16(metrics.cellHeight)
+        var slots: [GlyphKey: AtlasSlot] = [:]
+        for codepoint in UInt32(0x41)...0x5A {
+            let glyph = GlyphKey(codepoint: codepoint, bold: false, italic: false, span: 1, pixelHeight: pixelHeight)
+            slots[glyph] = cache.slot(for: glyph, metrics: metrics)
+        }
+        XCTAssertEqual(slots.values.count, 26)
+        XCTAssertGreaterThan(cache.textures().mask.width, 64, "doubled instead of reset")
+        XCTAssertEqual(cache.generation, 0)
+        XCTAssertFalse(cache.resetIfOverflowed())
+        for (glyph, slot) in slots {
+            XCTAssertEqual(cache.slot(for: glyph, metrics: metrics), slot, "slots survive growth")
+        }
+        // Past the cap, a reset is the last resort.
+        let before = cache.textures().mask
+        for codepoint in UInt32(0x4E00)...0x4F00 {
+            _ = cache.slot(for: GlyphKey(
+                codepoint: codepoint, bold: false, italic: false, span: 2, pixelHeight: pixelHeight),
+                metrics: metrics)
+        }
+        XCTAssertTrue(cache.resetIfOverflowed())
+        XCTAssertFalse(cache.textures().mask === before, "a reset never rewrites a texture in use")
+        XCTAssertEqual(cache.generation, 1)
+
+        let a = GlyphCache.shared(device: device, scale: 2)
+        let b = GlyphCache.shared(device: device, scale: 2)
+        XCTAssertTrue(a != nil && a === b, "one cache per display scale")
+        XCTAssertFalse(a === GlyphCache.shared(device: device, scale: 1))
+    }
+
     // MARK: - dirty rows
 
     func testDirtyRowsMergeWithoutLosingAnything() {
