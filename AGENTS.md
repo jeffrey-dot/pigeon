@@ -2,8 +2,8 @@
 
 给编码 agent 的工作说明。人看的部分在 `README.md`，产品/架构在设计文档里（见 §11）。
 **当前状态：M2 与 M4 已落地**——`core/`（VT / OSC 7501 / 协议 / 布局 / C ABI）、`pigeon-server`（多 pane、状态流、
-`--stdio`/`--proxy` 远端传输）、AppKit 客户端（分屏、滚动回看、zoom、侧栏、未读/needs-you、远端自动安装与三档对接）；
-输入法（`NSTextInputClient`，preedit 在客户端画，提交后才发给宿主）已接入。验收记录见 `docs/m2-checklist.md`、`docs/m3-checklist.md`、`docs/m4-checklist.md`。
+`--stdio`/`--proxy` 远端传输、退出的 pane 保留到用户关闭）、AppKit + Metal 客户端（分屏、滚动回看、zoom、侧栏、未读/needs-you、
+远端自动安装与三档对接、kitty 键盘协议、输入法、应用内更新）。验收记录见 `docs/m2-checklist.md`、`docs/m3-checklist.md`、`docs/m4-checklist.md`。
 
 ## 1. 项目是什么
 
@@ -29,8 +29,8 @@ cargo test  --manifest-path core/Cargo.toml    # 内核单测 + C ABI + 宿主�
 cargo run   --manifest-path core/Cargo.toml --bin pigeon-server   # 会话宿主（本机自动拉起；远端按需推送；手动跑用于调试）
 cargo build                     # 先建核心：客户端链接 core/target/*/libpigeon_core.a
 swift build                     # 客户端（macOS only）
-swift test                      # 客户端纯逻辑单测（SidebarModel / Grouping / KeyEncoder）
-# tools/vt-parity/run.sh        # VT 对账（M1 建；现在还只有 core/tests 的确定性用例）
+swift test                      # 客户端单测（纯逻辑 + 渲染/输入/网络的可测部分）
+tools/vt-parity/run.sh          # VT 对账（golden 文件在 tools/vt-parity/golden/）
 ```
 
 这些命令在对应模块落地前会失败——**先建模块，再加功能**，不要为了跑通而把逻辑塞进 `main.rs` 或 `PigeonApp.swift`。
@@ -56,7 +56,7 @@ Rust 客户端走 `pigeon_core::api`。客户端不认识 `core` 的内部类型
 可移植性标记：
 
 - `core/`（Rust）—— **portable**：只许 std + POSIX 绑定（`libc`/`nix`/`rustix`）+ VT/序列化依赖；
-  `unsafe` 只允许出现在 `core/src/ffi/`（FFI 边界）。
+  `unsafe` 只允许出现在 `core/src/ffi/`（FFI 边界），由编译器强制（见 §4）。
 - `include/pigeon_core.h` —— **生成物**：由 `cbindgen` 从 `core/src/ffi/mod.rs` 生成，**手改无效**（CI 会比对新旧输出）。
 - `Sources/PigeonCore/` —— **macOS only**：C 头的 module map + 类型映射，薄到没有语义。
 - `Sources/PigeonApp/` —— **macOS only**：AppKit 视图与 CoreText 渲染都在这里；不要往下泄漏。
@@ -69,13 +69,13 @@ pigeon/
 ├── AGENTS.md
 ├── Package.swift                 # targets: PigeonApp / PigeonCore / PigeonAppTests（macOS only）
 ├── docs/                         # plan.md, protocol.md, ui.md, 历史资料
-├── tools/vt-parity/              # M1：对账脚本与 golden 文件（不含产品代码）
+├── tools/                        # 对账（vt-parity/）、GUI 冒烟脚本、打包脚本（不含产品代码）
 ├── include/pigeon_core.h         # 生成物：cbindgen 从 core/src/ffi/mod.rs 输出，不许手改
 ├── core/                         # Rust 内核 + 会话宿主（crate + bin，平台无关）
 │   ├── Cargo.toml
 │   ├── cbindgen.toml             # 头文件生成配置（名字/前缀/文档注释）
 │   ├── src/
-│   │   ├── lib.rs                # 模块声明；unsafe 只允许出现在 ffi.rs
+│   │   ├── lib.rs                # 模块声明；只有 ffi 模块放行 unsafe_code
 │   │   ├── api/                  # 安全的 Rust 客户端 API（Rust 客户端唯一入口）
 │   │   ├── ffi/                  # extern "C" 导出（头文件的唯一来源；api 的薄包装）
 │   │   │   ├── mod.rs            # 生命周期 / pane / 快照 / 状态 / 布局
@@ -85,33 +85,30 @@ pigeon/
 │   │   ├── status/               # OSC 7501 解析与记录生命周期
 │   │   ├── session/              # session/window/pane 模型
 │   │   └── proto/                # 分帧 + CBOR 编解码（协议的唯一实现）
-│   ├── src/bin/pigeon-server/      # 会话宿主：cli / transport / client / dispatch / pane_actor（3–8MB 硬指标）
+│   ├── src/bin/pigeon-server/    # 会话宿主：cli / transport / socket_trust / client / dispatch / pane_actor（3–8MB 硬指标）
 │   └── tests/                    # abi（C 外形）+ api（Rust 外形）+ host（真实 PTY 端到端）
 └── Sources/
     ├── PigeonCore/               # C 头封装（module map + 类型映射，不实现语义）
     └── PigeonApp/                # macOS 客户端：只做 UI 与输入
-        ├── PigeonApp.swift       # @main，装配依赖
-        ├── Window/               # 窗口、标题栏、红绿灯、窗口级快捷键（M3 侧栏做完再拆）
+        ├── main.swift            # 入口：NSApplication + AppDelegate
+        ├── PigeonApp.swift       # AppDelegate：窗口、菜单、宿主连接与消息路由（超过 400 行，待拆）
         ├── Sidebar/
         │   ├── SidebarModel.swift      # 分组/排序/未读/计数（纯逻辑，可单测）
-        │   ├── SidebarViewController.swift   # M3
-        │   ├── SidebarRowView.swift    # 一行：名称 + 相对时间 + 状态图标（M3）
-        │   └── Grouping.swift          # 项目分组规则（git 根 / cwd 末级目录）
+        │   ├── Grouping.swift          # 项目分组规则（git 根 / cwd 末级目录）
+        │   ├── SessionReducer.swift    # 宿主消息 → 侧栏状态（纯逻辑）
+        │   ├── Sidebar*View*.swift     # 视图：列表、行、组头、状态图标
+        │   └── SidebarTheme.swift / SidebarMetrics.swift   # 色值与尺寸（规格见 docs/ui.md §7）
         ├── Terminal/
-        │   ├── PaneView.swift          # 终端视图容器（焦点、IME、鼠标）
-        │   ├── CoreTextRenderer.swift  # 唯一 import CoreText 的文件：字体度量 + Metal 用的字形光栅化
+        │   ├── PaneView*.swift         # 终端视图容器（焦点、IME、鼠标、选择）
+        │   ├── CoreTextRenderer.swift  # 唯一 import CoreText 的文件：字体度量、字形与整段光栅化
         │   ├── PaneView+Metal.swift    # 把格子交给渲染线程（唯一的网格渲染路径）
-        │   ├── Render/                 # GPU 渲染：图集、脏行、实例构建、Metal 线程与 shader
-        │   └── KeyEncoder.swift        # 按键 → 字节（kitty protocol / legacy）
-        ├── Update/               # 软件更新：检查 latest.json、验签、替换 Pigeon.app 并重启
-        └── Layout/               # M1 分屏
-            ├── SplitView.swift         # 把 PgRect 画成 AppKit 视图
-            └── Focus.swift             # 焦点与选择
+        │   ├── Render/                 # GPU 渲染：图集、脏行、实例构建、Metal 线程与 shader、程序绘制的线框/Powerline
+        │   ├── KeyEncoder.swift        # 按键 → 字节（legacy / xterm）
+        │   └── KittyKeyEncoder.swift   # 按键 → 字节（kitty keyboard protocol）
+        ├── Layout/               # 分屏：把 PgRect 画成视图，卡片与会话头部
+        ├── Net/                  # 宿主连接：HostClient（分帧走 C ABI）、socket 校验、远端安装与下载
+        └── Update/               # 软件更新：检查 latest.json、验签、替换 Pigeon.app 并重启
 ```
-
-`Window/`、`Layout/`、`SidebarViewController.swift`、`SidebarRowView.swift`
-是后续里程碑（M1/M3）的落点；M0 只建了 `Terminal/{PaneView,CoreTextRenderer,KeyEncoder}.swift`、
-`Net/{HostClient,Wire}.swift`、`Sidebar/{SidebarModel,Grouping}.swift`。
 
 协议与宿主只存在于 `core/src/proto/` 与 `core/src/bin/pigeon-server/`，没有 Swift 版：宿主必须是 3–8MB
 静态单文件（`docs/remote.md`），Swift 运行时做不到；协议只留一处实现，客户端通过 C ABI 编解码（见 `docs/protocol.md` §9）。
@@ -128,11 +125,12 @@ pigeon/
 | 渲染、字体、输入法 | `Sources/PigeonApp/Terminal/`，不往下漏 |
 | 一次性脚本 / 对账工具 | `tools/`，不放进 `Sources/` 或 `core/src/` |
 
-### 可移植性硬规则（CI 跑 fmt / clippy / test / tokio+portable-pty 引用检查 / `--lib --no-default-features` 构建 / 体积上限 / 头文件 diff；仍缺 `unsafe` 与平台 crate 的静态检查，见 `docs/plan.md` §11）
+### 可移植性硬规则（CI 跑 fmt / clippy（含 §4 的 lint）/ test / tokio+portable-pty 引用检查 / `--lib --no-default-features` 构建 / 体积上限 / 头文件 diff；平台 crate 还没有静态检查）
 
 - `core/` 里**不许**出现：平台专属 crate（`core-foundation`、`objc2`…）、`cfg(target_os = …)` 分支
  （PTY 与信号可以有一处，且必须两边都有实现）、直接操作窗口/字体/图形 API。
-- `core/src/` 里**不许**出现 `unsafe`（唯一例外：`ffi.rs` 的 `extern "C"` 边界）。
+- `core/src/` 里**不许**出现 `unsafe`（唯一例外：`ffi/` 的 `extern "C"` 边界）。`core/Cargo.toml` 的 `[lints]` 把
+  `unsafe_code` 设成 deny，只有 `lib.rs` 里的 `ffi` 模块放行；宿主需要的 POSIX 调用走 `nix`，不自己写 `unsafe`。
 - Swift 侧：`PigeonCore` 不许 `import AppKit`；`PigeonApp` 可以，但 `import CoreText` 只允许在
  `CoreTextRenderer.swift`。
 - PTY 用 `portable-pty`（内部就是 `forkpty`/`openpty` 的封装）。因为 `core/src` 除 `ffi/` 外不许 `unsafe`，
@@ -160,14 +158,17 @@ pigeon/
 
 ## 4. 代码风格
 
-- Swift 6 / Rust 2021 edition，4 空格缩进；公开 API 写显式类型；`guard`/`if let` 早返回，避免深嵌套。
-- Rust：提交前 `cargo fmt` + `cargo clippy -- -D warnings`；`unwrap()`/`expect()` 只允许在测试里，
-  生产路径返回 `Result<T, PgError>`；不允许 `panic!` 越过 FFI 边界。
+- Swift 6 工具链（语言模式 v5，见 `Package.swift`）/ Rust 2021 edition，4 空格缩进；公开 API 写显式类型；`guard`/`if let` 早返回，避免深嵌套。
+- Rust：提交前 `cargo fmt` + `cargo clippy --all-targets -- -D warnings`。生产路径返回 `Result<T, PgError>`；
+  `unwrap()`/`expect()`/`panic!` 由 `[lints.clippy]` 设成 deny（`core/clippy.toml` 放行单元测试，
+  `core/tests/*`、`core/examples/*` 在文件头放行），每个 `unsafe` 块前必须有 `// SAFETY:` 注释（`undocumented_unsafe_blocks`）。
+  FFI 导出一律包 `catch_unwind`，panic 不越过边界。不要用 `#[allow]` 绕过这些 lint；确需例外，在 PR 里说明。
 - **后台进程里禁止 `!` 强解包 / `try!`**；所有失败返回 `Result` 或 `throws` 的自定义 error enum。
 - 并发：`core/` 不用可变全局；每个 pane 的状态由宿主串行驱（一个 task/线程一处所有权）；`App` 的 UI 状态只在主线程改。
 - 命名：类型 UpperCamelCase，函数/变量 lowerCamelCase；协议名用名词（`Term`、`GridRenderer`）而不是 `-able` 广告。
 - 注释只写“为什么”，不写“做了什么”；对外部协议的实现要在文件头注明依据（例如 OSC 7501 revision）。
 - 语言约定：**代码与注释英文；`docs/` 中文；UI 文案英文**（与参考图一致，如 `Working · 1m`）。
+- 文档只写现状：功能删了就删掉对应文字，改名就按新名字重写，不留“上一版…”“已取消”“做过又删”之类的历史说明（历史在 git 里）。
 
 ## 5. 测试要求
 
