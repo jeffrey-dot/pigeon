@@ -130,7 +130,12 @@ pub async fn save(host: &HostState, path: &Path) -> Result<(), String> {
     let bytes = SavedState::new(sessions)
         .encode()
         .map_err(|error| format!("encode state: {error:?}"))?;
-    write_private(path, &bytes)
+    // `fsync` can take tens of milliseconds on a busy disk; off the runtime's workers so the
+    // panes and clients sharing them do not stall every few seconds.
+    let path = path.to_owned();
+    tokio::task::spawn_blocking(move || write_private(&path, &bytes))
+        .await
+        .map_err(|error| format!("state writer: {error}"))?
 }
 
 fn write_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
