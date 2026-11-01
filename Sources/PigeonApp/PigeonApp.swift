@@ -478,10 +478,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Points the window at a live client: the local socket and a remote bridge look the same
     /// from here on (that is the point of mode A/B).
     private func wire(_ client: HostClient, host: String) {
-        client.onMessage = { [weak self] message in
+        // One main-queue hop per socket read, not per message: a burst of deltas then lands
+        // in one run-loop turn, and the panes post one frame for all of it.
+        client.onMessages = { [weak self] messages in
             DispatchQueue.main.async {
-                defer { Wire.free(message) }
-                self?.handle(message, host: host)
+                defer { messages.forEach(Wire.free) }
+                guard let self else { return }
+                for message in messages { self.handle(message, host: host) }
             }
         }
         client.onClose = { [weak self] in
