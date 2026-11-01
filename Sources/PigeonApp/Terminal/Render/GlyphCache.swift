@@ -90,7 +90,9 @@ final class GlyphCache: @unchecked Sendable {
         defer { lock.unlock() }
         if let slot = maskAtlas.slot(for: key) ?? colorAtlas.slot(for: key) { return slot }
         guard !blank.contains(key), !overflowed else { return nil }
-        guard let bitmap = CoreTextRenderer.rasterize(key, metrics: metrics) else {
+        guard let bitmap = Self.sprite(key, metrics: metrics)
+            ?? CoreTextRenderer.rasterize(key, metrics: metrics)
+        else {
             blank.insert(key)
             return nil
         }
@@ -115,6 +117,15 @@ final class GlyphCache: @unchecked Sendable {
                 bytesPerRow: bitmap.colored ? bitmap.width * 4 : bitmap.width)
         }
         return slot
+    }
+
+    /// A glyph drawn from the cell's geometry instead of the font (Powerline separators).
+    static func sprite(_ key: GlyphKey, metrics: GridMetrics) -> CoreTextRenderer.GlyphBitmap? {
+        let (width, height) = metrics.glyphSize(span: Int(key.span))
+        guard let mask = PowerlineSprite.mask(
+            key.codepoint, width: width, height: height, stroke: metrics.lineThickness)
+        else { return nil }
+        return CoreTextRenderer.GlyphBitmap(width: width, height: height, colored: false, bytes: mask)
     }
 
     /// Packs `bitmap`, doubling its atlas as often as needed before giving up.
