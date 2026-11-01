@@ -109,7 +109,7 @@ impl PaneState {
         self.rows = rows;
         self.term.resize(cols, rows);
         // Rows sent before the resize no longer fit the grid; only a snapshot can.
-        self.backlog.clear();
+        self.backlog.reset_at(self.seq);
     }
 
     /// Current cell size of this pane.
