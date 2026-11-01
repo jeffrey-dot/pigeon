@@ -2394,6 +2394,42 @@ fn a_host_refuses_an_unsafe_socket_directory_or_a_non_socket_path() {
     let _ = std::fs::remove_dir(&dir);
 }
 
+/// A child that never reads its input: the host queues a bounded amount and pushes back
+/// instead of buffering without limit, and it keeps serving other connections meanwhile.
+#[test]
+fn input_the_child_never_reads_does_not_wedge_the_host() {
+    let _serial = one_at_a_time();
+    let pane = script("#!/bin/sh\nprintf 'deaf\\n'\nexec sleep 60\n");
+    let host = start_host_with(pane.to_str().expect("utf8"));
+    let mut typist = Client::connect(&host.socket);
+    hello(&mut typist);
+    let pane_id = attach_first(&mut typist);
+    // Far more than the PTY and the input queue together can hold.
+    let flood = vec![b'x'; 64 * 1024];
+    let writer = std::thread::spawn(move || {
+        for _ in 0..64 {
+            typist.send(&Message::Keys {
+                pane_id,
+                bytes: flood.clone(),
+            });
+        }
+        typist
+    });
+    std::thread::sleep(Duration::from_millis(500));
+    let mut other = Client::connect(&host.socket);
+    hello(&mut other);
+    other.send(&Message::Sessions { items: Vec::new() });
+    let _ = other.wait_for(|m| matches!(m, Message::Sessions { .. }));
+    drop(other);
+    // Ending the child lets the queued input go nowhere and the typist finish.
+    let mut closer = Client::connect(&host.socket);
+    hello(&mut closer);
+    closer.send(&Message::ClosePane { id: 5, pane_id });
+    let typist = writer.join().expect("typist");
+    drop(typist);
+    let _ = std::fs::remove_file(&pane);
+}
+
 /// Hosts started at the same moment on a stale socket (a crash left it, two windows open at
 /// once) must not both take it over: exactly one serves, the others exit.
 #[test]

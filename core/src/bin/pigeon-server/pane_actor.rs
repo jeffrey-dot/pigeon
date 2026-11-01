@@ -1,6 +1,7 @@
 //! One pane: a PTY, the threads that move its bytes, and the task that owns its terminal
 //! state. Everything that touches `PaneState` goes through this task's `Cmd` queue.
 
+use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
@@ -24,6 +25,10 @@ const READ_CHUNK: usize = 64 * 1024;
 /// At most this many bytes are fed per batch before the per-batch work (metadata, status,
 /// replies, frame) runs, so a flood still yields to commands and frames regularly.
 const BATCH_BYTES: usize = 256 * 1024;
+/// Chunks of input waiting for the PTY. A child that stops reading its input (busy, or
+/// stopped with ^Z) fills this; the actor then stops taking commands until it drains, which
+/// pushes back through the bounded command queue to the client instead of growing memory.
+const INPUT_QUEUE: usize = 64;
 /// At most one delta per pane per frame. A burst of output (`cat`, a build log) arrives in
 /// many small PTY reads, and one delta each would repaint the whole screen dozens of times
 /// per frame and flood an ssh link; a lone keystroke still goes out immediately.
@@ -79,6 +84,7 @@ pub fn spawn_pane(
         child,
         master,
         write_tx,
+        unwritten: VecDeque::new(),
         events: host.events.clone(),
         meta: Arc::clone(&host.meta),
         exits: Arc::clone(&host.exits),
@@ -119,10 +125,10 @@ fn start_reader(mut reader: Box<dyn Read + Send>) -> mpsc::Receiver<Vec<u8>> {
 }
 
 /// PTY input, written on a thread so a stalled child never blocks the actor.
-fn start_writer(mut writer: Box<dyn Write + Send>) -> std::sync::mpsc::Sender<Vec<u8>> {
-    let (write_tx, write_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+fn start_writer(mut writer: Box<dyn Write + Send>) -> mpsc::Sender<Vec<u8>> {
+    let (write_tx, mut write_rx) = mpsc::channel::<Vec<u8>>(INPUT_QUEUE);
     std::thread::spawn(move || {
-        for chunk in write_rx {
+        while let Some(chunk) = write_rx.blocking_recv() {
             if writer.write_all(&chunk).is_err() {
                 break;
             }
@@ -135,7 +141,11 @@ struct PaneActor {
     pane: PaneState,
     child: Box<dyn Child + Send + Sync>,
     master: Master,
-    write_tx: std::sync::mpsc::Sender<Vec<u8>>,
+    write_tx: mpsc::Sender<Vec<u8>>,
+    /// Input the writer had no room for yet, in order. While it is not empty the actor
+    /// takes no commands (see `INPUT_QUEUE`), so at most one command's worth waits here
+    /// besides query answers.
+    unwritten: VecDeque<Vec<u8>>,
     events: broadcast::Sender<Event>,
     meta: Meta,
     exits: Exits,
@@ -178,7 +188,18 @@ impl PaneActor {
                 _ = sleep_until(self.last_flush + FRAME), if self.dirty => {
                     self.flush_now();
                 }
-                command = cmd_rx.recv(), if commands_open => {
+                permit = self.write_tx.clone().reserve_owned(), if !self.unwritten.is_empty() => {
+                    match permit {
+                        Ok(permit) => {
+                            if let Some(chunk) = self.unwritten.pop_front() {
+                                permit.send(chunk);
+                            }
+                        }
+                        // The writer is gone with the child: nobody will read this input.
+                        Err(_) => self.unwritten.clear(),
+                    }
+                }
+                command = cmd_rx.recv(), if commands_open && self.unwritten.is_empty() => {
                     match command {
                         Some(command) => self.handle(command),
                         None => commands_open = false,
@@ -236,10 +257,11 @@ impl PaneActor {
         match command {
             Cmd::Input(bytes) => {
                 self.echo_due = true;
-                let _ = self.write_tx.send(bytes);
+                self.write_input(bytes);
             }
             Cmd::Paste(text) => {
-                let _ = self.write_tx.send(pane.paste_bytes(&text));
+                let bytes = pane.paste_bytes(&text);
+                self.write_input(bytes);
             }
             Cmd::Resize(cols, rows) => {
                 pane.resize(cols, rows);
@@ -326,7 +348,7 @@ impl PaneActor {
         }
         let replies = self.pane.take_replies();
         if !replies.is_empty() {
-            let _ = self.write_tx.send(replies);
+            self.write_input(replies);
         }
         if self.echo_due || self.last_flush.elapsed() >= FRAME {
             self.echo_due = false;
@@ -345,6 +367,19 @@ impl PaneActor {
             exits.insert(pane_id, code);
         }
         let _ = self.events.send(Event::Exited { pane_id, code });
+    }
+
+    /// Queues bytes for the PTY without waiting; what does not fit waits in `unwritten`
+    /// behind anything already there, so input and query answers keep their order.
+    fn write_input(&mut self, bytes: Vec<u8>) {
+        if !self.unwritten.is_empty() {
+            self.unwritten.push_back(bytes);
+            return;
+        }
+        match self.write_tx.try_send(bytes) {
+            Ok(()) | Err(mpsc::error::TrySendError::Closed(_)) => {}
+            Err(mpsc::error::TrySendError::Full(bytes)) => self.unwritten.push_back(bytes),
+        }
     }
 
     fn flush_now(&mut self) {
