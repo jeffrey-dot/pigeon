@@ -249,3 +249,26 @@ fn dirty_rows_can_be_peeked_and_consumed_in_parts() {
     core.consume_dirty_rows(pane, 1).expect("consume");
     assert_eq!(core.take_dirty_rows(pane).expect("take"), pending[1..]);
 }
+
+#[test]
+fn osc7501_can_be_turned_off() {
+    assert!(
+        Config::default().osc7501_enabled,
+        "on unless asked otherwise"
+    );
+    let mut core = Core::new(Config {
+        osc7501_enabled: false,
+        ..Config::default()
+    });
+    let pane = core.new_pane(20, 4).expect("pane");
+    core.feed(pane, b"\x1b]7501;state=working\x07")
+        .expect("feed");
+    let second = core.split(pane, Axis::Vertical, 0.5).expect("split");
+    core.feed(second, b"\x1b]7501;state=working\x07")
+        .expect("feed");
+    let (_, records) = core.focused_status().expect("status");
+    assert_eq!(records.count(), 0, "split panes follow the config too");
+    core.focus(pane).expect("focus");
+    let (_, records) = core.focused_status().expect("status");
+    assert_eq!(records.count(), 0);
+}

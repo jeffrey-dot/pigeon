@@ -14,10 +14,21 @@ use crate::status::Record;
 use crate::term::Snapshot;
 
 /// Core-wide settings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Config {
     /// 0 = core default (10000 lines); capped at 100000.
     pub scrollback_lines: u32,
+    /// `false`: OSC 7501 reports are ignored and every pane's status stays empty.
+    pub osc7501_enabled: bool,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            scrollback_lines: 0,
+            osc7501_enabled: true,
+        }
+    }
 }
 
 /// One embedded session: N panes plus the layout tree that places them.
@@ -50,7 +61,8 @@ impl Core {
         if self.layout.is_some() {
             return Err(PgError::InvalidArg);
         }
-        let pane = PaneState::new(pane_id, cols, rows, self.scrollback_lines());
+        let mut pane = PaneState::new(pane_id, cols, rows, self.scrollback_lines());
+        pane.set_status_enabled(self.config.osc7501_enabled);
         self.panes.insert(pane_id, pane);
         self.layout = Some(Layout::new(pane_id));
         Ok(pane_id)
@@ -147,6 +159,7 @@ impl Core {
         };
         let mut pane = PaneState::new(new_id, child_cols, child_rows, history);
         pane.resize(child_cols, child_rows);
+        pane.set_status_enabled(self.config.osc7501_enabled);
         self.panes.insert(new_id, pane);
         let _ = layout.focus(new_id);
         Ok(new_id)

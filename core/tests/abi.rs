@@ -470,3 +470,25 @@ fn dirty_rows_beyond_the_buffer_are_kept_for_the_next_call() {
     );
     pg_core_free(core);
 }
+
+#[test]
+fn osc7501_disabled_in_the_config_keeps_status_empty() {
+    let feed_status = |enabled: u8| {
+        let cfg = PgConfig {
+            size: std::mem::size_of::<PgConfig>() as u32,
+            version: 1,
+            scrollback_lines: 0,
+            osc7501_enabled: enabled,
+        };
+        let core = pg_core_new(&cfg);
+        assert!(!core.is_null());
+        let pane = pg_pane_new(core, &pane_options(20, 4));
+        let report = b"\x1b]7501;state=working\x07";
+        assert!(pg_pane_feed(core, pane, report.as_ptr(), report.len()));
+        let count = pg_status_count(core);
+        pg_core_free(core);
+        count
+    };
+    assert_eq!(feed_status(1), 1);
+    assert_eq!(feed_status(0), 0, "osc7501_enabled = 0 must reach the core");
+}

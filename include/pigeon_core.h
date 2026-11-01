@@ -185,6 +185,9 @@ typedef struct PgConfig {
      * 0 = core default (10000 lines); capped at 100000.
      */
     uint32_t scrollback_lines;
+    /**
+     * 0: OSC 7501 reports are ignored and `pg_status_*` stays empty.
+     */
     uint8_t osc7501_enabled;
 } PgConfig;
 

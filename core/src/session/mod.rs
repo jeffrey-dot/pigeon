@@ -47,6 +47,8 @@ pub struct PaneState {
     status: StatusStore,
     /// Deltas already sent, for a reconnecting client's `attach.since`.
     backlog: Backlog,
+    /// `false` when the embedder turned OSC 7501 off (`PgConfig.osc7501_enabled`).
+    status_enabled: bool,
 }
 
 impl PaneState {
@@ -59,6 +61,7 @@ impl PaneState {
             term: Box::new(AlacrittyTerm::new(cols, rows, scrollback)),
             status: StatusStore::new(),
             backlog: Backlog::default(),
+            status_enabled: true,
         }
     }
 
@@ -79,6 +82,7 @@ impl PaneState {
             term: Box::new(FrozenTerm::new(snapshot)),
             status: StatusStore::new(),
             backlog: Backlog::default(),
+            status_enabled: true,
         }
     }
 
@@ -260,7 +264,12 @@ impl PaneState {
     }
 
     fn status_enabled(&self) -> bool {
-        true
+        self.status_enabled
+    }
+
+    /// Turns OSC 7501 parsing on or off for bytes fed from now on.
+    pub fn set_status_enabled(&mut self, enabled: bool) {
+        self.status_enabled = enabled;
     }
 }
 

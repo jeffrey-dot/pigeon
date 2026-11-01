@@ -152,6 +152,7 @@ pub struct PgConfig {
     pub version: u32,
     /// 0 = core default (10000 lines); capped at 100000.
     pub scrollback_lines: u32,
+    /// 0: OSC 7501 reports are ignored and `pg_status_*` stays empty.
     pub osc7501_enabled: u8,
 }
 
@@ -184,6 +185,7 @@ pub extern "C" fn pg_core_new(cfg: *const PgConfig) -> *mut PgCore {
         Ok(Box::into_raw(Box::new(PgCore {
             core: Core::new(api::Config {
                 scrollback_lines: config.scrollback_lines,
+                osc7501_enabled: config.osc7501_enabled != 0,
             }),
         })))
     })
