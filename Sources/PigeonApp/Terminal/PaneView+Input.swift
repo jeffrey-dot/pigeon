@@ -9,6 +9,8 @@ extension PaneView: NSTextInputClient {
         // While composing, every key (Return to commit, Esc to cancel, arrows to pick a
         // candidate) is the input method's.
         if hasMarkedText() { return true }
+        // DECKPAM: keypad digits are keys the program binds, not text.
+        if stroke.keypad, modes & TerminalModes.appKeypad != 0 { return false }
         guard case .character = stroke.key, !stroke.control, !stroke.command else { return false }
         return !(stroke.option && optionAsMeta)
     }
@@ -29,8 +31,20 @@ extension PaneView: NSTextInputClient {
     // MARK: NSTextInputClient
 
     func insertText(_ string: Any, replacementRange: NSRange) {
+        let composed = preedit != nil
         setPreedit(nil)
-        sendText(Self.plainString(string))
+        let text = Self.plainString(string)
+        // A key that typed its own character (no composition) is still a key event for a
+        // program that asked for every key as an escape code; composed text stays text.
+        if !composed, let event = pendingKeyEvent, var stroke = KeyStroke(event),
+           KittyKeyEncoder.Flags(modes: modes).contains(.allKeys) {
+            stroke.text = text
+            if let bytes = KeyEncoder.encode(stroke, modes: modes) {
+                sendBytes(bytes)
+                return
+            }
+        }
+        sendText(text)
     }
 
     func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
@@ -87,9 +101,27 @@ extension PaneView: NSTextInputClient {
     /// `deleteBackward:`); the terminal encodes the original key instead.
     override func doCommand(by selector: Selector) {
         guard let event = pendingKeyEvent, let stroke = KeyStroke(event),
-              let bytes = KeyEncoder.encode(stroke, appCursor: modes & TerminalModes.appCursor != 0)
+              let bytes = KeyEncoder.encode(stroke, modes: modes)
         else { return }
         sendBytes(bytes)
+    }
+
+    /// Releases only matter to a program that asked for kitty event types (flag 2).
+    override func keyUp(with event: NSEvent) {
+        guard KittyKeyEncoder.Flags(modes: modes).contains(.eventTypes), !hasMarkedText(),
+              let stroke = KeyStroke(event),
+              let bytes = KeyEncoder.encode(stroke, modes: modes)
+        else { return super.keyUp(with: event) }
+        onInput?(bytes)
+    }
+
+    /// A modifier key alone: reported only under kitty's "all keys as escape codes" (flag 8).
+    override func flagsChanged(with event: NSEvent) {
+        guard KittyKeyEncoder.Flags(modes: modes).contains(.allKeys), !hasMarkedText(),
+              let stroke = KeyStroke(modifierEvent: event),
+              let bytes = KeyEncoder.encode(stroke, modes: modes)
+        else { return super.flagsChanged(with: event) }
+        onInput?(bytes)
     }
 
     func sendBytes(_ bytes: [UInt8]) {

@@ -287,6 +287,17 @@ pub const MODE_APP_KEYPAD: u32 = 1 << 7;
 pub const MODE_ALTERNATE_SCROLL: u32 = 1 << 8;
 /// The program asked for a blinking cursor (DECSCUSR 1/3/5, or `?12h`).
 pub const MODE_CURSOR_BLINK: u32 = 1 << 9;
+/// Kitty keyboard protocol flag 1: disambiguate escape codes (`CSI > 1 u`). Bits 10–14
+/// carry the active flags of the program's `CSI > flags u` stack, flag `1 << n` at bit `10 + n`.
+pub const MODE_KITTY_DISAMBIGUATE: u32 = 1 << 10;
+/// Kitty flag 2: report press / repeat / release.
+pub const MODE_KITTY_EVENT_TYPES: u32 = 1 << 11;
+/// Kitty flag 4: report alternate (shifted and base-layout) keys.
+pub const MODE_KITTY_ALTERNATE_KEYS: u32 = 1 << 12;
+/// Kitty flag 8: report every key, text keys included, as an escape code.
+pub const MODE_KITTY_ALL_KEYS: u32 = 1 << 13;
+/// Kitty flag 16: report the text a key produces alongside its code.
+pub const MODE_KITTY_ASSOCIATED_TEXT: u32 = 1 << 14;
 
 #[cfg(test)]
 mod tests {
@@ -330,6 +341,37 @@ mod tests {
         // Garbage mode numbers change nothing.
         term.feed(b"\x1b[?99999h");
         assert_eq!(term.modes(), off);
+    }
+
+    #[test]
+    fn kitty_keyboard_flags_follow_the_programs_stack() {
+        use super::{
+            MODE_KITTY_ALL_KEYS, MODE_KITTY_ALTERNATE_KEYS, MODE_KITTY_ASSOCIATED_TEXT,
+            MODE_KITTY_DISAMBIGUATE, MODE_KITTY_EVENT_TYPES,
+        };
+        let all = MODE_KITTY_DISAMBIGUATE
+            | MODE_KITTY_EVENT_TYPES
+            | MODE_KITTY_ALTERNATE_KEYS
+            | MODE_KITTY_ALL_KEYS
+            | MODE_KITTY_ASSOCIATED_TEXT;
+        let mut term = term();
+        assert_eq!(term.modes() & all, 0, "legacy keys until a program asks");
+        // What neovim / fish push on start.
+        term.feed(b"\x1b[>1u");
+        assert_eq!(term.modes() & all, MODE_KITTY_DISAMBIGUATE);
+        term.feed(b"\x1b[>31u");
+        assert_eq!(term.modes() & all, all);
+        // The query is answered with the active flags.
+        term.feed(b"\x1b[?u");
+        assert_eq!(term.take_replies(), b"\x1b[?31u");
+        // Popping returns to the previous entry, then to legacy.
+        term.feed(b"\x1b[<u");
+        assert_eq!(term.modes() & all, MODE_KITTY_DISAMBIGUATE);
+        term.feed(b"\x1b[<u");
+        assert_eq!(term.modes() & all, 0);
+        // Malformed: popping an empty stack or a garbage flag value leaves legacy keys.
+        term.feed(b"\x1b[<5u\x1b[>zu");
+        assert_eq!(term.modes() & all, 0);
     }
 
     #[test]
