@@ -12,14 +12,17 @@ final class FrameMailbox: @unchecked Sendable {
     private var pending: GridFrame?
     private var closed = false
 
-    func post(_ frame: GridFrame) {
+    /// Returns whether the mailbox was empty, i.e. whether the render thread needs waking.
+    @discardableResult
+    func post(_ frame: GridFrame) -> Bool {
         lock.lock()
+        defer { lock.unlock() }
         if let older = pending {
             pending = frame.superseding(older)
-        } else {
-            pending = frame
+            return false
         }
-        lock.unlock()
+        pending = frame
+        return true
     }
 
     /// The newest posted frame, or nil when none is waiting (or the mailbox is closed).

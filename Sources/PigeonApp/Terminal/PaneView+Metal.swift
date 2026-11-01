@@ -53,13 +53,7 @@ extension PaneView {
                 SIMD2(Float(rect.minX * scale), Float((bounds.height - rect.maxY) * scale)),
                 SIMD2(Float(rect.width * scale), Float(rect.height * scale)))
         }
-        var thumbColor = SIMD4<Float>(0.5, 0.5, 0.5, 0.45)
-        appearance.performAsCurrentDrawingAppearance {
-            let color = NSColor.secondaryLabelColor.usingColorSpace(.sRGB) ?? .gray
-            thumbColor = SIMD4(
-                Float(color.redComponent), Float(color.greenComponent),
-                Float(color.blueComponent), Float(color.alphaComponent) * 0.45)
-        }
+        let chrome = OverlayColors.resolve(for: appearance)
         var shown = (cells: cells, cursor: cursor)
         shown.cursor.hollow = !hasKeyboardFocus
         if blinkTimer != nil, !blink.isLit(at: Date()) { shown.cursor.visible = false }
@@ -79,28 +73,60 @@ extension PaneView {
             width: Int((bounds.width * scale).rounded()),
             height: Int((bounds.height * scale).rounded()),
             thumb: thumb.map { (origin: $0.0, size: $0.1) },
-            thumbColor: thumbColor,
+            thumbColor: chrome.thumb,
             dirty: dirty,
             selection: selectionSpans(),
-            selectionColor: selectionColor(appearance)))
+            selectionColor: chrome.selection))
         dirty = .none
     }
 
-    /// The system's selection colour, translucent so the text under it stays readable.
-    private func selectionColor(_ appearance: NSAppearance) -> SIMD4<Float> {
-        var color = SIMD4<Float>(0.3, 0.5, 1, 0.35)
+    /// Schedules one post for the end of this run-loop turn. A burst of deltas (one socket
+    /// read can carry dozens) then patches `cells` in place: posting after each would leave
+    /// the mailbox sharing the array, and the next patch would copy the whole grid.
+    /// A hidden pane has no renderer and catches up with one full frame when it becomes
+    /// visible again (`dirty` stays `.everything` until then).
+    func screenChanged() {
+        guard !postScheduled else { return }
+        postScheduled = true
+        RunLoop.main.perform(inModes: [.common]) { [weak self] in
+            guard let self else { return }
+            postScheduled = false
+            postFrame()
+        }
+    }
+}
+
+/// The scroll thumb and selection colours for one appearance. Resolving a dynamic `NSColor`
+/// means switching the drawing appearance, which every posted frame used to do twice.
+struct OverlayColors {
+    var thumb: SIMD4<Float>
+    var selection: SIMD4<Float>
+
+    nonisolated(unsafe) private static var cache: [NSAppearance.Name: OverlayColors] = [:]
+
+    /// The accent colour is a user setting: a change in System Settings drops the cache.
+    nonisolated(unsafe) private static let observer = NotificationCenter.default.addObserver(
+        forName: NSColor.systemColorsDidChangeNotification, object: nil, queue: .main
+    ) { _ in cache = [:] }
+
+    /// Main thread only (it reads AppKit colours), so the cache needs no lock.
+    static func resolve(for appearance: NSAppearance) -> OverlayColors {
+        _ = observer
+        if let hit = cache[appearance.name] { return hit }
+        var colors = OverlayColors(
+            thumb: SIMD4(0.5, 0.5, 0.5, 0.45), selection: SIMD4(0.3, 0.5, 1, 0.38))
         appearance.performAsCurrentDrawingAppearance {
+            let thumb = NSColor.secondaryLabelColor.usingColorSpace(.sRGB) ?? .gray
+            colors.thumb = SIMD4(
+                Float(thumb.redComponent), Float(thumb.greenComponent),
+                Float(thumb.blueComponent), Float(thumb.alphaComponent) * 0.45)
+            // The system's selection colour, translucent so the text under it stays readable.
             let accent = NSColor.selectedContentBackgroundColor.usingColorSpace(.sRGB) ?? .systemBlue
-            color = SIMD4(
+            colors.selection = SIMD4(
                 Float(accent.redComponent), Float(accent.greenComponent),
                 Float(accent.blueComponent), 0.38)
         }
-        return color
-    }
-
-    /// Posts the current screen; a hidden pane has no renderer and catches up with one
-    /// full frame when it becomes visible again (`dirty` stays `.everything` until then).
-    func screenChanged() {
-        postFrame()
+        cache[appearance.name] = colors
+        return colors
     }
 }

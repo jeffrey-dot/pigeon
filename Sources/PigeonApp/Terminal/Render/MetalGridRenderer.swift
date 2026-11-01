@@ -126,7 +126,9 @@ final class MetalGridRenderer: @unchecked Sendable {
     }
 
     func post(_ frame: GridFrame) {
-        mailbox.post(frame)
+        // A frame still waiting means its wakeup is still queued or the link is running; the
+        // render thread will find this one in its place without another hop.
+        guard mailbox.post(frame) else { return }
         perform { [self] in
             if #available(macOS 14.0, *), let link = link as? CAMetalDisplayLink {
                 link.isPaused = false

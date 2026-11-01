@@ -59,6 +59,8 @@ final class PaneView: NSView {
     var metal: MetalGridRenderer?
     /// Rows changed since the last frame was posted to `metal`.
     var dirty = DirtyRows.everything
+    /// A post is queued for the end of this run-loop turn (`screenChanged`).
+    var postScheduled = false
     /// Last occlusion state logged under `PIGEON_FRAME_STATS`.
     var reportedVisible: Bool?
 

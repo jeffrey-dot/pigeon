@@ -133,6 +133,27 @@ final class MetalRendererTests: XCTestCase {
         XCTAssertNil(mailbox.poll())
     }
 
+    /// Only a post into an empty mailbox wakes the render thread; later ones ride along.
+    func testOnlyThePostIntoAnEmptyMailboxAsksForAWakeup() {
+        let mailbox = FrameMailbox()
+        XCTAssertTrue(mailbox.post(frame("ab", cols: 1)))
+        XCTAssertFalse(mailbox.post(frame("cd", cols: 1)))
+        _ = mailbox.poll()
+        XCTAssertTrue(mailbox.post(frame("ef", cols: 1)))
+    }
+
+    /// Every delta used to post a frame at once, so the mailbox shared `cells` and the next
+    /// delta copied the whole grid. Changes now coalesce into one post per run-loop turn.
+    @MainActor
+    func testScreenChangesCoalesceIntoOnePostPerRunLoopTurn() {
+        let view = PaneView(frame: .zero)
+        view.screenChanged()
+        view.screenChanged()
+        XCTAssertTrue(view.postScheduled)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        XCTAssertFalse(view.postScheduled, "the scheduled post ran once and cleared the flag")
+    }
+
     func testARestoredFrameNeverOverwritesANewerOne() {
         let mailbox = FrameMailbox()
         var taken = DirtyRows.none
