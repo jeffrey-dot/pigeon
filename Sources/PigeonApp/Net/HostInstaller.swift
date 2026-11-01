@@ -4,14 +4,15 @@ import PigeonCore
 /// Puts `pigeon-server` on a remote machine over the system `ssh` (`docs/remote.md` §2).
 ///
 /// Rules this file exists to keep: no package manager and no root; everything lives under
-/// `~/.pigeon/`; a binary already there is used as long as it runs and reports the version
-/// this app expects (`pigeon-server --version`), so a connect costs no hashing and needs no
-/// local copy; a transfer must pass the same check *on the remote* before it becomes live.
+/// `~/.pigeon/`; any installed binary that runs and speaks a compatible protocol (same major,
+/// read from `pigeon-server --version`) is used as is, whatever its release version, so a
+/// connect costs no hashing and needs no local copy; an upload happens only when nothing
+/// compatible is there, and it must run *on the remote* before it becomes live.
 public struct HostInstaller {
     public struct Remote: Equatable {
         /// `uname -sm`, e.g. `Linux x86_64`.
         public var platform: String
-        /// The server version: the directory name under `~/.pigeon/server/`.
+        /// The server's release version: its directory name under `~/.pigeon/server/`.
         public var version: String
         /// Absolute path of the installed binary on the remote.
         public var path: String
@@ -92,18 +93,23 @@ public struct HostInstaller {
     /// rules can be tested without a network.
     public typealias Runner = (_ host: String, _ script: String, _ stdin: URL?) throws -> Result
 
-    /// The version this app wants on the far side: the core it was built with.
+    /// The release this app ships for the far side: the core it was built with.
     public static var expectedVersion: String { Wire.string(pg_core_version()) }
+    /// The wire protocol this app speaks, `(major << 8) | minor`.
+    public static var protocolVersion: UInt16 { pg_proto_version() }
 
     private let run: Runner
     private let version: String
+    private let proto: UInt16
 
     public init(
         run: @escaping Runner = HostInstaller.sshRunner,
-        version: String = HostInstaller.expectedVersion
+        version: String = HostInstaller.expectedVersion,
+        proto: UInt16 = HostInstaller.protocolVersion
     ) {
         self.run = run
         self.version = version
+        self.proto = proto
     }
 
     /// What the remote machine is, as `uname` sees it.
@@ -118,9 +124,10 @@ public struct HostInstaller {
         return result.output.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Makes sure `host` has a runnable `pigeon-server` of this app's version, uploading one
+    /// Makes sure `host` has a runnable `pigeon-server` this app can talk to, uploading one
     /// only when it does not. `artifact` is asked for the local binary only in that case, so
-    /// a machine that is already set up connects without any download.
+    /// a machine that is already set up connects without any download, and a newer app keeps
+    /// using an older server until the protocol actually changes.
     ///
     /// `allowInstall` is the "first connection asks once" switch: with it off, a host that
     /// has no usable binary is an error rather than a silent upload.
@@ -133,21 +140,21 @@ public struct HostInstaller {
         guard Self.triple(for: platform) != nil else {
             throw Failure.unsupportedPlatform(platform)
         }
-        let directory = "$HOME/.pigeon/server/\(version)"
-        let probe = try run(host, Self.probeScript(directory: directory), nil)
+        let probe = try run(host, Self.probeScript, nil)
         guard probe.ok else {
             throw Failure.command(probe.error.isEmpty ? probe.output : probe.error)
         }
-        let lines = probe.output.split(whereSeparator: \.isNewline).map(String.init)
-        if let path = lines.first, lines.dropFirst().first == Self.versionLine(version) {
-            return Remote(platform: platform, version: version, path: path, sent: false)
+        if let found = Self.compatible(in: probe.output, proto: proto) {
+            return Remote(platform: platform, version: found.version, path: found.path, sent: false)
         }
         guard allowInstall else {
-            throw Failure.rejected("pigeon-server \(version) is not installed and installing is off")
+            throw Failure.rejected("no compatible pigeon-server is installed and installing is off")
         }
 
         let file = try artifact(platform)
-        let script = Self.installScript(directory: directory, expected: Self.versionLine(version))
+        let directory = "$HOME/.pigeon/server/\(version)"
+        let script = Self.installScript(
+            directory: directory, expected: Self.versionLine(version, proto: proto))
         do {
             let result = try run(host, script, file)
             guard result.ok else {
@@ -169,21 +176,45 @@ public struct HostInstaller {
 
     // MARK: - pieces that are worth testing on their own
 
-    /// What `pigeon-server --version` prints for `version`.
-    public static func versionLine(_ version: String) -> String {
-        "pigeon-server \(version)"
+    /// What `pigeon-server --version` prints.
+    public static func versionLine(_ version: String, proto: UInt16) -> String {
+        "pigeon-server \(version) proto \(proto >> 8).\(proto & 0xff)"
     }
 
-    /// Prints the binary's absolute path, then what it says its version is; the second line
-    /// is missing when the file is not there or does not run on this machine.
-    public static func probeScript(directory: String) -> String {
+    /// One `--version` line read back: release version and protocol. `nil` for anything else,
+    /// including a binary too old to report its protocol.
+    public static func parseVersionLine(_ line: String) -> (version: String, proto: UInt16)? {
+        let words = line.split(separator: " ")
+        guard words.count == 4, words[0] == "pigeon-server", words[2] == "proto" else { return nil }
+        let parts = words[3].split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 2, let major = UInt8(parts[0]), let minor = UInt8(parts[1]) else {
+            return nil
+        }
+        return (String(words[1]), UInt16(major) << 8 | UInt16(minor))
+    }
+
+    /// Lists every installed server, newest first, as `<path>\t<its --version line>`; the line
+    /// is empty when the file does not run on this machine.
+    public static let probeScript = """
+        ls -1t "$HOME/.pigeon/server" 2>/dev/null | while read -r dir; do
+            bin="$HOME/.pigeon/server/$dir/pigeon-server"
+            [ -x "$bin" ] || continue
+            line=$("$bin" --version 2>/dev/null | head -n 1) || line=""
+            printf '%s\\t%s\\n' "$bin" "$line"
+        done
         """
-        bin="\(directory)/pigeon-server"
-        printf '%s\\n' "$bin"
-        if [ -x "$bin" ]; then
-            "$bin" --version 2>/dev/null | head -n 1
-        fi
-        """
+
+    /// The newest installed server whose protocol major is `proto`'s; minor differences are
+    /// settled in the handshake (protocol §3.1).
+    public static func compatible(in listing: String, proto: UInt16) -> (path: String, version: String)? {
+        for row in listing.split(whereSeparator: \.isNewline) {
+            let fields = row.split(separator: "\t", maxSplits: 1).map(String.init)
+            guard fields.count == 2, let found = parseVersionLine(fields[1]),
+                  found.proto >> 8 == proto >> 8
+            else { continue }
+            return (fields[0], found.version)
+        }
+        return nil
     }
 
     /// The shell run on the remote: write a temp file next to the target, make sure it runs

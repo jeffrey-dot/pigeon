@@ -395,6 +395,12 @@ uint32_t pg_core_abi_version(void);
 struct PgStr pg_core_version(void);
 
 /**
+ * The wire protocol this build speaks, `(major << 8) | minor` (protocol §3.1). Peers with
+ * the same major interoperate.
+ */
+uint16_t pg_proto_version(void);
+
+/**
  * Returns NULL on failure. `cfg == NULL` means defaults.
  */
 PgCore *pg_core_new(const struct PgConfig *cfg);

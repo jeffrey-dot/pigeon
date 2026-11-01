@@ -40,9 +40,9 @@ final class RemoteSessionTests: XCTestCase {
                     return HostInstaller.Result(status: 0, output: "Linux x86_64", error: "")
                 }
                 return HostInstaller.Result(
-                    status: 0, output: "/home/u/.pigeon/server/9.9.9/pigeon-server\n"
-                        + "pigeon-server 9.9.9\n", error: "")
-            }, version: "9.9.9"),
+                    status: 0, output: "/home/u/.pigeon/server/9.9.9/pigeon-server\t"
+                        + "pigeon-server 9.9.9 proto 1.0\n", error: "")
+            }, version: "9.9.9", proto: 0x0100),
             run: { script in
                 if script.contains("uname -sm") {
                     return HostInstaller.Result(status: 0, output: "Linux x86_64", error: "")
@@ -62,7 +62,7 @@ final class RemoteSessionTests: XCTestCase {
                 started.append(process)
                 return process
             },
-            // The remote already has this version, so nothing is uploaded or downloaded.
+            // The remote already has a compatible server, so nothing is uploaded or downloaded.
             artifact: { _ in
                 XCTFail("a usable remote binary needs no local one")
                 return nil

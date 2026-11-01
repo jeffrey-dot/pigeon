@@ -745,7 +745,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func sendHello() {
         send({ message in
-            Wire.set(message, u32: "proto", 0x0100)
+            Wire.set(message, u32: "proto", UInt32(pg_proto_version()))
             Wire.set(message, str: "client", "pigeon-mac")
             // `delta` sends only the rows that changed: a keystroke costs ~2 KB instead of a
             // full screen (~100 KB on a large pane), which is what makes ssh feel slow.

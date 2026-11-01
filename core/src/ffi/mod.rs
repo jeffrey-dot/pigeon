@@ -147,6 +147,13 @@ pub extern "C" fn pg_core_version() -> PgStr {
     }
 }
 
+/// The wire protocol this build speaks, `(major << 8) | minor` (protocol §3.1). Peers with
+/// the same major interoperate.
+#[no_mangle]
+pub extern "C" fn pg_proto_version() -> u16 {
+    api::PROTO_VERSION
+}
+
 // -------------------------------------------------------------- lifetime
 
 /// Opaque session container (one core owns N panes).

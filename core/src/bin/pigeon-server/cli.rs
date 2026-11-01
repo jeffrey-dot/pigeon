@@ -66,8 +66,8 @@ pub fn parse(mut args: impl Iterator<Item = String>) -> Result<Command, String> 
             }
             "--proxy" => options.transport = Transport::Proxy,
             "--detach" => options.transport = Transport::Detach,
-            // The client compares this line with its own version to decide whether the
-            // installed server can be used as is (`docs/remote.md`).
+            // The client reads the protocol off this line to decide whether an installed
+            // server can be used as is (`docs/remote.md`).
             "--version" => return Ok(Command::Print(version_line())),
             "-h" | "--help" => return Ok(Command::Print(USAGE.to_owned())),
             other => return Err(format!("unknown argument: {other}")),
@@ -76,9 +76,16 @@ pub fn parse(mut args: impl Iterator<Item = String>) -> Result<Command, String> 
     Ok(Command::Run(options))
 }
 
-/// `pigeon-server <version>`, one line.
+/// `pigeon-server <version> proto <major>.<minor>`, one line. The client reuses any installed
+/// server whose protocol major matches its own, so the protocol is what this line must carry.
 pub fn version_line() -> String {
-    format!("pigeon-server {}\n", pigeon_core::api::VERSION)
+    let proto = pigeon_core::api::PROTO_VERSION;
+    format!(
+        "pigeon-server {} proto {}.{}\n",
+        pigeon_core::api::VERSION,
+        proto >> 8,
+        proto & 0xff
+    )
 }
 
 /// Where the socket lives (protocol §1, `docs/remote.md` §2):
@@ -128,13 +135,13 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     #[test]
-    fn version_prints_one_line_with_the_crate_version() {
+    fn version_prints_the_crate_and_protocol_versions() {
         let Ok(Command::Print(text)) = parse(["--version".to_owned()].into_iter()) else {
             panic!("--version prints");
         };
         assert_eq!(
             text,
-            format!("pigeon-server {}\n", env!("CARGO_PKG_VERSION"))
+            format!("pigeon-server {} proto 1.0\n", env!("CARGO_PKG_VERSION"))
         );
         assert_eq!(text, version_line());
     }

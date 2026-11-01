@@ -62,35 +62,69 @@ final class HostInstallerTests: XCTestCase {
 
     func testTheRemoteScriptRunsTheUploadBeforeItGoesLive() {
         let script = HostInstaller.installScript(
-            directory: "$HOME/.pigeon/server/0.1.0", expected: "pigeon-server 0.1.0")
+            directory: "$HOME/.pigeon/server/0.1.0", expected: "pigeon-server 0.1.0 proto 1.0")
         XCTAssertTrue(script.contains("$HOME/.pigeon/server/0.1.0/pigeon-server.tmp"))
         XCTAssertTrue(script.contains("\"$tmp\" --version"), "the upload has to run here")
-        XCTAssertTrue(script.contains("if [ \"$got\" != \"pigeon-server 0.1.0\" ]"))
+        XCTAssertTrue(script.contains("if [ \"$got\" != \"pigeon-server 0.1.0 proto 1.0\" ]"))
         XCTAssertTrue(script.contains("rm -f \"$tmp\""), "a bad transfer must not be left behind")
         XCTAssertTrue(
             script.contains("mv \"$tmp\" \"$HOME/.pigeon/server/0.1.0/pigeon-server\""),
-            "the binary only appears after it reports the right version")
+            "the binary only appears after it runs")
         XCTAssertTrue(script.contains("tail -n +3"), "older versions are garbage collected")
         XCTAssertFalse(script.contains("/tmp/"), "nothing is written outside ~/.pigeon")
         XCTAssertFalse(script.contains("sha256"), "no hashing on the remote")
     }
 
-    func testTheProbeAsksTheBinaryItsVersion() {
-        let script = HostInstaller.probeScript(directory: "$HOME/.pigeon/server/0.1.0")
-        XCTAssertTrue(script.contains("[ -x \"$bin\" ]"), "a missing or non-executable file says nothing")
+    func testTheProbeAsksEveryInstalledBinaryItsVersion() {
+        let script = HostInstaller.probeScript
+        XCTAssertTrue(script.contains("ls -1t"), "newest first")
+        XCTAssertTrue(script.contains("[ -x \"$bin\" ]"), "a non-executable file is skipped")
         XCTAssertTrue(script.contains("\"$bin\" --version"))
         XCTAssertFalse(script.contains("sha256"))
-        XCTAssertEqual(HostInstaller.versionLine("0.1.0"), "pigeon-server 0.1.0")
+    }
+
+    func testVersionLinesAreReadWholeOrNotAtAll() {
+        XCTAssertEqual(HostInstaller.versionLine("0.1.0", proto: 0x0103), "pigeon-server 0.1.0 proto 1.3")
+        let parsed = HostInstaller.parseVersionLine("pigeon-server 0.2.0 proto 1.3")
+        XCTAssertEqual(parsed?.version, "0.2.0")
+        XCTAssertEqual(parsed?.proto, 0x0103)
+        for bad in [
+            "", "pigeon-server 0.1.0", "pigeon-server 0.1.0 proto", "pigeon-server 0.1.0 proto 1",
+            "pigeon-server 0.1.0 proto x.0", "pigeon-server 0.1.0 proto 1.0 extra",
+            "other 0.1.0 proto 1.0", "pigeon-server 0.1.0 proto 256.0",
+        ] {
+            XCTAssertNil(HostInstaller.parseVersionLine(bad), bad)
+        }
+    }
+
+    /// Release versions do not matter; the protocol major does. Minor differences are the
+    /// handshake's business, so they are no reason to upload.
+    func testTheNewestServerWithTheSameProtocolMajorIsChosen() {
+        let listing = """
+            /h/.pigeon/server/0.3.0/pigeon-server\tpigeon-server 0.3.0 proto 2.0
+            /h/.pigeon/server/0.2.5/pigeon-server\t
+            /h/.pigeon/server/0.2.0/pigeon-server\tpigeon-server 0.2.0 proto 1.4
+            /h/.pigeon/server/0.1.0/pigeon-server\tpigeon-server 0.1.0 proto 1.0
+            /h/.pigeon/server/0123456789abcdef/pigeon-server\tpigeon-server 0.1.0
+
+            """
+        let found = HostInstaller.compatible(in: listing, proto: 0x0100)
+        XCTAssertEqual(found?.path, "/h/.pigeon/server/0.2.0/pigeon-server", "newer minor is fine")
+        XCTAssertEqual(found?.version, "0.2.0")
+        XCTAssertEqual(HostInstaller.compatible(in: listing, proto: 0x0201)?.version, "0.3.0")
+        XCTAssertNil(HostInstaller.compatible(in: listing, proto: 0x0300), "no major 3 installed")
+        XCTAssertNil(HostInstaller.compatible(in: "", proto: 0x0100))
     }
 
     func testTheExpectedVersionIsTheCoresOwn() {
         XCTAssertFalse(HostInstaller.expectedVersion.isEmpty)
         XCTAssertTrue(HostInstaller.expectedVersion.first?.isNumber ?? false, HostInstaller.expectedVersion)
+        XCTAssertEqual(HostInstaller.protocolVersion >> 8, 1)
     }
 
-    /// A remote that already runs this version is used as is: no local file is looked for,
-    /// nothing is downloaded, nothing is sent.
-    func testARunnableBinaryOfTheRightVersionIsUsedAsIs() throws {
+    /// A compatible server is used as is even when the app is newer: no local file is looked
+    /// for, nothing is downloaded, nothing is sent.
+    func testACompatibleServerIsUsedAsIs() throws {
         var uploads = 0
         let installer = HostInstaller(run: { _, script, stdin in
             if script.contains("uname -sm") {
@@ -99,46 +133,55 @@ final class HostInstallerTests: XCTestCase {
             XCTAssertNil(stdin)
             if script.contains("set -e") { uploads += 1 }
             return HostInstaller.Result(
-                status: 0, output: "/home/u/.pigeon/server/0.2.0/pigeon-server\npigeon-server 0.2.0\n",
+                status: 0,
+                output: "/home/u/.pigeon/server/0.1.0/pigeon-server\tpigeon-server 0.1.0 proto 1.0\n",
                 error: "")
-        }, version: "0.2.0")
+        }, version: "0.2.0", proto: 0x0101)
         let remote = try installer.install(host: "far") { _ in
             XCTFail("no local binary is needed")
             throw HostInstaller.Failure.noArtifact("Linux x86_64")
         }
         XCTAssertFalse(remote.sent)
-        XCTAssertEqual(remote.path, "/home/u/.pigeon/server/0.2.0/pigeon-server")
-        XCTAssertEqual(remote.version, "0.2.0")
+        XCTAssertEqual(remote.path, "/home/u/.pigeon/server/0.1.0/pigeon-server")
+        XCTAssertEqual(remote.version, "0.1.0")
         XCTAssertEqual(uploads, 0)
     }
 
-    /// Missing, not runnable (wrong CPU, truncated), or answering with another version: all
-    /// three mean "upload this version".
-    func testAMissingBrokenOrOtherVersionBinaryIsReplaced() throws {
+    /// Nothing installed, nothing that runs here, or only another protocol major: upload.
+    func testAnIncompatibleOrMissingServerIsReplaced() throws {
         let artifact = try fakeArtifact()
         defer { try? FileManager.default.removeItem(at: artifact) }
-        for answer in ["", "sh: cannot execute binary file", "pigeon-server 0.1.0", "pigeon-server 0.2.0-dev"] {
+        for listing in [
+            "",
+            "/p/pigeon-server\t\n",
+            "/p/pigeon-server\tpigeon-server 9.0.0 proto 2.0\n",
+            "/p/pigeon-server\tpigeon-server 0.1.0\n",
+        ] {
             var sent: URL?
-            let installer = HostInstaller(run: { _, script, stdin in
-                if script.contains("uname -sm") {
+            var script = ""
+            let installer = HostInstaller(run: { _, body, stdin in
+                if body.contains("uname -sm") {
                     return HostInstaller.Result(status: 0, output: "Linux aarch64", error: "")
                 }
-                if script.contains("set -e") {
+                if body.contains("set -e") {
                     sent = stdin
+                    script = body
                     return HostInstaller.Result(
                         status: 0, output: "/home/u/.pigeon/server/0.2.0/pigeon-server", error: "")
                 }
-                return HostInstaller.Result(
-                    status: 0, output: "/home/u/.pigeon/server/0.2.0/pigeon-server\n\(answer)", error: "")
-            }, version: "0.2.0")
+                return HostInstaller.Result(status: 0, output: listing, error: "")
+            }, version: "0.2.0", proto: 0x0100)
             var asked: String?
             let remote = try installer.install(host: "far") { platform in
                 asked = platform
                 return artifact
             }
-            XCTAssertTrue(remote.sent, answer)
+            XCTAssertTrue(remote.sent, listing)
+            XCTAssertEqual(remote.version, "0.2.0")
             XCTAssertEqual(asked, "Linux aarch64", "the local build is for the remote's platform")
-            XCTAssertEqual(sent, artifact, answer)
+            XCTAssertEqual(sent, artifact, listing)
+            XCTAssertTrue(script.contains("$HOME/.pigeon/server/0.2.0"), "goes in under the app's version")
+            XCTAssertTrue(script.contains("pigeon-server 0.2.0 proto 1.0"))
         }
     }
 
@@ -147,7 +190,7 @@ final class HostInstallerTests: XCTestCase {
             if script.contains("uname -sm") {
                 return HostInstaller.Result(status: 0, output: "Linux x86_64", error: "")
             }
-            return HostInstaller.Result(status: 0, output: "/p\n", error: "")
+            return HostInstaller.Result(status: 0, output: "", error: "")
         }, version: "0.2.0")
         XCTAssertThrowsError(try installer.install(host: "far", allowInstall: false) { _ in
             XCTFail("refused installs do not fetch")
@@ -177,7 +220,7 @@ final class HostInstallerTests: XCTestCase {
                 return HostInstaller.Result(
                     status: 3, output: "", error: "pigeon-server: the uploaded file does not run here (got '')")
             }
-            return HostInstaller.Result(status: 0, output: "/p\n", error: "")
+            return HostInstaller.Result(status: 0, output: "", error: "")
         })
         XCTAssertThrowsError(try installer.install(host: "far") { _ in artifact }) {
             XCTAssertTrue("\($0)".contains("does not run here"), "got \($0)")
@@ -205,14 +248,13 @@ final class HostInstallerTests: XCTestCase {
         defer {
             _ = try? HostInstaller.sshRunner(host: host, script: "rm -rf \"\(scratch)\"", stdin: nil)
         }
-        let install = HostInstaller.installScript(
-            directory: scratch, expected: HostInstaller.versionLine(version))
+        let line = HostInstaller.versionLine(version, proto: HostInstaller.protocolVersion)
+        let install = HostInstaller.installScript(directory: scratch, expected: line)
         let sent = try HostInstaller.sshRunner(host: host, script: install, stdin: artifact)
         XCTAssertTrue(sent.ok, "upload passes the remote check: \(sent.error)")
 
-        let probe = try HostInstaller.sshRunner(
-            host: host, script: HostInstaller.probeScript(directory: scratch), stdin: nil)
-        XCTAssertTrue(probe.output.contains(HostInstaller.versionLine(version)), probe.output)
+        let probe = try HostInstaller.sshRunner(host: host, script: HostInstaller.probeScript, stdin: nil)
+        XCTAssertTrue(probe.output.contains(line), probe.output)
 
         // Something that does not run there must leave nothing behind.
         let junk = FileManager.default.temporaryDirectory.appendingPathComponent("pigeon-junk-\(UUID().uuidString)")
@@ -221,7 +263,7 @@ final class HostInstallerTests: XCTestCase {
         let bad = "$HOME/.pigeon/server/e2e-bad-\(UUID().uuidString.prefix(8))"
         let rejected = try HostInstaller.sshRunner(
             host: host,
-            script: HostInstaller.installScript(directory: bad, expected: HostInstaller.versionLine(version)),
+            script: HostInstaller.installScript(directory: bad, expected: line),
             stdin: junk)
         XCTAssertFalse(rejected.ok)
         let leftovers = try HostInstaller.sshRunner(

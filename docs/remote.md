@@ -34,9 +34,10 @@ stdin/stdout 上说话（首次安装后的第一次启动用它）；之后它�
 首次连接某个主机时，客户端自己在 ssh 上完成安装，不需要 root、不需要 PATH、不改 rc：
 
 1. `ssh host 'uname -sm'` → 选对应架构的内嵌产物（Linux x86_64/aarch64、macOS arm64/x86_64）；
-2. 跑 `~/.pigeon/server/<版本>/pigeon-server --version`：能执行、输出 `pigeon-server <版本>` 与客户端内核版本一致就直接用，
-   **不算哈希，也不需要本机有这个文件**（所以已经装好的机器连接时不下载）；
-3. 不存在、跑不起来或版本不对，才去取本机的产物，把二进制**从同一条 ssh 连接流过去**（不依赖 scp/ftp）：
+2. 对 `~/.pigeon/server/` 下每个已装的 `pigeon-server` 跑 `--version`（输出 `pigeon-server <版本> proto <大>.<小>`），
+   取最新的、**协议大版本与客户端相同**的那个直接用。发行版本号不同、协议小版本不同都不重装（小版本差异由握手按较小者协商，
+   见 `docs/protocol.md` §3.1）；**不算哈希，也不需要本机有这个文件**，所以已经装好的机器连接时不下载；
+3. 一个都没有、都跑不起来，或协议大版本都不同（不兼容），才去取本机的产物，把二进制**从同一条 ssh 连接流过去**（不依赖 scp/ftp）：
 
    ```sh
    ssh host 'mkdir -p ~/.pigeon/server/0.1.0 \
@@ -46,7 +47,7 @@ stdin/stdout 上说话（首次安装后的第一次启动用它）；之后它�
      < pigeon-server
    ```
 
-4. 在远端执行一次 `pigeon-server.tmp --version`：输出不是期望的版本行（传输被截断、架构不对）就删文件并报错，通过了才 `mv` 上线；
+4. 在远端执行一次 `pigeon-server.tmp --version`：输出不是期望的那一行（传输被截断、架构不对）就删文件并报错，通过了才 `mv` 上线；
 5. 启动：`ssh host ~/.pigeon/server/0.1.0/pigeon-server --proxy`（宿主已在远端常驻，桥接它的 unix socket；socket 上没人监听时 `--proxy` 先拉起一个宿主——无共享 stdio、独立进程组，ssh 断开不会带走它——再桥接，所以重启后的第一次连接也只需要这一条命令）。
 
 ### 远端产物从哪来（GitHub Release，按需下载）
@@ -67,7 +68,7 @@ stdin/stdout 上说话（首次安装后的第一次启动用它）；之后它�
 外加一个 `SHA256SUMS`。Linux 全是 musl 静态链接（纯 Rust，`rust-lld` 直接链，不要交叉 C 工具链），
 一个 CPU 一份就覆盖所有发行版。对照表在 `HostInstaller.platforms`，`ServerDownloadTests` 会比对它与工作流矩阵，两边不许漂移。
 
-远端缺这个版本、本机缓存里也没有对应平台的产物时，客户端（`ServerDownload.swift`）才下载：取 `releases/download/v<App 版本>/SHA256SUMS` →
+远端没有兼容的 server、本机缓存里也没有对应平台的产物时，客户端（`ServerDownload.swift`）才下载：取 `releases/download/v<App 版本>/SHA256SUMS` →
 下载对应 `.gz` → **校验哈希后**才解压、`chmod +x`、改名进 `~/.cache/pigeon/server/<版本>/`；
 校验不过什么都不留。同一版本同一平台只下一次。`PIGEON_SERVER_URL` 可指向镜像（内网 / 访问 GitHub 困难的地区）。
 下载失败时退回普通 ssh 模式（不持久），界面照常说明。
@@ -84,8 +85,8 @@ cargo build --release --manifest-path core/Cargo.toml --bin pigeon-server \
 
 ### 自动安装怎么做
 
-`Sources/PigeonApp/Net/HostInstaller.swift`：`ssh uname -sm` 探测平台 → 版本目录名就是版本号（`pg_core_version()`）→
-远端那个文件能跑且 `--version` 对得上就**不传**，否则才向本机要产物，把二进制流进
+`Sources/PigeonApp/Net/HostInstaller.swift`：`ssh uname -sm` 探测平台 → 列出远端已装的 server 并读 `--version` →
+有协议大版本相同的（`pg_proto_version()`）就**不传**，否则才向本机要产物，放进以 App 版本号（`pg_core_version()`）命名的目录，把二进制流进
 `~/.pigeon/server/<版本>/pigeon-server.tmp`，**在远端**跑通 `--version` 后才 `mv` 成正式文件，
 并只保留最新两个版本。远端的登录 shell 可能是 fish/csh，所以命令行走 base64 + `sh`，
 不假设是 POSIX sh。实跑记录见 `docs/m4-checklist.md`。
@@ -95,7 +96,8 @@ cargo build --release --manifest-path core/Cargo.toml --bin pigeon-server \
 - **安装在远端用户的家目录**：`$HOME/.pigeon/`（用 `$HOME` 展开，不假设家目录路径），
   目录结构：`~/.pigeon/server/<version>/pigeon-server`、`~/.pigeon/state/`（socket、日志）。
   绝不写 `/usr/local`、不用 sudo、不改 PATH 与 rc。
-- **版本目录并存**：升级只推新目录（`server/0.2.0/`），老会话继续跑老版本直到重启；保留最近 2 个版本并 GC。
+- **只在不兼容时升级**：App 升级但协议大版本没变，远端继续用已装的 server；大版本变了才推新目录（`server/0.2.0/`），
+  老会话继续跑老版本直到重启；保留最近 2 个版本并 GC。
 - **先问一次**：首次连接弹确认（“将在 host 上安装 pigeon-server 4.1 MB 到 `~/.pigeon/`”），可勾选“以后不再问”；
   `--no-remote-install` 全局关闭。
 - **卸载**：`rm -rf ~/.pigeon` 就是卸载，远端不留任何其它痕迹。

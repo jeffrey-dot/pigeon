@@ -208,7 +208,7 @@ final class RemoteSession {
         }
         client.onClose = { probe.finish(answered: false) }
         guard let hello = Wire.make(PG_MSG_HELLO) else { return false }
-        Wire.set(hello, u32: "proto", 0x0100)
+        Wire.set(hello, u32: "proto", UInt32(pg_proto_version()))
         Wire.set(hello, str: "client", "pigeon-mac")
         Wire.set(hello, strings: "features", ["scrollback", "delta", "status_all"])
         client.send(hello)
