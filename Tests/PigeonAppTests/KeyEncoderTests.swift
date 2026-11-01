@@ -86,7 +86,38 @@ final class KeyEncoderModeTests: XCTestCase {
         XCTAssertEqual(encode(KeyStroke(key: .function(1))), "\u{1b}OP")
         XCTAssertEqual(encode(KeyStroke(key: .function(4))), "\u{1b}OS")
         XCTAssertEqual(encode(KeyStroke(key: .function(2), control: true)), "\u{1b}[1;5Q")
-        XCTAssertNil(encode(KeyStroke(key: .function(13))), "F13+ is not a key we map")
+        XCTAssertNil(encode(KeyStroke(key: .function(21))), "F21+ is not a key we map")
+        XCTAssertNil(encode(KeyStroke(key: .function(0))))
+    }
+
+    /// xterm-256color's terminfo: kf13–kf20 are Shift+F1–F8.
+    func testF13ToF20AreShiftedF1ToF8() {
+        XCTAssertEqual(encode(KeyStroke(key: .function(13))), "\u{1b}[1;2P")
+        XCTAssertEqual(encode(KeyStroke(key: .function(15))), "\u{1b}[1;2R")
+        XCTAssertEqual(encode(KeyStroke(key: .function(17))), "\u{1b}[15;2~")
+        XCTAssertEqual(encode(KeyStroke(key: .function(20))), "\u{1b}[19;2~")
+        XCTAssertEqual(encode(KeyStroke(key: .function(13), control: true)), "\u{1b}[1;6P")
+    }
+
+    func testInsertIsTilde2() {
+        XCTAssertEqual(encode(KeyStroke(key: .insert)), "\u{1b}[2~")
+        XCTAssertEqual(encode(KeyStroke(key: .insert, control: true)), "\u{1b}[2;5~")
+    }
+
+    /// xterm's Ctrl+digit table (VT220 heritage): 2 is NUL, 3–7 are ESC and FS–US, 8 is DEL.
+    func testControlDigitsAndSlashFollowXterm() {
+        let expected: [Character: UInt8] = [
+            "/": 0x1f, "2": 0x00, "3": 0x1b, "4": 0x1c, "5": 0x1d, "6": 0x1e, "7": 0x1f,
+            "8": 0x7f, "~": 0x1e,
+        ]
+        for (character, byte) in expected {
+            XCTAssertEqual(
+                KeyEncoder.encode(KeyStroke(key: .character(character), control: true)), [byte],
+                "Ctrl+\(character)")
+        }
+        // Edge: digits with no control form type themselves.
+        XCTAssertEqual(KeyEncoder.encode(KeyStroke(key: .character("1"), control: true)), [0x31])
+        XCTAssertEqual(KeyEncoder.encode(KeyStroke(key: .character("9"), control: true)), [0x39])
     }
 
     func testOptionBackspaceDeletesAWord() {

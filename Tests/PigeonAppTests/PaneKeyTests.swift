@@ -52,4 +52,16 @@ final class PaneKeyTests: XCTestCase {
         pane.keyDown(with: keyDown("\u{F700}", keyCode: 126))
         XCTAssertEqual(received, Array("\u{1b}[A".utf8))
     }
+
+    /// Mac key codes for Insert (the Help key position) and F13–F20.
+    func testInsertAndHighFunctionKeysMapFromTheirKeyCodes() {
+        let codes: [UInt16: KeyStroke.Key] = [
+            114: .insert, 105: .function(13), 107: .function(14), 113: .function(15),
+            106: .function(16), 64: .function(17), 79: .function(18), 80: .function(19),
+            90: .function(20),
+        ]
+        for (code, key) in codes {
+            XCTAssertEqual(KeyStroke(keyDown("\u{F746}", keyCode: code))?.key, key, "keyCode \(code)")
+        }
+    }
 }

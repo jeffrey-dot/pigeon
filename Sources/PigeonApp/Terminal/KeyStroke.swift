@@ -10,6 +10,7 @@ public struct KeyStroke: Equatable {
         case backspace
         case escape
         case delete
+        case insert
         case up
         case down
         case left

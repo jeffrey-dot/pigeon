@@ -42,10 +42,17 @@ public enum KeyEncoder {
         case UInt8(ascii: "["), UInt8(ascii: "\\"), UInt8(ascii: "]"),
              UInt8(ascii: "^"), UInt8(ascii: "_"), UInt8(ascii: "@"):
             return ascii - 0x40
-        case UInt8(ascii: "?"):
+        case UInt8(ascii: "?"), UInt8(ascii: "8"):
             return 0x7f
-        case UInt8(ascii: " "):
+        case UInt8(ascii: " "), UInt8(ascii: "2"):
             return 0x00
+        // xterm's VT220-style digits: Ctrl+3…7 are ESC, FS, GS, RS, US.
+        case UInt8(ascii: "3")...UInt8(ascii: "7"):
+            return ascii - UInt8(ascii: "3") + 0x1b
+        case UInt8(ascii: "/"):
+            return 0x1f
+        case UInt8(ascii: "~"):
+            return 0x1e
         default:
             return nil
         }
@@ -99,6 +106,14 @@ public enum KeyEncoder {
             return tildeKey(5, stroke)
         case .pageDown:
             return tildeKey(6, stroke)
+        case .insert:
+            return tildeKey(2, stroke)
+        case let .function(number) where (13...20).contains(number):
+            // xterm-256color's kf13–kf20 are Shift+F1–F8.
+            var shifted = stroke
+            shifted.key = .function(number - 12)
+            shifted.shift = true
+            return special(shifted, appCursor: appCursor)
         case let .function(number):
             if (1...4).contains(number) {
                 // F1–F4 are SS3 P/Q/R/S, or `CSI 1;m P` once modified.
