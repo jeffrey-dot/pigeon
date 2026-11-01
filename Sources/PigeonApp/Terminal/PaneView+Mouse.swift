@@ -40,7 +40,7 @@ extension PaneView {
         guard modes & TerminalModes.alternateScroll != 0 else { return false }
         let key: KeyStroke.Key = lines > 0 ? .up : .down
         guard let bytes = KeyEncoder.encode(
-            KeyStroke(key: key), appCursor: modes & TerminalModes.appCursor != 0)
+            KeyStroke(key: key), modes: modes)
         else { return false }
         for _ in 0..<min(abs(lines), 10) { onInput?(bytes) }
         return true

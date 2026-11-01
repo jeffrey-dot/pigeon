@@ -397,7 +397,7 @@ final class PaneView: NSView {
             pendingKeyEvent = nil
             return
         }
-        guard let bytes = KeyEncoder.encode(stroke, appCursor: modes & TerminalModes.appCursor != 0)
+        guard let bytes = KeyEncoder.encode(stroke, modes: modes)
         else { return }
         sendBytes(bytes)
     }

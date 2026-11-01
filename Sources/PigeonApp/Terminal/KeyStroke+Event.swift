@@ -65,9 +65,16 @@ extension KeyStroke {
             option: option,
             shift: shift,
             command: command,
+            keypad: Self.keypadCodes.contains(event.keyCode),
             base: base
         )
     }
+
+    /// The numeric keypad's key codes (`kVK_ANSI_Keypad*`). `NSEvent.ModifierFlags.numericPad`
+    /// cannot be used: AppKit sets it on the arrow keys too.
+    static let keypadCodes: Set<UInt16> = [
+        65, 67, 69, 75, 76, 78, 81, 82, 83, 84, 85, 86, 87, 88, 89, 91, 92,
+    ]
 
     /// What `keyCode` types, unmodified, on the user's ASCII-capable keyboard layout
     /// (the layout macOS itself falls back to for shortcuts; Ghostty does the same).

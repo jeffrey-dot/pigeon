@@ -4,11 +4,17 @@ import Foundation
 /// modifier parameter (`CSI 1;5C` for Ctrl+→) and application cursor mode (DECCKM), which
 /// is what readline, vim and fish actually bind. The kitty keyboard protocol is later.
 public enum KeyEncoder {
-    /// `appCursor`: the program turned on DECCKM (`?1h`), so unmodified arrows, Home and
-    /// End go out as `SS3` (`ESC O A`) instead of `CSI`.
-    public static func encode(_ stroke: KeyStroke, appCursor: Bool = false) -> [UInt8]? {
+    /// `modes`: the `TerminalModes` bits the program turned on. DECCKM (`?1h`) sends
+    /// unmodified arrows, Home and End as `SS3` (`ESC O A`) instead of `CSI`; DECKPAM
+    /// (`ESC =`) sends unmodified keypad keys as `SS3` too.
+    public static func encode(_ stroke: KeyStroke, modes: UInt32 = 0) -> [UInt8]? {
         // Command chords belong to the app, not the shell.
         if stroke.command { return nil }
+        let appCursor = modes & TerminalModes.appCursor != 0
+
+        if modes & TerminalModes.appKeypad != 0, let sequence = applicationKeypad(stroke) {
+            return sequence
+        }
 
         if let sequence = special(stroke, appCursor: appCursor) {
             return sequence
@@ -31,6 +37,29 @@ public enum KeyEncoder {
         }
         return bytes
     }
+
+    /// xterm's application keypad (DECKPAM): `SS3` plus a final byte per key. Modified
+    /// keypad keys keep their normal encoding, as in xterm without `modifyKeypadKeys`.
+    private static func applicationKeypad(_ stroke: KeyStroke) -> [UInt8]? {
+        guard stroke.keypad, !stroke.control, !stroke.option, !stroke.shift else { return nil }
+        let final: Character
+        switch stroke.key {
+        case .enter:
+            final = "M"
+        case let .character(character):
+            guard let found = keypadFinals[character] else { return nil }
+            final = found
+        default:
+            return nil
+        }
+        return Array("\u{1b}O\(final)".utf8)
+    }
+
+    private static let keypadFinals: [Character: Character] = [
+        "0": "p", "1": "q", "2": "r", "3": "s", "4": "t", "5": "u", "6": "v", "7": "w",
+        "8": "x", "9": "y", ".": "n", ",": "l", "*": "j", "+": "k", "-": "m", "/": "o",
+        "=": "X",
+    ]
 
     private static func controlByte(_ character: Character) -> UInt8? {
         guard let ascii = character.asciiValue else { return nil }

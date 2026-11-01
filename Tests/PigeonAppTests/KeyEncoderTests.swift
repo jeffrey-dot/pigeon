@@ -56,7 +56,7 @@ final class KeyEncoderTests: XCTestCase {
 /// Modes the program turned on, and xterm's modifier parameter on cursor and function keys.
 final class KeyEncoderModeTests: XCTestCase {
     private func encode(_ stroke: KeyStroke, appCursor: Bool = false) -> String? {
-        KeyEncoder.encode(stroke, appCursor: appCursor).map { String(decoding: $0, as: UTF8.self) }
+        KeyEncoder.encode(stroke, modes: appCursor ? TerminalModes.appCursor : 0).map { String(decoding: $0, as: UTF8.self) }
     }
 
     func testApplicationCursorModeSwitchesArrowsToSS3() {

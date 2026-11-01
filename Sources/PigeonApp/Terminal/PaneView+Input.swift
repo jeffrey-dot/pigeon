@@ -9,6 +9,8 @@ extension PaneView: NSTextInputClient {
         // While composing, every key (Return to commit, Esc to cancel, arrows to pick a
         // candidate) is the input method's.
         if hasMarkedText() { return true }
+        // DECKPAM: keypad digits are keys the program binds, not text.
+        if stroke.keypad, modes & TerminalModes.appKeypad != 0 { return false }
         guard case .character = stroke.key, !stroke.control, !stroke.command else { return false }
         return !(stroke.option && optionAsMeta)
     }
@@ -87,7 +89,7 @@ extension PaneView: NSTextInputClient {
     /// `deleteBackward:`); the terminal encodes the original key instead.
     override func doCommand(by selector: Selector) {
         guard let event = pendingKeyEvent, let stroke = KeyStroke(event),
-              let bytes = KeyEncoder.encode(stroke, appCursor: modes & TerminalModes.appCursor != 0)
+              let bytes = KeyEncoder.encode(stroke, modes: modes)
         else { return }
         sendBytes(bytes)
     }

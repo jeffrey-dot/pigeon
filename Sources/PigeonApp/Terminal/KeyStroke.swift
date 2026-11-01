@@ -27,6 +27,8 @@ public struct KeyStroke: Equatable {
     public var option: Bool
     public var shift: Bool
     public var command: Bool
+    /// The key sits on the numeric keypad (DECKPAM and the kitty `KP_*` codes care).
+    public var keypad: Bool
     /// The same physical key on the ASCII-capable layout, when `key` is a character the
     /// current layout makes non-ASCII (`c` for Russian `с`). Ctrl chords and the kitty
     /// protocol's base-layout key need it; nil when unknown or not needed.
@@ -38,6 +40,7 @@ public struct KeyStroke: Equatable {
         option: Bool = false,
         shift: Bool = false,
         command: Bool = false,
+        keypad: Bool = false,
         base: Character? = nil
     ) {
         self.key = key
@@ -45,6 +48,7 @@ public struct KeyStroke: Equatable {
         self.option = option
         self.shift = shift
         self.command = command
+        self.keypad = keypad
         self.base = base
     }
 }
