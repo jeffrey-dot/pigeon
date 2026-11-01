@@ -345,6 +345,54 @@ final class MetalRendererTests: XCTestCase {
         XCTAssertEqual(row.glyphs.first?.size, SIMD2(10, 12))
     }
 
+    // MARK: - ligatures
+
+    func testOnlyPunctuationRunsOfOneStyleAreOfferedForShaping() {
+        var asked: [String] = []
+        var cells = frame("a->b !==x", cols: 9).cells
+        cells[5].attrs = CellAttrs.bold   // "!" in bold splits "!==" into "!" and "=="
+        let shaped = RowInstances.ligatures(cells[...]) { text, _, _ in
+            asked.append(text)
+            return Array(repeating: 7, count: text.count)
+        }
+        XCTAssertEqual(asked, ["->", "=="])
+        XCTAssertEqual(shaped.keys.sorted(), [1, 2, 6, 7])
+    }
+
+    func testAShapedRunDrawsItsGlyphsAndSkipsCoveredCells() {
+        var keys: [GlyphKey] = []
+        let row = RowInstances.build(row: 0, of: frame("=>", cols: 2), glyph: { key in
+            keys.append(key)
+            return self.slot(key)
+        }, shape: { _, _, _ in [GlyphKey.noGlyph - 1, GlyphKey.noGlyph] }) { $0 }
+        XCTAssertEqual(keys.map(\.glyph), [GlyphKey.noGlyph - 1], "the covered cell draws nothing")
+        XCTAssertEqual(row.glyphs.count, 1)
+        // Without shaping (the setting off, or a font without ligatures) nothing changes.
+        keys = []
+        _ = RowInstances.build(row: 0, of: frame("=>", cols: 2), glyph: { key in
+            keys.append(key)
+            return self.slot(key)
+        }) { $0 }
+        XCTAssertEqual(keys.map(\.glyph), [0, 0])
+    }
+
+    func testShapingIsANoOpForFontsWithoutLigaturesAndRefusesNonASCII() {
+        XCTAssertNil(CoreTextRenderer.shapeLigatures("é=", bold: false, italic: false))
+        XCTAssertNil(CoreTextRenderer.shapeLigatures("=", bold: false, italic: false), "one cell")
+        XCTAssertNil(CoreTextRenderer.shapeLigatures("", bold: false, italic: false))
+    }
+
+    func testAProgrammingFontsLigatureIsShapedIntoOneCellPerCharacter() throws {
+        guard let jetbrains = NSFont(name: "JetBrainsMonoNF-Regular", size: 13)
+            ?? NSFont(name: "JetBrainsMono-Regular", size: 13)
+        else { throw XCTSkip("JetBrains Mono is not installed") }
+        let arrow = try XCTUnwrap(CoreTextRenderer.shape("->", in: jetbrains), "JetBrains Mono has a -> ligature")
+        XCTAssertEqual(arrow.count, 2, "one glyph per cell keeps the grid")
+        XCTAssertNil(CoreTextRenderer.shape("a,", in: jetbrains), "no ligature, no shaping")
+        let menlo = try XCTUnwrap(NSFont(name: "Menlo-Regular", size: 13))
+        XCTAssertNil(CoreTextRenderer.shape("->", in: menlo), "Menlo has no ligatures")
+    }
+
     // MARK: - GPU smoke
 
     func testTheShadersCompileAndAGlyphRasterizes() throws {

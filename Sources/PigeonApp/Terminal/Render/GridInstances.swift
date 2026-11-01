@@ -18,6 +18,7 @@ struct GridInstances {
     mutating func update(
         from frame: GridFrame,
         atlasGeneration generation: Int,
+        shape: RowInstances.Shaper? = nil,
         glyph: (GlyphKey) -> AtlasSlot?
     ) {
         let reshaped = frame.rows != rows.count || frame.cols != cols
@@ -33,7 +34,7 @@ struct GridInstances {
         }
         lastRebuilt = 0
         for row in 0..<frame.rows where reshaped || frame.dirty.contains(row) {
-            rows[row] = RowInstances.build(row: row, of: frame, glyph: glyph) { fg in
+            rows[row] = RowInstances.build(row: row, of: frame, glyph: glyph, shape: shape) { fg in
                 if let known = readable[fg] { return known }
                 let solved = frame.palette.readable(fg)
                 readable[fg] = solved

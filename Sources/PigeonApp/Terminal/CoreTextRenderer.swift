@@ -105,31 +105,46 @@ enum CoreTextRenderer {
     /// system's fonts; fallback, symbol (Nerd Font / Powerline) and colour glyphs larger than
     /// their cells are scaled down to fit them.
     static func rasterize(_ key: GlyphKey, metrics: GridMetrics) -> GlyphBitmap? {
-        guard let scalar = Unicode.Scalar(key.codepoint) else { return nil }
         let (cellWidth, cellHeight) = metrics.glyphSize(span: Int(key.span))
         guard cellWidth > 0, cellHeight > 0 else { return nil }
-        var base = font(bold: key.bold) as CTFont
-        if key.italic {
-            base = CTFontCreateCopyWithSymbolicTraits(base, 0, nil, .traitItalic, .traitItalic) ?? base
+        let base = face(bold: key.bold, italic: key.italic)
+        let ink: CGRect
+        let colored: Bool
+        let fit: Bool
+        let paint: (CGContext) -> Void
+        if key.glyph != 0 {
+            // A shaped glyph of the primary face (`shapeLigatures`): drawn at its own size so
+            // the pieces of a ligature meet across cells.
+            var glyph = CGGlyph(key.glyph)
+            var bounds = CGRect.zero
+            CTFontGetBoundingRectsForGlyphs(base, .default, &glyph, &bounds, 1)
+            ink = bounds
+            colored = false
+            fit = false
+            paint = { context in
+                var position = CGPoint.zero
+                CTFontDrawGlyphs(base, &glyph, &position, 1, context)
+            }
+        } else {
+            guard let scalar = Unicode.Scalar(key.codepoint) else { return nil }
+            let line = CTLineCreateWithAttributedString(attributed(String(Character(scalar)), base))
+            let traits = runTraits(line, primary: base)
+            ink = inkBounds(line, colored: traits.colored)
+            colored = traits.colored
+            fit = traits.colored || traits.fallback || isSymbol(key.codepoint)
+            paint = { context in
+                context.textMatrix = .identity
+                context.textPosition = .zero
+                CTLineDraw(line, context)
+            }
         }
-        let attributed = NSAttributedString(
-            string: String(Character(scalar)),
-            attributes: [
-                NSAttributedString.Key(kCTFontAttributeName as String): base,
-                // Mask glyphs are white on black; the GPU tints them with the cell's colour.
-                NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String): true,
-            ]
-        )
-        let line = CTLineCreateWithAttributedString(attributed)
-        let (colored, fallback) = runTraits(line, primary: base)
         let scale = CGFloat(metrics.scale)
-        let ink = inkBounds(line, colored: colored)
         guard !ink.isNull, ink.width > 0, ink.height > 0 else { return nil }
         let place = placement(
             ink: ink,
             cell: CGSize(width: CGFloat(cellWidth) / scale, height: CGFloat(cellHeight) / scale),
             baseline: CGFloat(metrics.baseline) / scale,
-            fit: colored || fallback || isSymbol(key.codepoint))
+            fit: fit)
         // The ink box in device pixels from the cell's top-left (y down), with a one-pixel
         // margin for antialiasing.
         let left = ((place.penX + ink.minX * place.factor) * scale).rounded(.down) - 1
@@ -138,8 +153,9 @@ enum CoreTextRenderer {
         let bottom = ((place.baseline - ink.minY * place.factor) * scale).rounded(.up) + 1
         let width = Int(right - left)
         let height = Int(bottom - top)
-        // A runaway glyph (a font's broken bounding box) must not allocate a huge bitmap.
-        guard width > 0, height > 0, width <= cellWidth * 4, height <= cellHeight * 4
+        // A runaway glyph (a font's broken bounding box) must not allocate a huge bitmap; a
+        // ligature's last glyph may reach several cells back over its run.
+        guard width > 0, height > 0, width <= cellWidth * 8, height <= cellHeight * 4
         else { return nil }
         let bytesPerRow = colored ? width * 4 : width
         var bytes = [UInt8](repeating: 0, count: bytesPerRow * height)
@@ -167,15 +183,99 @@ enum CoreTextRenderer {
                 x: place.penX * scale - left,
                 y: CGFloat(height) - (place.baseline * scale - top))
             context.scaleBy(x: scale * place.factor, y: scale * place.factor)
-            context.textMatrix = .identity
-            context.textPosition = .zero
-            CTLineDraw(line, context)
+            paint(context)
             return true
         }
         guard drawn else { return nil }
         return GlyphBitmap(
             width: width, height: height, colored: colored, bytes: bytes,
             bearingX: Int(left), bearingY: Int(top))
+    }
+
+    /// The primary face in a style.
+    private static func face(bold: Bool, italic: Bool) -> CTFont {
+        let base = font(bold: bold) as CTFont
+        guard italic else { return base }
+        return CTFontCreateCopyWithSymbolicTraits(base, 0, nil, .traitItalic, .traitItalic) ?? base
+    }
+
+    private static func attributed(_ text: String, _ font: CTFont) -> NSAttributedString {
+        NSAttributedString(
+            string: text,
+            attributes: [
+                NSAttributedString.Key(kCTFontAttributeName as String): font,
+                // Mask glyphs are white on black; the GPU tints them with the cell's colour.
+                NSAttributedString.Key(kCTForegroundColorFromContextAttributeName as String): true,
+            ])
+    }
+
+    // MARK: - ligatures
+
+    private struct ShapeKey: Hashable {
+        var text: String
+        var bold: Bool
+        var italic: Bool
+    }
+
+    /// Shaped runs, keyed by run text and style; `[]` remembers "shaping changes nothing".
+    /// Shared by every render thread, hence the lock.
+    nonisolated(unsafe) private static var shaped: [ShapeKey: [UInt16]] = [:]
+    private static let shapedLock = NSLock()
+
+    /// One glyph ID per character of `text` (an ASCII run, one cell per character) after
+    /// shaping with the font's ligatures and contextual alternates. `GlyphKey.noGlyph` marks
+    /// a cell a multi-character ligature to its left covers. Nil when shaping draws the same
+    /// glyphs as the characters alone (most runs, and every font without ligatures), when
+    /// CoreText fell back to another font, or for non-ASCII text.
+    static func shapeLigatures(_ text: String, bold: Bool, italic: Bool) -> [UInt16]? {
+        let key = ShapeKey(text: text, bold: bold, italic: italic)
+        shapedLock.lock()
+        let hit = shaped[key]
+        shapedLock.unlock()
+        if let hit { return hit.isEmpty ? nil : hit }
+        let result = shape(text, face(bold: bold, italic: italic)) ?? []
+        shapedLock.lock()
+        // A screen of changing output must not grow this without bound.
+        if shaped.count > 4096 { shaped = [:] }
+        shaped[key] = result
+        shapedLock.unlock()
+        return result.isEmpty ? nil : result
+    }
+
+    /// `shapeLigatures` against an explicit font, uncached (tests).
+    static func shape(_ text: String, in font: NSFont) -> [UInt16]? {
+        shape(text, font as CTFont)
+    }
+
+    private static func shape(_ text: String, _ font: CTFont) -> [UInt16]? {
+        let units = Array(text.utf16)
+        guard units.count >= 2, units.allSatisfy({ $0 > 0x20 && $0 < 0x7F }) else { return nil }
+        var nominal = [CGGlyph](repeating: 0, count: units.count)
+        guard CTFontGetGlyphsForCharacters(font, units, &nominal, units.count) else { return nil }
+        let line = CTLineCreateWithAttributedString(attributed(text, font))
+        guard let runs = CTLineGetGlyphRuns(line) as? [CTRun] else { return nil }
+        let primaryName = CTFontCopyPostScriptName(font) as String
+        var out = [UInt16](repeating: GlyphKey.noGlyph, count: units.count)
+        for run in runs {
+            let attributes = CTRunGetAttributes(run) as NSDictionary
+            guard let value = attributes[kCTFontAttributeName as String],
+                  CFGetTypeID(value as CFTypeRef) == CTFontGetTypeID(),
+                  CTFontCopyPostScriptName(unsafeBitCast(value as AnyObject, to: CTFont.self)) as String
+                    == primaryName
+            else { return nil }
+            let count = CTRunGetGlyphCount(run)
+            var glyphs = [CGGlyph](repeating: 0, count: count)
+            var indices = [CFIndex](repeating: 0, count: count)
+            CTRunGetGlyphs(run, CFRange(location: 0, length: count), &glyphs)
+            CTRunGetStringIndices(run, CFRange(location: 0, length: count), &indices)
+            for (glyph, index) in zip(glyphs, indices) where index >= 0 && index < units.count {
+                // Two glyphs for one character (a decomposition) would not fit one cell.
+                guard out[index] == GlyphKey.noGlyph, glyph != 0 else { return nil }
+                out[index] = glyph
+            }
+        }
+        guard out[0] != GlyphKey.noGlyph, out != nominal.map({ UInt16($0) }) else { return nil }
+        return out
     }
 
     /// Private-use (Nerd Font icons, Powerline) and the symbol/dingbat blocks: drawn by fonts

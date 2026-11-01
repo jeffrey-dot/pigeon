@@ -5,6 +5,7 @@ import Foundation
 ///     font-family = "JetBrains Mono"
 ///     font-size = 14
 ///     line-height = 1.3
+///     font-ligatures = false
 ///
 /// Only flat `key = value` lines are understood (no tables or arrays), which is all this file
 /// holds; anything else, an unknown key or a value out of range, is ignored and the default
@@ -15,13 +16,18 @@ struct FontConfig: Equatable {
     var size: Double = 13
     var lineHeight: Double = 1.25
 
+    /// Programming-font ligatures (`->`, `!=`, `===`): runs of ASCII punctuation are shaped
+    /// with the font's contextual alternates. Fonts without them draw exactly as before.
+    var ligatures = true
+
     static let sizeRange = 8.0...36.0
     static let lineHeightRange = 1.0...2.0
 
-    init(family: String = "", size: Double = 13, lineHeight: Double = 1.25) {
+    init(family: String = "", size: Double = 13, lineHeight: Double = 1.25, ligatures: Bool = true) {
         self.family = family
         self.size = size
         self.lineHeight = lineHeight
+        self.ligatures = ligatures
     }
 
     init(toml text: String) {
@@ -38,6 +44,8 @@ struct FontConfig: Equatable {
                 if let number = Double(value), Self.sizeRange.contains(number) { size = number }
             case "line-height":
                 if let number = Double(value), Self.lineHeightRange.contains(number) { lineHeight = number }
+            case "font-ligatures":
+                if value == "true" { ligatures = true } else if value == "false" { ligatures = false }
             default:
                 continue
             }

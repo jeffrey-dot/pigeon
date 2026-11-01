@@ -8,4 +8,10 @@ struct GlyphKey: Hashable {
     var span: UInt8
     /// Cell height in device pixels: a pane on a 1x display needs its own rasterization.
     var pixelHeight: UInt16
+    /// A glyph ID in the primary face chosen by shaping (a ligature or contextual alternate),
+    /// drawn instead of `codepoint`'s own glyph; 0 for "the codepoint's glyph".
+    var glyph: UInt16 = 0
+
+    /// In a shaped run: this cell is covered by a ligature that starts to its left.
+    static let noGlyph: UInt16 = 0xFFFF
 }

@@ -36,6 +36,12 @@ final class FontConfigTests: XCTestCase {
         XCTAssertEqual(FontConfig(toml: #"font-family = "Mono #2""#).family, "Mono #2")
     }
 
+    func testLigaturesDefaultOnAndCanBeTurnedOff() {
+        XCTAssertTrue(FontConfig().ligatures)
+        XCTAssertFalse(FontConfig(toml: "font-ligatures = false").ligatures)
+        XCTAssertTrue(FontConfig(toml: "font-ligatures = maybe").ligatures, "malformed keeps the default")
+    }
+
     func testAMissingFileIsTheDefault() {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID()).toml")
         XCTAssertEqual(FontConfig.load(from: url), FontConfig())

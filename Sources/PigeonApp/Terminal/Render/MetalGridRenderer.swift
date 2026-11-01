@@ -211,7 +211,10 @@ final class MetalGridRenderer: @unchecked Sendable {
         // glyphs, so the atlas starts over and every row is rebuilt once against the empty one.
         // The same rebuild covers another pane's thread resetting the shared atlas mid-frame.
         for _ in 0..<2 {
-            instances.update(from: frame, atlasGeneration: atlas.generation) { key in
+            instances.update(
+                from: frame, atlasGeneration: atlas.generation,
+                shape: CoreTextRenderer.config.ligatures ? CoreTextRenderer.shapeLigatures : nil
+            ) { key in
                 glyphs.slot(for: key, metrics: frame.metrics)
             }
             _ = glyphs.resetIfOverflowed()
