@@ -419,6 +419,8 @@ pub extern "C" fn pg_snapshot_free(snap: *mut PgSnapshot) {
         let snap = unsafe { Box::from_raw(snap) };
         let cols = usize::from(snap.cols);
         let rows = usize::from(snap.rows);
+        // SAFETY: `screen`/`history` and their cell buffers were leaked by build_snapshot with
+        // exactly these lengths (rows × cols, history_count × cols) and are reclaimed once here.
         unsafe {
             if rows > 0 && !snap.screen.is_null() {
                 reclaim((*snap.screen).cells.cast_mut(), rows * cols);

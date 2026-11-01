@@ -1,3 +1,12 @@
+// Tests and tools, not production: panics and raw FFI calls are how they assert.
+#![allow(
+    unsafe_code,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::undocumented_unsafe_blocks
+)]
+
 //! ABI skeleton: lifecycle, error reporting and the promise that a successful
 //! call clears the thread-local error.
 

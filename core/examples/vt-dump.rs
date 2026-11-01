@@ -1,3 +1,12 @@
+// Tests and tools, not production: panics and raw FFI calls are how they assert.
+#![allow(
+    unsafe_code,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::undocumented_unsafe_blocks
+)]
+
 //! Renders a byte stream through the kernel and prints the resulting screen as text.
 //!
 //! This exists for `tools/vt-parity`: the same corpus goes through this and through a

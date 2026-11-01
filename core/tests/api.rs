@@ -1,3 +1,12 @@
+// Tests and tools, not production: panics and raw FFI calls are how they assert.
+#![allow(
+    unsafe_code,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::undocumented_unsafe_blocks
+)]
+
 //! The safe Rust client face. Uses `pigeon_core::api` only, exactly as a Rust
 //! client would; `abi.rs` covers the same behaviour through the C face.
 

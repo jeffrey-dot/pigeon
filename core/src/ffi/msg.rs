@@ -1057,7 +1057,9 @@ mod tests {
         let view = unsafe { &*snap };
         assert_eq!((view.cols, view.rows), (1, 1));
         assert_eq!(view.pane_id, 1);
+        // SAFETY: a 1×1 snapshot has one screen row with one cell, alive until the free below.
         let row = unsafe { &*view.screen };
+        // SAFETY: as above.
         let cell = unsafe { &*row.cells };
         assert_eq!(cell.codepoint, 'A' as u32);
         assert_eq!(cell.fg, 0x00ff_0000);

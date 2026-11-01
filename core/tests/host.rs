@@ -1,3 +1,12 @@
+// Tests and tools, not production: panics and raw FFI calls are how they assert.
+#![allow(
+    unsafe_code,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::undocumented_unsafe_blocks
+)]
+
 //! End-to-end: a client attaches, types, disconnects, reconnects — and the shell
 //! is still there with the same screen. This is the M0 promise ("关闭窗口进程不死"),
 //! proven against the real host binary over the real socket.
