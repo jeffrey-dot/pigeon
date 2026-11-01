@@ -48,23 +48,38 @@ stdin/stdout 上说话（首次安装后的第一次启动用它）；之后它�
 4. 校验 sha256（客户端内嵌期望值，远端 `shasum -a 256` 比对；不一致就删文件并报错）；
 5. 启动：`ssh host ~/.pigeon/server/3.2.0/pigeon-server --proxy`（宿主已在远端常驻，桥接它的 unix socket；socket 上没人监听时 `--proxy` 先拉起一个宿主——无共享 stdio、独立进程组，ssh 断开不会带走它——再桥接，所以重启后的第一次连接也只需要这一条命令）。
 
-### 本机交叉构建（macOS → Linux）
+### 远端产物从哪来（GitHub Release，按需下载）
 
-远端要的是**另一个架构的静态产物**，本机得先能编出来：
+`Pigeon.app` **不带**任何远端架构的 server，只带本机那一个。远端要的静态产物由
+`.github/workflows/release.yml` 在打 `v<版本>` tag 时统一构建，作为 release 资产发布：
+
+| `uname -sm` | 目标 | 资产 |
+|---|---|---|
+| `Linux x86_64` | `x86_64-unknown-linux-musl` | `pigeon-server-x86_64-unknown-linux-musl.gz` |
+| `Linux i686` / `i386` | `i686-unknown-linux-musl` | 同上命名 |
+| `Linux aarch64` / `arm64` | `aarch64-unknown-linux-musl` | 〃 |
+| `Linux armv7l` / `armv8l` | `armv7-unknown-linux-musleabihf` | 〃（树莓派 2+、多数 ARM 板） |
+| `Linux armv6l` | `arm-unknown-linux-musleabihf` | 〃（树莓派 1 / Zero） |
+| `Linux riscv64` | `riscv64gc-unknown-linux-musl` | 〃 |
+| `Darwin arm64` / `x86_64` | `aarch64-apple-darwin` / `x86_64-apple-darwin` | 〃 |
+
+外加一个 `SHA256SUMS`。Linux 全是 musl 静态链接（纯 Rust，`rust-lld` 直接链，不要交叉 C 工具链），
+一个 CPU 一份就覆盖所有发行版。对照表在 `HostInstaller.platforms`，`ServerDownloadTests` 会比对它与工作流矩阵，两边不许漂移。
+
+客户端（`ServerDownload.swift`）第一次连到某个平台时：取 `releases/download/v<App 版本>/SHA256SUMS` →
+下载对应 `.gz` → **校验哈希后**才解压、`chmod +x`、改名进 `~/.cache/pigeon/server/<版本>/`；
+校验不过什么都不留。同一版本同一平台只下一次。`PIGEON_SERVER_URL` 可指向镜像（内网 / 访问 GitHub 困难的地区）。
+下载失败时退回普通 ssh 模式（不持久），界面照常说明。
+
+开发构建（没有 bundle 版本号）不下载，直接用 `PIGEON_HOST_ARTIFACTS` 或 `core/target/<triple>/release/pigeon-server`。
+本机交叉编一份调试用：
 
 ```sh
-rustup target add x86_64-unknown-linux-musl        # aarch64 同理
-host=$(rustc -vV | sed -n 's/^host: //p')
-lld=$(ls ~/.rustup/toolchains/*/lib/rustlib/$host/bin/rust-lld | head -1)
+rustup target add x86_64-unknown-linux-musl
+lld=$(ls "$(rustc --print sysroot)"/lib/rustlib/*/bin/rust-lld | head -1)
 cargo build --release --manifest-path core/Cargo.toml --bin pigeon-server \
-  --target x86_64-unknown-linux-musl \
-  --config "target.x86_64-unknown-linux-musl.linker=\"$lld\""
-# → core/target/x86_64-unknown-linux-musl/release/pigeon-server（static-pie，1.7 MB）
+  --target x86_64-unknown-linux-musl --config "target.x86_64-unknown-linux-musl.linker=\"$lld\""
 ```
-
-macOS 的 `cc` 会被当成链接器并拒继 musl 的 `-static`，所以必须指到 rustup 自带的 `rust-lld`。
-产物放哪都行，安装器按**平台匹配**挑：`PIGEON_HOST_ARTIFACTS` 目录下的
-`pigeon-server-<triple>`，或 `core/target/<triple>/release/pigeon-server`。
 
 ### 自动安装怎么做
 

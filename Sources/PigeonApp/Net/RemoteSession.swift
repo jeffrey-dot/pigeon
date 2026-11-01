@@ -33,9 +33,10 @@ final class RemoteSession {
     private let installer: HostInstaller
     private let run: (String) throws -> HostInstaller.Result
     private let spawn: ([String]) throws -> Process
-    /// Finds the host build to push for a remote's `uname -sm` (tests pass their own, so the
-    /// outcome does not depend on what happens to be in `core/target`).
-    private let artifact: (String) -> URL?
+    /// Finds the server build to push for a remote's `uname -sm`: a local build if there is
+    /// one (development), else this version's release download. Tests pass their own, so the
+    /// outcome does not depend on what happens to be in `core/target` or on the network.
+    private let artifact: (String) throws -> URL?
     private var children: [Process] = []
 
     init(
@@ -43,12 +44,15 @@ final class RemoteSession {
         installer: HostInstaller = HostInstaller(),
         run: ((String) throws -> HostInstaller.Result)? = nil,
         spawn: (([String]) throws -> Process)? = nil,
-        artifact: ((String) -> URL?)? = nil
+        artifact: ((String) throws -> URL?)? = nil
     ) {
         self.host = host
         self.installer = installer
         self.artifact = artifact ?? { platform in
-            HostInstaller.artifact(for: platform, in: HostInstaller.searchDirectories())
+            if let local = HostInstaller.artifact(for: platform, in: HostInstaller.searchDirectories()) {
+                return local
+            }
+            return try ServerDownload.standard()?.binary(for: platform)
         }
         self.run = run ?? { script in
             try HostInstaller.sshRunner(host: host, script: script, stdin: nil)
@@ -127,7 +131,7 @@ final class RemoteSession {
             throw HostInstaller.Failure.unreachable(host: host, detail: probe.reason)
         }
         let platform = probe.output.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let artifact = artifact(platform) else {
+        guard let artifact = try artifact(platform) else {
             throw HostInstaller.Failure.noArtifact(platform)
         }
         return artifact

@@ -1,0 +1,94 @@
+---
+# Builds pigeon-server for every platform a remote machine can be, and publishes them on the
+# GitHub release for the tag. The app downloads the one a server needs on first connect
+# (Sources/PigeonApp/Net/ServerDownload.swift), so Pigeon.app itself carries none of them.
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# Asset names are a contract with ServerDownload: pigeon-server-<triple>.gz + SHA256SUMS.
+name: release
+"on":
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build, e.g. v0.1.0"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          # Linux: static musl + rust-lld, one per CPU covers every distribution. Pure Rust,
+          # so no C cross toolchain is needed. Keep in step with HostInstaller.platforms
+          # (ServerDownloadTests checks this list against it).
+          - {triple: x86_64-unknown-linux-musl, os: ubuntu-latest}
+          - {triple: i686-unknown-linux-musl, os: ubuntu-latest}
+          - {triple: aarch64-unknown-linux-musl, os: ubuntu-latest}
+          - {triple: armv7-unknown-linux-musleabihf, os: ubuntu-latest}
+          - {triple: arm-unknown-linux-musleabihf, os: ubuntu-latest}
+          - {triple: riscv64gc-unknown-linux-musl, os: ubuntu-latest}
+          - {triple: aarch64-apple-darwin, os: macos-latest}
+          - {triple: x86_64-apple-darwin, os: macos-latest}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - name: tag matches the crate version
+        run: |
+          tag="${{ inputs.tag || github.ref_name }}"
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' core/Cargo.toml | head -1)
+          test "$tag" = "v$version" || { echo "tag $tag != v$version"; exit 1; }
+      - run: rustup target add ${{ matrix.triple }}
+      - name: build
+        run: |
+          triple=${{ matrix.triple }}
+          case "$triple" in
+            *-linux-musl)
+              host=$(rustc -vV | sed -n 's/^host: //p')
+              lld=$(ls "$(rustc --print sysroot)/lib/rustlib/$host/bin/rust-lld")
+              config="--config target.$triple.linker=\"$lld\""
+              ;;
+            *) config="" ;;
+          esac
+          eval cargo build --release --manifest-path core/Cargo.toml \
+            --bin pigeon-server --target "$triple" $config
+          bin=core/target/$triple/release/pigeon-server
+          size=$(stat -f%z "$bin" 2>/dev/null || stat -c%s "$bin")
+          echo "pigeon-server ($triple): $size bytes"
+          test "$size" -le 8388608
+          mkdir -p dist
+          gzip -9 -n -c "$bin" > "dist/pigeon-server-$triple.gz"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pigeon-server-${{ matrix.triple }}
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: dist
+          merge-multiple: true
+      - name: checksums
+        working-directory: dist
+        run: sha256sum pigeon-server-*.gz | tee SHA256SUMS
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag="${{ inputs.tag || github.ref_name }}"
+          gh release view "$tag" >/dev/null 2>&1 \
+            || gh release create "$tag" --title "$tag" --notes "pigeon $tag"
+          gh release upload "$tag" dist/* --clobber

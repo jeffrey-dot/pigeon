@@ -59,13 +59,33 @@ public struct HostInstaller {
         }
     }
 
-    /// `uname -sm` values we can serve. Keys are Rust target triples (the artifact names).
+    /// `uname -sm` values we can serve → the Rust target triple built for them (the release
+    /// asset names, `.github/workflows/release.yml`). Linux builds are static musl, so one
+    /// per CPU covers every distribution.
     public static let platforms: [String: String] = [
-        "x86_64-unknown-linux-musl": "Linux x86_64",
-        "aarch64-unknown-linux-musl": "Linux aarch64",
-        "aarch64-apple-darwin": "Darwin arm64",
-        "x86_64-apple-darwin": "Darwin x86_64",
+        "Linux x86_64": "x86_64-unknown-linux-musl",
+        "Linux i686": "i686-unknown-linux-musl",
+        "Linux i386": "i686-unknown-linux-musl",
+        "Linux aarch64": "aarch64-unknown-linux-musl",
+        "Linux arm64": "aarch64-unknown-linux-musl",
+        // 32-bit ARM with hardware floats: Raspberry Pi 2+ / most boards (v7), Pi 1 / Zero (v6).
+        "Linux armv7l": "armv7-unknown-linux-musleabihf",
+        "Linux armv8l": "armv7-unknown-linux-musleabihf",
+        "Linux armv6l": "arm-unknown-linux-musleabihf",
+        "Linux riscv64": "riscv64gc-unknown-linux-musl",
+        "Darwin arm64": "aarch64-apple-darwin",
+        "Darwin x86_64": "x86_64-apple-darwin",
     ]
+
+    /// The triple built for a `uname -sm`, if any.
+    public static func triple(for platform: String) -> String? {
+        platforms[platform]
+    }
+
+    /// Every triple a release carries, once each.
+    public static var triples: [String] {
+        Set(platforms.values).sorted()
+    }
 
     /// Runs a shell command on `host`; `stdin` is the file to stream into it. Injected so the
     /// rules can be tested without a network.
@@ -98,7 +118,7 @@ public struct HostInstaller {
     /// has no matching binary is an error rather than a silent upload.
     public func install(host: String, artifact: URL, allowInstall: Bool = true) throws -> Remote {
         let platform = try platform(of: host)
-        guard let _ = Self.platforms.first(where: { $0.value == platform }) else {
+        guard Self.triple(for: platform) != nil else {
             throw Failure.unsupportedPlatform(platform)
         }
         let full = try hash(artifact)
@@ -206,40 +226,35 @@ public struct HostInstaller {
 
     /// The local binary that runs on `platform`, if we have one.
     public static func artifact(for platform: String, in directories: [URL]) -> URL? {
-        let triples = platforms.filter { $0.value == platform }.keys.sorted()
+        guard let triple = triple(for: platform) else { return nil }
         for directory in directories {
-            for triple in triples {
-                let named = directory.appendingPathComponent("pigeon-server-\(triple)")
-                if FileManager.default.isExecutableFile(atPath: named.path) {
-                    return named
-                }
-                // cargo keeps the triple in the path (`target/<triple>/release`) and the
-                // binary under its plain name.
-                if directory.pathComponents.contains(triple) {
-                    let plain = directory.appendingPathComponent("pigeon-server")
-                    if FileManager.default.isExecutableFile(atPath: plain.path) {
-                        return plain
-                    }
+            let named = directory.appendingPathComponent("pigeon-server-\(triple)")
+            if FileManager.default.isExecutableFile(atPath: named.path) {
+                return named
+            }
+            // cargo keeps the triple in the path (`target/<triple>/release`) and the
+            // binary under its plain name.
+            if directory.pathComponents.contains(triple) {
+                let plain = directory.appendingPathComponent("pigeon-server")
+                if FileManager.default.isExecutableFile(atPath: plain.path) {
+                    return plain
                 }
             }
         }
         return nil
     }
 
-    /// Where a local build can be, most specific first.
+    /// Where a local build can be, most specific first. Release builds of the app ship no
+    /// remote binaries; they download them (`ServerDownload`).
     public static func searchDirectories(
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        workingDirectory: String = FileManager.default.currentDirectoryPath,
-        resources: URL? = Bundle.main.resourceURL
+        workingDirectory: String = FileManager.default.currentDirectoryPath
     ) -> [URL] {
         var directories: [URL] = []
         if let explicit = environment["PIGEON_HOST_ARTIFACTS"], !explicit.isEmpty {
             directories.append(URL(fileURLWithPath: explicit))
         }
-        if let resources {
-            directories.append(resources.appendingPathComponent("server"))
-        }
-        for triple in platforms.keys.sorted() {
+        for triple in triples {
             directories.append(
                 URL(fileURLWithPath: workingDirectory)
                     .appendingPathComponent("core/target/\(triple)/release"))
