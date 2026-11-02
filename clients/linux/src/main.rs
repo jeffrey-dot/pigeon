@@ -1,20 +1,21 @@
 //! pigeon for Linux: a GTK4 window with an OpenGL grid renderer, talking the host protocol
 //! through `pigeon_core::api`.
 //!
-//! Scope of this first slice (`docs/renderer.md` §5.5): connect to the local host, show one
-//! pane, send keys, follow window resizes. The sidebar, splits and scrollback come next.
+//! Scope so far (`docs/renderer.md` §5): connect to the local host, draw every pane of the
+//! session at its rect, send keys, follow layout changes and window resizes.
+//! The sidebar and scrollback come next.
 
 mod host;
 mod input;
-mod pane;
 mod render;
 mod screen;
+mod view;
 
 use gtk::prelude::*;
 use gtk4 as gtk;
 use pigeon_core::api::Message;
 
-use crate::pane::Pane;
+use crate::view::Workspace;
 
 const APP_ID: &str = "dev.pigeon.Linux";
 
@@ -41,31 +42,33 @@ fn start(application: &gtk::Application) {
             return;
         }
     };
+
     let scale = primary_scale();
-    let metrics = render::measure(scale);
-    let pane = Pane::new(screen, host.clone(), scale);
-    let (cols, rows) = pane.borrow().grid();
+    let metrics = view::measure(scale);
+    let width = screen.cols();
+    let height = screen.rows();
+    let workspace = Workspace::new(screen, host.clone(), scale);
 
     let window = gtk::ApplicationWindow::builder()
         .application(application)
         .title("pigeon")
-        .child(&pane.borrow().area)
+        .child(&workspace.borrow().area)
         .build();
     // The application holds the window: without this the local goes out of scope when
     // `start` returns and GTK destroys the just-presented window.
     application.add_window(&window);
     // Open at the size the host's screen already has, so the first frame is not a resize.
     if let Some(metrics) = metrics {
-        let width = (cols as f32 * metrics.cell_w / scale).round().max(80.0);
-        let height = (rows as f32 * metrics.cell_h / scale).round().max(60.0);
-        window.set_default_size(width as i32, height as i32);
+        let w = (width as f32 * metrics.cell_w / scale).round().max(80.0);
+        let h = (height as f32 * metrics.cell_h / scale).round().max(60.0);
+        window.set_default_size(w as i32, h as i32);
     }
     window.present();
-    pane.borrow().area.grab_focus();
+    workspace.borrow().area.grab_focus();
 
     let receiver = host.receiver();
     let host_for_pump = host.clone();
-    let pane_for_pump = pane.clone();
+    let workspace_for_pump = workspace.clone();
     gtk::glib::spawn_future_local(async move {
         while let Ok(message) = receiver.recv().await {
             match &message {
@@ -75,34 +78,17 @@ fn start(application: &gtk::Application) {
                 }
                 Message::Error { code, detail, .. } => {
                     eprintln!("pigeon: host error {code}: {detail}");
-                    // The outbound queue overflowed: the screen is behind, so re-sync
-                    // instead of waiting for frames that were dropped (protocol §7).
-                    if code == "backpressure" {
-                        reattach(&pane_for_pump, &host_for_pump);
-                    }
                 }
                 other => {
-                    let handled = pane_for_pump.borrow_mut().apply(other);
-                    if !handled {
-                        reattach(&pane_for_pump, &host_for_pump);
+                    // A pane that is out of step asks for a fresh snapshot; the window keeps
+                    // drawing the old one until it arrives.
+                    if !workspace_for_pump.borrow_mut().apply(other) {
+                        eprintln!("pigeon: out of step with the host, re-attaching");
                     }
                 }
             }
         }
         eprintln!("pigeon: the host closed the connection");
-    });
-}
-
-/// Asks for a fresh snapshot for this pane; the client keeps drawing the old screen until it
-/// arrives, so the window never goes blank mid-session.
-fn reattach(pane: &std::rc::Rc<std::cell::RefCell<Pane>>, host: &host::HostLink) {
-    let pane_id = pane.borrow().pane_id();
-    host.send(Message::Attach {
-        id: u32::MAX,
-        pane_id,
-        size_policy: None,
-        history: Some(false),
-        since: None,
     });
 }
 

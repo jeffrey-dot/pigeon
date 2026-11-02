@@ -156,8 +156,8 @@ GL context`），shader 版本头在运行期按 `glGetString(GL_VERSION)` 选�
 clients/linux/src/
 ├── main.rs        装配：GtkApplication → 窗口 → 消息泵
 ├── host.rs        默认 socket 路径（问 `pigeon-server --socket-path`）、拉起、连接、hello/attach、收发线程
-├── screen.rs      屏幕模型：只有 `snapshot` 能改它；`delta` 到达即重新 attach
-├── pane.rs        GLArea + 渲染器 + 输入 + 尺寸：换成 cols/rows 就发 `resize_pane`
+├── screen.rs      一个 pane 的屏幕模型：只有 `snapshot` 能建它；`delta` 到达即重新 attach
+├── view.rs        Workspace：**一个 GLArea 画所有 pane**、焦点、快捷键、每 pane 的 cols/rows
 ├── input.rs       按键 → 字节（xterm legacy 编码，含 DECCKM）
 └── render/
     ├── mod.rs     Renderer：一帧 = 清屏 + 背景批 + 字形批 + 彩色字形批
@@ -168,6 +168,22 @@ clients/linux/src/
     ├── instances.rs 屏幕 → 实例（背景/制表符/下划线/删除线/光标 + 两组字形）
     └── palette.rs 颜色语义：`0x01000000|idx`、xterm 256、默认色、反色
 ```
+
+### 5.2.1 多 pane：一个 surface，N 个矩形
+
+分屏不按 pane 开 GL 上下文，而是**一个 `GtkGLArea` 画整个窗口**：
+
+- 位置来自宿主的 `layout`（归一化 rect），`view::place()` 把它换成设备像素——纯函数，有单测；
+- 每一帧按 pane 顺序：设 scissor 到该 pane 的 rect → 画它的矩形批/文字批/彩色批。
+  scissor 是必要的：`cols = floor(w / cell_w)` 只能保证格子不超宽，最后一行仍可能高出几像素；
+- 光标只画焦点 pane 的；焦点来自 `layout.focus`，点击做命中测试（rect 包含），并把焦点告诉宿主
+  （`focus` 消息 → 尺寸策略 `latest` 跟着走）；
+- 分割线用 `layout_splits` 的 rect 画一条 1px 半透明线，否则两个同底色的 pane 看起来像一个宽的；
+- zoom：`layout.zoom` 有值时只画那个 pane，铺满窗口。
+
+为什么不是每个 pane 一个 GLArea（macOS 的做法）：GTK 里每个 GLArea 都要自己的 context/FBO 与绘制
+调度，而这一侧的布局本来就由宿主给、命中测试只是矩形包含。上下文少一个，帧里就少一次 clear 与
+一次上下文切换；代价是 `PaneFrame` 这层抽象与 CPU 侧的索引。
 
 ### 5.3 一帧的四组四边形
 
@@ -191,13 +207,18 @@ emoji 的 ZWJ 序列、肤色/旗帜组合不做整形——协议按单元格�
 
 - 脏行增量（每帧整屏重建；`FrameStats` 先量出真实数字再决定是否值得做）；
 - 滚动回看（`scroll` 消息）与选择/复制；
-- 侧栏、分屏、zoom；
+- 侧栏；
+- 拖动分割线改比例（只画线，`resize_split` 还没接）；
 - kitty keyboard protocol（先用 xterm legacy 编码）；
 - 鼠标上报、焦点事件、括号粘贴；
 - DMABUF / 后台渲染线程（先主线程 GLArea，等有性能数字再换）。
 
 已补上（原先列在这里的三项）：制表符/方块元素改由矩形画（`boxdraw.rs`，从 macOS 的
 `BoxDrawing.swift` 移植，同一张权重表）、宽字符字形居中、emoji 彩色图集（COLR + CBDT 位图）。
+
+分屏已接：`Ctrl+Shift+D` 左右分、`Ctrl+Shift+E` 上下分、`Ctrl+Shift+W` 关焦点 pane、
+`Ctrl+Shift+Z` 放大/还原。左右分屏目视确认过（两个 fish 各自独立、分割线可见）；上下分屏与 zoom
+只做了单测级验证（见 §5.5 的说明）。
 
 ### 5.5 验收（第一片已过）
 
@@ -214,7 +235,11 @@ emoji 的 ZWJ 序列、肤色/旗帜组合不做整形——协议按单元格�
 7. ✅ `vim`：备用屏能进能出（`:q!` 后回到 shell 原屏）、`~` 填充列、状态行、文本光标；
 8. ✅ `cargo test --manifest-path core/Cargo.toml` 在 Linux 上 45 个用例全绿（不变量 7）。
 
-未验证（需要手动 / 后续）：鼠标上报、IME、`Ctrl-D` 后重连复原、多客户端尺寸策略标注。
+9. ✅ 分屏：`Ctrl+Shift+D` 后两个 pane 各自跑 fish、各自尺寸、分割线可见（目视），
+   `view::place()` 的几何（半屏/zoom/未知 pane 跳过）有 4 个单测。
+
+未验证（需要手动 / 后续）：上下分屏与 zoom 的目视效果、鼠标上报、IME、`Ctrl-D` 后重连复原、
+多客户端尺寸策略标注。
 
 ## 6. 后续（M5 剩余 → M6）
 

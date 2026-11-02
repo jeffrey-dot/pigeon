@@ -28,6 +28,16 @@ pub fn measure(scale: f32) -> Option<GridMetrics> {
     font::measure(FONT_POINTS * scale)
 }
 
+/// One pane in a frame: where its grid starts, how much room it has, what to draw.
+pub struct PaneFrame<'a> {
+    /// Device pixels from the canvas top-left to the pane's top-left.
+    pub origin: [f32; 2],
+    pub size: [f32; 2],
+    pub screen: &'a Screen,
+    /// The cursor is only drawn for the pane the keyboard goes to.
+    pub focused: bool,
+}
+
 pub struct Renderer {
     gl: gl::Gl,
     rects: gl::Pipeline,
@@ -112,56 +122,92 @@ impl Renderer {
         }
     }
 
-    /// Draws one full frame into the current framebuffer, `width`×`height` device pixels
-    /// (what GTK gives the GLArea: its allocation times the scale factor).
-    pub fn draw(&mut self, screen: &Screen, cursor_on: bool, width: i32, height: i32) {
+    /// Draws every pane into the current framebuffer, `width`×`height` device pixels (what
+    /// GTK gives the GLArea: its allocation times the scale factor).
+    pub fn draw(
+        &mut self,
+        panes: &[PaneFrame<'_>],
+        dividers: &[[f32; 4]],
+        width: i32,
+        height: i32,
+    ) {
         let context = &self.gl.context;
         if width <= 0 || height <= 0 {
             return;
         }
         let started = std::time::Instant::now();
-        let batch = instances::build(
-            context,
-            screen,
-            &self.font,
-            self.font.metrics,
-            &self.palette,
-            &mut self.atlas,
-            cursor_on,
-        );
+        let (mut rects, mut glyphs, mut colour_glyphs) = (0, 0, 0);
         unsafe {
             context.viewport(0, 0, width, height);
             let clear = self.background();
             context.clear_color(clear[0], clear[1], clear[2], clear[3]);
             context.clear(glow::COLOR_BUFFER_BIT);
-            self.rects.draw(context, &batch.rects, (width, height));
-
+            // A pane's grid can be a few pixels taller than its rect (whole cells only), so
+            // clip to the rect instead of letting the last row spill into its neighbour.
+            context.enable(glow::SCISSOR_TEST);
+            // The atlas handles never change once created, so the units are bound once.
             context.active_texture(glow::TEXTURE0);
             context.bind_texture(glow::TEXTURE_2D, Some(self.atlas.mask));
             context.active_texture(glow::TEXTURE1);
             context.bind_texture(glow::TEXTURE_2D, Some(self.atlas.color));
             self.glyphs.bind_atlases(context);
+        }
 
-            // Text is straight alpha, emoji are premultiplied (swash composites the layers).
-            self.glyphs.set_kind(context, 0);
-            context.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
-            self.glyphs.draw(context, &batch.glyphs, (width, height));
-            self.glyphs.set_kind(context, 1);
-            context.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
-            self.glyphs
-                .draw(context, &batch.color_glyphs, (width, height));
-            context.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
-
+        {
+            let mut draw = instances::Draw {
+                gl: context,
+                font: &self.font,
+                metrics: self.font.metrics,
+                palette: &self.palette,
+                atlas: &mut self.atlas,
+            };
+            for pane in panes {
+                let [x, y] = pane.origin;
+                let [w, h] = pane.size;
+                let batch = instances::build(&mut draw, pane.screen, pane.origin, pane.focused);
+                unsafe {
+                    context.scissor(x as i32, height - y as i32 - h as i32, w as i32, h as i32);
+                    self.rects.draw(context, &batch.rects, (width, height));
+                    // Text is straight alpha, emoji are premultiplied (swash composites the
+                    // layers before handing over the image).
+                    self.glyphs.set_kind(context, 0);
+                    context.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+                    self.glyphs.draw(context, &batch.glyphs, (width, height));
+                    self.glyphs.set_kind(context, 1);
+                    context.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
+                    self.glyphs
+                        .draw(context, &batch.color_glyphs, (width, height));
+                    context.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+                }
+                rects += batch.rects.len();
+                glyphs += batch.glyphs.len();
+                colour_glyphs += batch.color_glyphs.len();
+            }
+        }
+        if !dividers.is_empty() {
+            // A muted line, not a full-strength rule: the pane content is the subject.
+            let mut colour = Palette::components(self.palette.foreground);
+            colour[3] = 0.18;
+            let lines: Vec<instances::RectInstance> = dividers
+                .iter()
+                .map(|line| instances::RectInstance {
+                    pos: [line[0], line[1]],
+                    size: [line[2], line[3]],
+                    color: colour,
+                })
+                .collect();
+            unsafe {
+                context.disable(glow::SCISSOR_TEST);
+                self.rects.draw(context, &lines, (width, height));
+            }
+        }
+        unsafe {
             context.active_texture(glow::TEXTURE1);
             context.bind_texture(glow::TEXTURE_2D, None);
             context.active_texture(glow::TEXTURE0);
             context.bind_texture(glow::TEXTURE_2D, None);
         }
-        self.record(
-            started,
-            batch.rects.len(),
-            batch.glyphs.len() + batch.color_glyphs.len(),
-        );
+        self.record(started, rects, glyphs + colour_glyphs);
     }
 
     /// `PIGEON_FRAME_STATS=1` prints one line a second: the same knob the macOS client has,

@@ -44,19 +44,30 @@ pub struct Batch {
     pub color_glyphs: Vec<GlyphInstance>,
 }
 
-/// Draws every cell of `screen` plus the cursor.
+/// Everything a frame needs besides the screens themselves; one value is built per frame so
+/// the per-pane call stays short.
+pub struct Draw<'a> {
+    pub gl: &'a glow::Context,
+    pub font: &'a Font,
+    pub metrics: GridMetrics,
+    pub palette: &'a Palette,
+    pub atlas: &'a mut Atlas,
+}
+
+/// Draws every cell of `screen` at `origin` plus the cursor.
 ///
 /// The whole grid is rebuilt each frame; dirty-row tracking is the next optimisation, and
 /// is worth doing only once `PIGEON_FRAME_STATS=1` says it matters (`docs/renderer.md` §5.4).
-pub fn build(
-    gl: &glow::Context,
-    screen: &Screen,
-    font: &Font,
-    metrics: GridMetrics,
-    palette: &Palette,
-    atlas: &mut Atlas,
-    cursor_on: bool,
-) -> Batch {
+pub fn build(draw: &mut Draw<'_>, screen: &Screen, origin: [f32; 2], cursor_on: bool) -> Batch {
+    let Draw {
+        gl,
+        font,
+        metrics,
+        palette,
+        atlas,
+    } = draw;
+    let metrics = *metrics;
+    let [origin_x, origin_y] = origin;
     let cols = screen.cols();
     let rows = screen.rows();
     let mut batch = Batch::default();
@@ -64,7 +75,7 @@ pub fn build(
     let cursor_cell = (usize::from(cursor.x), usize::from(cursor.y));
 
     for y in 0..rows {
-        let top = y as f32 * metrics.cell_h;
+        let top = origin_y + y as f32 * metrics.cell_h;
         for x in 0..cols {
             let Some(cell) = screen.cell(x, y) else {
                 break;
@@ -75,7 +86,7 @@ pub fn build(
             }
             let attrs = cell.attrs;
             let (fg, bg) = palette.colors(cell.fg, cell.bg, attrs);
-            let left = x as f32 * metrics.cell_w;
+            let left = origin_x + x as f32 * metrics.cell_w;
             let width = metrics.cell_w * f32::from(cell.width.max(1));
 
             if bg != palette.background {
@@ -161,8 +172,8 @@ pub fn build(
 
     if cursor_on && cursor.visible {
         let (cx, cy) = cursor_cell;
-        let left = cx as f32 * metrics.cell_w;
-        let top = cy as f32 * metrics.cell_h;
+        let left = origin_x + cx as f32 * metrics.cell_w;
+        let top = origin_y + cy as f32 * metrics.cell_h;
         let bar = (metrics.cell_w / 8.0).max(1.0);
         let (pos, size) = match cursor.shape {
             // Bar and underline sit next to the glyph, so the glyph keeps its colour.
