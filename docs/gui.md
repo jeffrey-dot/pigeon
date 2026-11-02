@@ -63,8 +63,10 @@ Rust core（VT / 布局 / 状态 / 协议）  ── C ABI ──┬─ mac 客�
   对账：`tools/checks/metal-gui-check.sh`（两种外观各截一张）。
 - **输入法**：实现 `NSTextInputClient`（候选窗定位、marked text）；这是原生前端的额外活，
   但也是 Electron/winit 路线最难对齐的部分，正是选 A 的理由之一。
-- **Linux（M5）**：GTK4 + `GtkTextView` 不行（终端要自绘网格），用 `GtkDrawingArea` + Pango 排版；
+- **Linux（M5）**：GTK4 + `GtkTextView` 不行（终端要自绘网格）；网格用 `GtkGLArea` + OpenGL 3.3
+  （实例化四边形 + R8 字形图集，字体走 `fontdb` + `swash`，不用 Pango 排版）；
   侧栏用 `GtkListBox`/`GtkTreeListModel`。行为与 macOS 对齐靠 `docs/ui.md` 的规格。
+  渲染形状与参照实现见 [renderer.md](renderer.md)，选型理由见 [adr/0011](adr/0011-linux-rendering.md)。
 
 ## 4. 展示层要共享什么
 
