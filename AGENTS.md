@@ -30,6 +30,8 @@ cargo run   --manifest-path core/Cargo.toml --bin pigeon-server   # 会话宿主
 cargo build                     # 先建核心：客户端链接 core/target/*/libpigeon_core.a
 swift build                     # 客户端（macOS only）
 swift test                      # 客户端纯逻辑单测（SidebarModel / Grouping / KeyEncoder）
+cargo build -p pigeon-linux     # Linux 客户端（需要 GTK4；不在根的 default-members 里）
+cargo test  -p pigeon-linux     # Linux 客户端纯逻辑单测（KeyEncoder / 调色板 / 实例布局）
 # tools/vt-parity/run.sh        # VT 对账（M1 建；现在还只有 core/tests 的确定性用例）
 ```
 
@@ -61,15 +63,18 @@ Rust 客户端走 `pigeon_core::api`。客户端不认识 `core` 的内部类型
 - `clients/` —— **客户端层**，每个平台一个目录；客户端只通过客户端接口看图，不认识 `core` 内部类型。
 - `clients/macos/` —— **macOS only**：C 头封装（`Sources/PigeonCore/`）+ AppKit 客户端（`Sources/PigeonApp/`）。
   AppKit 视图与 CoreText 渲染都在这里，不要往下泄漏。
-- `clients/linux/` —— M5 的 GTK4 客户端（未开工）：独立的 crate / target，不进 `core/`（`core/` 不许 GUI 依赖）。
-  Rust 写就只依赖 `pigeon_core::api` 与 `docs/protocol.md`；用 C/Vala 写就只依赖 C ABI。两种都不 import `PigeonApp`。
+- `clients/linux/` —— M5 的 **GTK4 客户端（Rust）**：workspace 成员但**不在 `default-members`**里
+  （`cargo build`/`cargo test` 在根上仍然只跑 `core`，macOS 不需要 GTK）。只依赖 `pigeon_core::api`
+  （`default-features = false`）与 `docs/protocol.md`；不 import `PigeonApp`。
+  网格走 `GtkGLArea` + OpenGL（ES 3 / 3.3 core 两套 shader 头），字体 `fontdb` + `swash`，
+  `unsafe` 只允许在 `clients/linux/src/render/gl.rs`（GL 加载与上传边界）。见 `docs/renderer.md`。
 
 ```
 pigeon/
 ├── AGENTS.md
 ├── GLOSSARY.md                   # 领域词汇：一个概念只有一个名字（写代码前先查这里）
 ├── Package.swift                 # SwiftPM：clients/macos 的三个 target（macOS only）
-├── docs/                         # plan.md, protocol.md, ui.md, 历史资料
+├── docs/                         # plan.md, protocol.md, ui.md, renderer.md, 历史资料
 │   └── adr/                      # 架构决策记录：为什么是这样而不是别的那样
 ├── tools/                        # 开发期脚本（不进产品；各自定位仓库根，见 tools/README.md）
 │   ├── build/                    # bundle-app.sh：打 Pigeon.app
@@ -123,7 +128,7 @@ pigeon/
     │   │       ├── Layout/           # 分屏：把 PgRect 画成 AppKit 视图、焦点与选择
     │   │       └── Update/           # 软件更新：检查 latest.json、验签、替换 Pigeon.app 并重启
     │   └── Tests/PigeonAppTests/     # SidebarModel / Grouping / KeyEncoder 等纯逻辑单测
-    └── linux/                    # M5：GTK4 客户端（未开工，见 clients/linux/README.md）
+    └── linux/                    # M5：GTK4 客户端（Rust，第一片已跑通；见 clients/linux/README.md）
 ```
 
 协议与宿主只存在于 `core/src/proto/` 与 `core/src/bin/pigeon-server/`，没有 Swift 版：宿主必须是 3–8MB

@@ -1,0 +1,23 @@
+[package]
+name = "pigeon-linux"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "GPL-3.0-or-later"
+description = "pigeon for Linux: GTK4 client with an OpenGL grid renderer"
+publish = false
+
+[[bin]]
+name = "pigeon"
+path = "src/main.rs"
+
+[dependencies]
+# Clients only ever see `api`; the internal modules stay out of reach (AGENTS.md §3).
+pigeon-core = { path = "../../core", default-features = false }
+gtk4 = "0.11"
+glow = "0.18"
+libloading = "0.8"
+fontdb = "0.24"
+swash = "0.2"
+unicode-width = "0.2"
+async-channel = "2"

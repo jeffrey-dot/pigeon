@@ -1,7 +1,10 @@
 # Workspace root: lets the documented commands run from the repository root
 # (`cargo build --release --bin pigeon-server`, `cargo test`).
 [workspace]
-members = ["core"]
+members = ["core", "clients/linux"]
+# `cargo build`/`cargo test` at the root stay core-only: the Linux client needs GTK4, which
+# only exists on Linux (build it with `-p pigeon-linux`).
+default-members = ["core"]
 resolver = "2"
 
 # Profiles must live in the workspace root, otherwise cargo ignores them.
