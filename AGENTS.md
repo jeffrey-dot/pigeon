@@ -67,8 +67,10 @@ Rust 客户端走 `pigeon_core::api`。客户端不认识 `core` 的内部类型
 ```
 pigeon/
 ├── AGENTS.md
+├── GLOSSARY.md                   # 领域词汇：一个概念只有一个名字（写代码前先查这里）
 ├── Package.swift                 # targets: PigeonApp / PigeonCore / PigeonAppTests（macOS only）
 ├── docs/                         # plan.md, protocol.md, ui.md, 历史资料
+│   └── adr/                      # 架构决策记录：为什么是这样而不是别的那样
 ├── tools/vt-parity/              # M1：对账脚本与 golden 文件（不含产品代码）
 ├── include/pigeon_core.h         # 生成物：cbindgen 从 core/src/ffi/mod.rs 输出，不许手改
 ├── core/                         # Rust 内核 + 会话宿主（crate + bin，平台无关）
@@ -224,6 +226,8 @@ pigeon/
 
 ## 11. 设计文档在哪
 
+- `GLOSSARY.md` —— 领域词汇表：一个概念只有一个名字，含「禁用的说法」（**写代码前先读**）
+- `docs/adr/` —— 架构决策记录（ADR）：已定完、别再重新讨论的事，以及否掉过的选项（**改设计前先读**）
 - `docs/plan.md` —— 架构、选型、里程碑、验收、风险、已知缺口（**先读这个**）
 - `docs/core.md` —— 内核边界、C ABI 说明、快照/增量、语言选型、测试策略
 - `docs/protocol.md` —— 客户端 ⇄ 宿主的字段级契约（消息表、错误码、能力、尺寸策略）
