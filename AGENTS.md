@@ -102,7 +102,9 @@ pigeon/
     │   ├── Sources/
     │   │   ├── PigeonCore/       # C 头封装（module map + 类型映射，不实现语义）
     │   │   └── PigeonApp/        # macOS 客户端：只做 UI 与输入
-    │   │       ├── PigeonApp.swift   # @main，装配依赖
+    │   │       ├── main.swift        # 入口：SIGPIPE、NSApplication、装配 AppDelegate
+    │   │       ├── PigeonApp.swift   # AppDelegate 本体：状态 + 两个生命周期钩子
+    │   │       ├── AppDelegate+*.swift  # 按分节拆开的 extension：Window / Connection / Commands / Sessions / Hosts / Protocol
     │   │       ├── Net/          # 连到宿主与远端
     │   │       │   ├── Connection/   # 一条 socket：分帧、hello、心跳
     │   │       │   ├── Host/         # 一台机器：命名、持久化、安装、拉起、恢复
