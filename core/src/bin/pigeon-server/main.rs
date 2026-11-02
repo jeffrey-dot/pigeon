@@ -5,26 +5,16 @@
 //! only drops its tasks — the PTYs and the layout keep running, which is the point of pigeon.
 
 mod cli;
-mod client;
-mod client_state;
-mod cmd;
+mod connection;
 mod dispatch;
-mod dispatch_layout;
-mod dispatch_pane;
-mod event;
-mod handshake;
-mod host_state;
-mod out_queue;
-mod outbound;
-mod pane_actor;
-mod pane_query;
-mod resync;
+mod host;
+mod pane;
 mod transport;
 
 use std::process::ExitCode;
 
 use cli::{Command, Transport};
-use host_state::HostState;
+use host::state::HostState;
 
 fn main() -> ExitCode {
     let runtime = match tokio::runtime::Builder::new_multi_thread()

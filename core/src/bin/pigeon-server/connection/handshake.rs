@@ -2,8 +2,8 @@
 
 use pigeon_core::proto::{Message, PROTO_VERSION};
 
-use crate::client_state::ClientState;
-use crate::host_state::HostState;
+use crate::connection::state::ClientState;
+use crate::host::state::HostState;
 
 /// Capabilities this build offers (protocol §5).
 const SERVER_FEATURES: &[&str] = &["delta", "scrollback", "osc7501", "status_all"];

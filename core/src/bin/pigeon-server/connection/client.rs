@@ -10,14 +10,14 @@ use tokio::task::JoinHandle;
 use pigeon_core::error::PgError;
 use pigeon_core::proto::{self, Message};
 
-use crate::client_state::ClientState;
+use crate::connection::handshake;
+use crate::connection::outbound::Outbound;
+use crate::connection::resync::resync;
+use crate::connection::state::ClientState;
 use crate::dispatch::dispatch;
-use crate::event::Event;
-use crate::handshake;
-use crate::host_state::HostState;
-use crate::outbound::Outbound;
-use crate::pane_query::{latest_status, pending_statuses};
-use crate::resync::resync;
+use crate::host::event::Event;
+use crate::host::state::HostState;
+use crate::pane::query::{latest_status, pending_statuses};
 
 /// Connection ids the host hands out in `hello_ack` (protocol §3.1).
 static NEXT_CLIENT: AtomicU32 = AtomicU32::new(1);

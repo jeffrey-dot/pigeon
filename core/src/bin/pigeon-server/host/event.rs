@@ -5,7 +5,7 @@
 
 use pigeon_core::proto::Message;
 
-use crate::out_queue::Frame;
+use crate::connection::out_queue::Frame;
 
 #[derive(Clone)]
 pub enum Event {
@@ -42,7 +42,7 @@ pub enum Event {
 /// `message` as a whole frame, or `None` (logged) if it cannot be one: the only failure is a
 /// frame over the 8 MiB limit, which no client could read anyway.
 pub fn encode(message: &Message) -> Option<Frame> {
-    crate::outbound::encode(message)
+    crate::connection::outbound::encode(message)
         .map_err(|error| eprintln!("pigeon-server: {error}"))
         .ok()
 }

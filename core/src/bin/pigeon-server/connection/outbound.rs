@@ -12,9 +12,9 @@ use tokio::task::JoinHandle;
 
 use pigeon_core::proto::{self, Message};
 
-use crate::host_state::Sessions;
-use crate::out_queue::{Frame, OutQueue, Outgoing, OverCap};
-use crate::pane_query::snapshot_of;
+use crate::connection::out_queue::{Frame, OutQueue, Outgoing, OverCap};
+use crate::host::state::Sessions;
+use crate::pane::query::snapshot_of;
 
 /// Encoded bytes one connection may have waiting before the host gives up on it. A full
 /// snapshot with history is at most one 8 MiB frame, so this leaves room for several plus

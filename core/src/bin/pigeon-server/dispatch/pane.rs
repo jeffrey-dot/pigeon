@@ -4,13 +4,13 @@
 use pigeon_core::proto::Message;
 use pigeon_core::session::SizePolicy;
 
-use crate::client_state::ClientState;
-use crate::cmd::Cmd;
+use crate::connection::state::ClientState;
 use crate::dispatch::no_such_pane;
-use crate::event::{encode, Event};
-use crate::host_state::{broadcast_size, session_of, HostState, Session};
-use crate::pane_actor::spawn_pane;
-use crate::pane_query::{catch_up, latest_status, scroll as scroll_pane, sender_of, snapshot_of};
+use crate::host::event::{encode, Event};
+use crate::host::state::{broadcast_size, session_of, HostState, Session};
+use crate::pane::actor::spawn_pane;
+use crate::pane::cmd::Cmd;
+use crate::pane::query::{catch_up, latest_status, scroll as scroll_pane, sender_of, snapshot_of};
 
 const DEFAULT_COLS: u16 = 80;
 const DEFAULT_ROWS: u16 = 24;

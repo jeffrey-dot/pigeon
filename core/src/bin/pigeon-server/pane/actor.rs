@@ -13,9 +13,9 @@ use tokio::time::{interval, sleep_until, Instant, MissedTickBehavior};
 use pigeon_core::session::{PaneMeta, PaneState};
 use pigeon_core::term::Palette;
 
-use crate::cmd::Cmd;
-use crate::event::{encode, Event};
-use crate::host_state::{Exits, HostState, Meta};
+use crate::host::event::{encode, Event};
+use crate::host::state::{Exits, HostState, Meta};
+use crate::pane::cmd::Cmd;
 
 const SCROLLBACK: usize = 10_000;
 /// At most one delta per pane per frame. A burst of output (`cat`, a build log) arrives in

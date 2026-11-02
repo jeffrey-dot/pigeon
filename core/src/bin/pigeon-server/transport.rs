@@ -10,8 +10,8 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::time::Instant;
 
 use crate::cli::Transport;
-use crate::client::handle_client;
-use crate::host_state::HostState;
+use crate::connection::client::handle_client;
+use crate::host::state::HostState;
 
 /// Serves the socket forever, plus one stdio client with `Transport::Stdio`.
 pub async fn serve(socket: &Path, transport: Transport, host: HostState) -> Result<(), String> {
@@ -66,7 +66,7 @@ async fn shut_down(host: &HostState, socket: &Path) {
             .collect()
     };
     for sender in senders {
-        let _ = sender.send(crate::cmd::Cmd::Kill).await;
+        let _ = sender.send(crate::pane::cmd::Cmd::Kill).await;
     }
     host.sessions.lock().await.clear();
     let _ = std::fs::remove_file(socket);

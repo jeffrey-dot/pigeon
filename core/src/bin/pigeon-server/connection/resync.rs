@@ -9,11 +9,11 @@
 
 use pigeon_core::proto::Message;
 
-use crate::client_state::ClientState;
-use crate::handshake;
-use crate::host_state::HostState;
-use crate::outbound::Outbound;
-use crate::pane_query::current_status;
+use crate::connection::handshake;
+use crate::connection::outbound::Outbound;
+use crate::connection::state::ClientState;
+use crate::host::state::HostState;
+use crate::pane::query::current_status;
 
 pub async fn resync(
     host: &HostState,

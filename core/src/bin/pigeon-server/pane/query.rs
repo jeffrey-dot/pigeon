@@ -5,8 +5,8 @@ use tokio::sync::{mpsc, oneshot};
 
 use pigeon_core::proto::Message;
 
-use crate::cmd::Cmd;
-use crate::host_state::Sessions;
+use crate::host::state::Sessions;
+use crate::pane::cmd::Cmd;
 
 pub async fn sender_of(sessions: &Sessions, pane_id: u32) -> Option<mpsc::Sender<Cmd>> {
     let map = sessions.lock().await;

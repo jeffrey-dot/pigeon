@@ -1,13 +1,16 @@
 //! One inbound message → its effect and at most one direct reply. Session-tree edits live
-//! in `dispatch_layout`, pane lifecycle and I/O in `dispatch_pane`.
+//! in `layout`, pane lifecycle and I/O in `pane`.
+
+pub mod layout;
+pub mod pane;
 
 use pigeon_core::proto::Message;
 use pigeon_core::term::Palette;
 
-use crate::client_state::ClientState;
-use crate::cmd::Cmd;
-use crate::host_state::HostState;
-use crate::{dispatch_layout as layout, dispatch_pane as pane, handshake};
+use crate::connection::handshake;
+use crate::connection::state::ClientState;
+use crate::host::state::HostState;
+use crate::pane::cmd::Cmd;
 
 pub async fn dispatch(
     message: Message,

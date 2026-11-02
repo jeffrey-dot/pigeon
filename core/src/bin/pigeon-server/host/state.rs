@@ -9,8 +9,8 @@ use tokio::sync::{broadcast, mpsc, Mutex};
 use pigeon_core::session::{PaneMeta, SessionState};
 use pigeon_core::term::Palette;
 
-use crate::cmd::{send_or_queue, Cmd};
-use crate::event::{encode, Event};
+use crate::host::event::{encode, Event};
+use crate::pane::cmd::{send_or_queue, Cmd};
 
 /// One session, with a channel to each pane's task as the pane handle.
 pub type Session = SessionState<mpsc::Sender<Cmd>>;

@@ -91,7 +91,11 @@ pigeon/
 │   │   ├── status/               # OSC 7501 解析与记录生命周期
 │   │   ├── session/              # session/window/pane 模型
 │   │   └── proto/                # 分帧 + CBOR 编解码（协议的唯一实现）
-│   ├── src/bin/pigeon-server/      # 会话宿主：cli / transport / client / dispatch / pane_actor（3–8MB 硬指标）
+│   ├── src/bin/pigeon-server/      # 会话宿主：main / cli / transport + 四个组（3–8MB 硬指标）
+│   │   ├── host/                 # 共享状态：sessions、pane 元数据、事件总线
+│   │   ├── connection/           # 一条连接：client、握手、出站队列、追赶
+│   │   ├── pane/                 # 一个 pane 的任务：actor / cmd / query
+│   │   └── dispatch/             # 入站消息 → 效果：dispatch + layout / pane
 │   └── tests/                    # abi（C 外形）+ api（Rust 外形）+ host（真实 PTY 端到端）
 └── clients/                      # 客户端：每个平台一个目录
     ├── macos/

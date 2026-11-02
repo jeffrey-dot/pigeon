@@ -5,11 +5,11 @@ use pigeon_core::layout::Axis;
 use pigeon_core::proto::{Message, SplitAxis};
 use pigeon_core::session::empty_layout_message;
 
-use crate::cmd::{send_or_queue, Cmd};
 use crate::dispatch::no_such_pane;
-use crate::event::{encode, Event};
-use crate::host_state::{apply_layout, broadcast_size, session_of, HostState};
-use crate::pane_actor::spawn_pane;
+use crate::host::event::{encode, Event};
+use crate::host::state::{apply_layout, broadcast_size, session_of, HostState};
+use crate::pane::actor::spawn_pane;
+use crate::pane::cmd::{send_or_queue, Cmd};
 
 pub async fn split(
     host: &HostState,
