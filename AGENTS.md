@@ -99,7 +99,10 @@ pigeon/
     │   │   ├── PigeonCore/       # C 头封装（module map + 类型映射，不实现语义）
     │   │   └── PigeonApp/        # macOS 客户端：只做 UI 与输入
     │   │       ├── PigeonApp.swift   # @main，装配依赖
-    │   │       ├── Net/          # 传输、会话生命周期、远端安装
+    │   │       ├── Net/          # 连到宿主与远端
+    │   │       │   ├── Connection/   # 一条 socket：分帧、hello、心跳
+    │   │       │   ├── Host/         # 一台机器：命名、持久化、安装、拉起、恢复
+    │   │       │   └── Session/      # a/b/c 三档对接与退化模式
     │   │       ├── Sidebar/
     │   │       │   ├── SidebarModel.swift      # 分组/排序/未读/计数（纯逻辑，可单测）
     │   │       │   ├── SidebarViewController.swift
