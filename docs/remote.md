@@ -85,7 +85,7 @@ cargo build --release --manifest-path core/Cargo.toml --bin pigeon-server \
 
 ### 自动安装怎么做
 
-`Sources/PigeonApp/Net/HostInstaller.swift`：`ssh uname -sm` 探测平台 → 列出远端已装的 server 并读 `--version` →
+`clients/macos/Sources/PigeonApp/Net/HostInstaller.swift`：`ssh uname -sm` 探测平台 → 列出远端已装的 server 并读 `--version` →
 有协议大版本相同的（`pg_proto_version()`）就**不传**，否则才向本机要产物，放进以 App 版本号（`pg_core_version()`）命名的目录，把二进制流进
 `~/.pigeon/server/<版本>/pigeon-server.tmp`，**在远端**跑通 `--version` 后才 `mv` 成正式文件，
 并只保留最新两个版本。远端的登录 shell 可能是 fish/csh，所以命令行走 base64 + `sh`，

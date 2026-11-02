@@ -1,7 +1,7 @@
 ---
 # Builds pigeon-server for every platform a remote machine can be, plus Pigeon.app, and
 # publishes them on the GitHub release for the tag. The app downloads the server a remote
-# needs on first connect (Sources/PigeonApp/Net/ServerDownload.swift), so Pigeon.app itself
+# needs on first connect (clients/macos/Sources/PigeonApp/Net/ServerDownload.swift), so Pigeon.app itself
 # carries none of them. latest.json, signed with secrets.PIGEON_UPDATE_KEY, tells installed
 # copies about the new version (docs/update.md).
 #
@@ -80,7 +80,7 @@ jobs:
           name: pigeon-server-${{ matrix.triple }}
           path: dist/
 
-  # Pigeon.app itself, for the in-app updater (Sources/PigeonApp/Update/, docs/update.md).
+  # Pigeon.app itself, for the in-app updater (clients/macos/Sources/PigeonApp/Update/, docs/update.md).
   app:
     runs-on: macos-latest
     steps:

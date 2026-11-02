@@ -1,6 +1,6 @@
 # 软件更新
 
-Pigeon.app 自己检查、下载、安装新版本，不依赖 Sparkle 或其它框架。代码在 `Sources/PigeonApp/Update/`。
+Pigeon.app 自己检查、下载、安装新版本，不依赖 Sparkle 或其它框架。代码在 `clients/macos/Sources/PigeonApp/Update/`。
 
 ## 用户看到什么
 

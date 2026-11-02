@@ -20,7 +20,7 @@ let package = Package(
     targets: [
         .target(
             name: "PigeonCore",
-            path: "Sources/PigeonCore",
+            path: "clients/macos/Sources/PigeonCore",
             linkerSettings: [
                 .unsafeFlags(coreLibs.flatMap { ["-L", $0] } + ["-lpigeon_core"])
             ]
@@ -28,12 +28,12 @@ let package = Package(
         .executableTarget(
             name: "PigeonApp",
             dependencies: ["PigeonCore"],
-            path: "Sources/PigeonApp"
+            path: "clients/macos/Sources/PigeonApp"
         ),
         .testTarget(
             name: "PigeonAppTests",
             dependencies: ["PigeonApp"],
-            path: "Tests/PigeonAppTests"
+            path: "clients/macos/Tests/PigeonAppTests"
         ),
     ],
     swiftLanguageModes: [.v5]
