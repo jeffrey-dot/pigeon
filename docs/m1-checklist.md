@@ -27,7 +27,7 @@ swift test                                         # 22 个用例
 | 宿主端到端 | `split_makes_three_live_panes`（三个 pane 各自 echo 自己的 marker）、`three_panes_survive_a_disconnect_and_restore_layout_and_screens`（叶子顺序/split id+axis+ratio/focus/每 pane 逐 cell 快照都一致）、`closing_a_pane_merges_it_into_the_sibling`、`resizing_a_split_changes_the_tree_and_the_panes`、`vim_alternate_screen_survives_a_reconnect`（vim 进备用屏后断开重连，`alt` 与整屏逐 cell 相等）、`zoom_messages_are_unsupported_at_the_host`（真 `zoom_pane`/`unzoom` 帧回 `unsupported`，随后 ping/pong 仍通）、`two_panes_on_one_connection_both_get_live_output`（同一连接订阅两个 pane，两边都能持续收到输出，无需重新 attach）、`closing_the_watched_pane_still_delivers_the_new_layout`（关掉正在看的 pane 仍收到新 `layout`，焦点落到幸存者） |
 | Swift 纯逻辑 | `LayoutModelTests`（4 个）：divider 命中按轴且限定在它的 box 内、pane 命中、焦点循环回绕、`proposedRatio` 是纯坐标映射、空模型无焦点 |
 
-## 2. GUI（真键盘 / 真鼠标，`tools/m1-gui-check.sh`）
+## 2. GUI（真键盘 / 真鼠标，`tools/checks/m1-gui-check.sh`）
 
 脚本用 System Events 发快捷键、用 `cliclick` 发真实鼠标事件，窗口先被钉到 (0,0)/900×560。
 真实输出（macOS）：

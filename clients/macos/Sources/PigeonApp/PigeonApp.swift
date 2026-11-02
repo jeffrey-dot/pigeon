@@ -108,7 +108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // `PIGEON_APPEARANCE=light|dark|system` pins the app's appearance for the screenshot
-        // runs (`tools/m3-gui-check.sh`). Pinning sets `NSApp.appearance`, which overrides the
+        // runs (`tools/checks/m3-gui-check.sh`). Pinning sets `NSApp.appearance`, which overrides the
         // system until it is cleared again — hence the third value and the three-way toggle.
         NSApp.appearance = AppearanceMode
             .fromEnvironment(ProcessInfo.processInfo.environment["PIGEON_APPEARANCE"]).appearance
@@ -1503,7 +1503,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Exercises the three input paths a window has — menu key equivalents, first-responder
     /// keys, and a sidebar row selection — through AppKit itself. Run by
-    /// `tools/m2-gui-check.sh`: this session cannot activate windows, and these paths are
+    /// `tools/checks/m2-gui-check.sh`: this session cannot activate windows, and these paths are
     /// dispatched by the active app, so driving them in-process is the only honest check.
     private func beginSelfTestIfNeeded() {
         guard selfTest, !selfTestRunning, !rows.isEmpty else { return }

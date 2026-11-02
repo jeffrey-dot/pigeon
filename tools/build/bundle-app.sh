@@ -6,11 +6,12 @@
 # this version's GitHub release (`.github/workflows/release.yml`, `ServerDownload.swift`).
 # The bundle version must therefore match a release tag (`v<version>`).
 #
-#   tools/bundle-app.sh              -> build/Pigeon.app
-#   tools/bundle-app.sh /Applications -> installs it there
-#   UNIVERSAL=1 tools/bundle-app.sh   -> one app for Apple silicon and Intel (releases)
+#   tools/build/bundle-app.sh              -> build/Pigeon.app
+#   tools/build/bundle-app.sh /Applications -> installs it there
+#   UNIVERSAL=1 tools/build/bundle-app.sh   -> one app for Apple silicon and Intel (releases)
 set -eu
-cd "$(dirname "$0")/.."
+# Repo root, wherever this script is run: git resolves it from the script's own directory.
+cd "$(dirname -- "$0")" && cd "$(git rev-parse --show-toplevel)"
 out=${1:-build}/Pigeon.app
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' core/Cargo.toml | head -1)
 

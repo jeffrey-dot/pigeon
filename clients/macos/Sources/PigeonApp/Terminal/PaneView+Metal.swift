@@ -35,7 +35,7 @@ extension PaneView {
         guard let metal, bounds.width > 0, bounds.height > 0 else { return }
         if FrameStats.enabled {
             // Frame rates of an occluded window are throttled by the system; benchmarks
-            // (`tools/render-bench.sh`) need to know which numbers they are looking at.
+            // (`tools/bench/render-bench.sh`) need to know which numbers they are looking at.
             let visible = window?.occlusionState.contains(.visible) ?? false
             if visible != reportedVisible {
                 reportedVisible = visible

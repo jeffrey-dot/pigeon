@@ -7,7 +7,7 @@ import Foundation
 // `cargo build --release`.
 let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
 // `PIGEON_CORE_LIB` names one directory instead: the universal release build
-// (`tools/bundle-app.sh`) links a two-architecture library from there.
+// (`tools/build/bundle-app.sh`) links a two-architecture library from there.
 let coreLibs = ProcessInfo.processInfo.environment["PIGEON_CORE_LIB"].map { [$0] }
     ?? ["\(root)/core/target/debug", "\(root)/core/target/release"]
 

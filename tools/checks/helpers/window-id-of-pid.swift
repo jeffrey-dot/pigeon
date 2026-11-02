@@ -1,4 +1,4 @@
-// Prints the on-screen window number of a process, for `screencapture -l` (tools/metal-gui-check.sh).
+// Prints the on-screen window number of a process, for `screencapture -l` (tools/checks/metal-gui-check.sh).
 
 import CoreGraphics
 import Foundation

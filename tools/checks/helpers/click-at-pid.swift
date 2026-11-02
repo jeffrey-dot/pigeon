@@ -1,8 +1,8 @@
 // Posts a click inside the first on-screen window of a process, without needing it to be
-// frontmost. `tools/m2-gui-check.sh` uses this: this session cannot activate windows, but
+// frontmost. `tools/checks/m2-gui-check.sh` uses this: this session cannot activate windows, but
 // pid-targeted events still reach the view under the point.
 //
-// usage: swift tools/click-at-pid.swift <pid> <dx> <dy>
+// usage: swift tools/checks/helpers/click-at-pid.swift <pid> <dx> <dy>
 import CoreGraphics
 import Foundation
 

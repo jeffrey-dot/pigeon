@@ -6,7 +6,8 @@
 # Build first: cargo build --release --bin pigeon-server && cargo build && swift build
 set -u
 export PATH="$HOME/.cargo/bin:$PATH"
-cd "$(dirname "$0")/.."
+# Repo root, wherever this script is run: git resolves it from the script's own directory.
+cd "$(dirname -- "$0")" && cd "$(git rev-parse --show-toplevel)"
 
 APP=${APP:-.build/debug/pigeon}
 HOST=${HOST:-core/target/release/pigeon-server}
@@ -41,7 +42,7 @@ for appearance in light dark; do
     sleep 1
     # Capture the window itself, not a screen rectangle: nothing else on screen
     # (a leftover window, the terminal running this script) can end up in the shot.
-    WID=$(swift tools/window-id-of-pid.swift "$APP_PID" 2>/dev/null)
+    WID=$(swift tools/checks/helpers/window-id-of-pid.swift "$APP_PID" 2>/dev/null)
     screencapture -x -o -l"$WID" "$OUT/metal-$appearance.png"
     kill "$APP_PID" 2>/dev/null
     wait "$APP_PID" 2>/dev/null

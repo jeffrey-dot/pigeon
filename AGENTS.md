@@ -71,7 +71,11 @@ pigeon/
 ├── Package.swift                 # SwiftPM：clients/macos 的三个 target（macOS only）
 ├── docs/                         # plan.md, protocol.md, ui.md, 历史资料
 │   └── adr/                      # 架构决策记录：为什么是这样而不是别的那样
-├── tools/vt-parity/              # M1：对账脚本与 golden 文件（不含产品代码）
+├── tools/                        # 开发期脚本（不进产品；各自定位仓库根，见 tools/README.md）
+│   ├── build/                    # bundle-app.sh：打 Pigeon.app
+│   ├── bench/                    # render-bench.sh：渲染基准
+│   ├── checks/                   # 手工验收脚本 + helpers/（Swift 小工具）
+│   └── vt-parity/                # VT 对账：corpus / golden / run.sh
 ├── include/pigeon_core.h         # 生成物：cbindgen 从 core/src/ffi/mod.rs 输出，不许手改
 ├── core/                         # Rust 内核 + 会话宿主（crate + bin，平台无关）
 │   ├── Cargo.toml
@@ -126,7 +130,7 @@ pigeon/
 | 新的通信消息 | `core/src/proto/` 的 message enum + `pigeon-server` 的处理分支 + `core/tests/proto` 往返 |
 | 终端内核能力（换引擎 / 接别的内核） | `core/src/term/`（`Term` trait），C ABI、客户端、协议都不动 |
 | 渲染、字体、输入法 | `clients/macos/Sources/PigeonApp/Terminal/`，不往下漏 |
-| 一次性脚本 / 对账工具 | `tools/`，不放进 `clients/` 或 `core/src/` |
+| 一次性脚本 / 对账工具 | `tools/` 下的 `build/` `bench/` `checks/` `vt-parity/`，不放进 `clients/` 或 `core/src/` |
 
 ### 可移植性硬规则（CI 跑 fmt / clippy / test / tokio+portable-pty 引用检查 / `--lib --no-default-features` 构建 / 体积上限 / 头文件 diff；仍缺 `unsafe` 与平台 crate 的静态检查，见 `docs/plan.md` §11）
 

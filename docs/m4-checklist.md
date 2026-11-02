@@ -117,7 +117,7 @@ testRealSshDropKeepsTheRemoteSessionAndItsScreen ... passed (40.0s)
 |---|---|---|
 | GUI 侧栏的多主机分组 | 纯逻辑单测（`groupLabel` + 分组拆分） | 真开 `PIGEON_REMOTE=arch pigeon-product` 看分组与截图；本轮没有 GUI 手测，checklist 里没有截图 |
 | 连接状态展示 | 退化时窗口标题 `pigeon — arch (not persistent)` + 头部徽标 `Not persistent`；A/B 无额外标识 | 侧栏行上区分“本机 / 远端 / 已断”的视觉 |
-| GUI 多主机与重连的*观感* | `PIGEON_REMOTE=arch` 的侧栏分组由脚本验证（`groups=arch / jeffrey`）；`PIGEON_SELFTEST` 步 5 用 `NSTableView.selectRowIndexes` 选中会话行，走真实 delegate → `onSelect` | 物理鼠标点击本身（本会话投递不进窗口；`tools/click-at-pid.swift` 留给正常桌面会话） |
+| GUI 多主机与重连的*观感* | `PIGEON_REMOTE=arch` 的侧栏分组由脚本验证（`groups=arch / jeffrey`）；`PIGEON_SELFTEST` 步 5 用 `NSTableView.selectRowIndexes` 选中会话行，走真实 delegate → `onSelect` | 物理鼠标点击本身（本会话投递不进窗口；`tools/checks/helpers/click-at-pid.swift` 留给正常桌面会话） |
 | 退化模式（C）的窗口尺寸 | 本地 VT 会 resize | 远端 pty 尺寸仍是 ssh 分配的 80×24（客户端没有本地 pty 去转发 `TIOCSWINSZ`），见 plan §11 |
 | C 模式的 xctest 渲染断言 | 本地 VT 两条单测 + 手工 ssh 记录 | xctest 里把 ssh 的 pty 管道喂给 `LocalSession` 时读线程 25s 拿不到数据（本地子进程正常），原因未定位；不愿为它造假 |
 | 真的关掉 `AllowStreamLocalForwarding` 的主机 | 用拒绝 `--proxy` 模拟 A 失败 | 一台能改 sshd 配置的主机 |

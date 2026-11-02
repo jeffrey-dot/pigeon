@@ -5,12 +5,13 @@
 # for the terminal that runs this script (System Settings → Privacy & Security →
 # Accessibility): keystrokes and window resizing go through System Events.
 #
-#   tools/m0-gui-check.sh
+#   tools/checks/m0-gui-check.sh
 #
 # Every fixture (demo files, pane scripts) is generated in a temp dir, so nothing
 # outside the repo is required. Every screenshot below lands in docs/images/m0/.
 set -u
-cd "$(dirname "$0")/.."
+# Repo root, wherever this script is run: git resolves it from the script's own directory.
+cd "$(dirname -- "$0")" && cd "$(git rev-parse --show-toplevel)"
 
 APP=${APP:-.build/debug/pigeon}
 HOST=${HOST:-core/target/release/pigeon-server}

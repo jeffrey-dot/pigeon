@@ -90,7 +90,7 @@ jobs:
       - name: build Pigeon.app
         run: |
           rustup target add aarch64-apple-darwin x86_64-apple-darwin
-          UNIVERSAL=1 tools/bundle-app.sh build
+          UNIVERSAL=1 tools/build/bundle-app.sh build
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' core/Cargo.toml | head -1)
           mkdir -p dist
           # ditto keeps the bundle's symlinks, modes and signature, which zip(1) does not.

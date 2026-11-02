@@ -9,10 +9,11 @@
 # throttled by the system (the script warns when that happened).
 #
 # Build first: cargo build --release && cargo build && swift build
-# usage: tools/render-bench.sh [lines]   (default 200000)
+# usage: tools/bench/render-bench.sh [lines]   (default 200000)
 set -u
 export PATH="$HOME/.cargo/bin:$PATH"
-cd "$(dirname "$0")/.."
+# Repo root, wherever this script is run: git resolves it from the script's own directory.
+cd "$(dirname -- "$0")" && cd "$(git rev-parse --show-toplevel)"
 
 APP=${APP:-.build/debug/pigeon}
 HOST=${HOST:-core/target/release/pigeon-server}

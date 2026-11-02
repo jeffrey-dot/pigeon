@@ -5,7 +5,8 @@
 # (System Events + cliclick drive real input). Build first:
 #   cargo build --release --bin pigeon-server && cargo build && swift build
 set -u
-cd "$(dirname "$0")/.."
+# Repo root, wherever this script is run: git resolves it from the script's own directory.
+cd "$(dirname -- "$0")" && cd "$(git rev-parse --show-toplevel)"
 
 APP=${APP:-.build/debug/pigeon}
 HOST=${HOST:-core/target/release/pigeon-server}
