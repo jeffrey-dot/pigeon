@@ -18,8 +18,9 @@ cargo test -p pigeon-linux                   # 纯逻辑单测（按键编码 / 
 环境变量：`PIGEON_SERVER` 指定 `pigeon-server` 路径；`PIGEON_FONT` 指定字体族；
 `PIGEON_FRAME_STATS=1` 打开帧统计；`PIGEON_FONT_DEBUG=1` 打印选中的字体。
 
-**已实现**：连接/自动拉起宿主、握手、`attach`、整屏网格渲染（背景/字形/下划线/删除线/反色/光标三种形状）、
-字形图集、CJK 与全角 fallback、xterm legacy 按键编码（含 DECCKM）、窗口缩放 → `resize_pane` → PTY 尺寸。
+**已实现**：连接/自动拉起宿主、握手、`attach`、整屏网格渲染（背景/字形/下划线/删除线/反色/暗色/
+光标三种形状）、R8 掩码图集 + RGBA 彩色图集（emoji）、CJK/全角/符号 fallback、制表符与方块元素
+用矩形画（不接缝）、宽字符居中、xterm legacy 按键编码（含 DECCKM）、窗口缩放 → `resize_pane` → PTY 尺寸。
 
-**未做**：侧栏、分屏、滚动回看、选择/复制、IME、鼠标上报、emoji 彩色图集、DAMAGE 增量、DMABUF。
+**未做**：侧栏、分屏、滚动回看、选择/复制、IME、鼠标上报、DAMAGE 增量、DMABUF、emoji ZWJ 序列整形。
 详见 [docs/renderer.md](../../docs/renderer.md) §5.4。

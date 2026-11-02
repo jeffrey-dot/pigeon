@@ -5,6 +5,7 @@
 //! split waits until a second backend exists ([adr/0011](../../../../docs/adr/0011-linux-rendering.md)).
 
 mod atlas;
+mod boxdraw;
 mod font;
 mod gl;
 mod instances;
@@ -134,13 +135,33 @@ impl Renderer {
             context.clear_color(clear[0], clear[1], clear[2], clear[3]);
             context.clear(glow::COLOR_BUFFER_BIT);
             self.rects.draw(context, &batch.rects, (width, height));
+
             context.active_texture(glow::TEXTURE0);
-            context.bind_texture(glow::TEXTURE_2D, Some(self.atlas.texture));
-            self.glyphs.bind_atlas(context);
+            context.bind_texture(glow::TEXTURE_2D, Some(self.atlas.mask));
+            context.active_texture(glow::TEXTURE1);
+            context.bind_texture(glow::TEXTURE_2D, Some(self.atlas.color));
+            self.glyphs.bind_atlases(context);
+
+            // Text is straight alpha, emoji are premultiplied (swash composites the layers).
+            self.glyphs.set_kind(context, 0);
+            context.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
             self.glyphs.draw(context, &batch.glyphs, (width, height));
+            self.glyphs.set_kind(context, 1);
+            context.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
+            self.glyphs
+                .draw(context, &batch.color_glyphs, (width, height));
+            context.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+
+            context.active_texture(glow::TEXTURE1);
+            context.bind_texture(glow::TEXTURE_2D, None);
+            context.active_texture(glow::TEXTURE0);
             context.bind_texture(glow::TEXTURE_2D, None);
         }
-        self.record(started, batch.rects.len(), batch.glyphs.len());
+        self.record(
+            started,
+            batch.rects.len(),
+            batch.glyphs.len() + batch.color_glyphs.len(),
+        );
     }
 
     /// `PIGEON_FRAME_STATS=1` prints one line a second: the same knob the macOS client has,

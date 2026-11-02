@@ -14,6 +14,8 @@ pub struct GridMetrics {
     pub cell_h: f32,
     /// Distance from the top of the cell to the baseline.
     pub baseline: f32,
+    /// Stroke weight for underlines, strike-through and box-drawing arms.
+    pub line_thickness: f32,
 }
 
 /// One loaded face. The bytes are leaked on purpose: `FontRef` borrows them and lives as
@@ -47,6 +49,10 @@ const FALLBACKS: &[&str] = &[
     "Source Han Mono SC",
     "Sarasa Mono SC",
     "WenQuanYi Zen Hei",
+    // Emoji before the plain-text fallbacks: DejaVu has monochrome emoji, which would
+    // otherwise win and paint them grey.
+    "Noto Color Emoji",
+    "Twemoji",
     "Noto Sans Mono",
     "DejaVu Sans",
     "Symbols Nerd Font Mono",
@@ -186,5 +192,6 @@ fn measure_of(font_ref: FontRef<'_>, size: f32) -> GridMetrics {
         cell_w: advance.max(1.0).round(),
         cell_h: line.max(1.0).round(),
         baseline: metrics.ascent.round(),
+        line_thickness: metrics.stroke_size.round().max(1.0),
     }
 }

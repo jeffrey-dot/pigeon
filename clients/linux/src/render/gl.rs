@@ -58,11 +58,19 @@ void main() {
 const GLYPH_FRAGMENT: &str = r#"
 in vec2 v_uv;
 in vec4 v_color;
-uniform sampler2D u_atlas;
+uniform sampler2D u_mask;
+uniform sampler2D u_color;
+// 0 = 8-bit coverage tinted by v_color, 1 = premultiplied RGBA drawn as is (emoji).
+uniform int u_kind;
 out vec4 frag;
 void main() {
-    float coverage = texture(u_atlas, v_uv).r;
-    frag = vec4(v_color.rgb, v_color.a * coverage);
+    if (u_kind == 1) {
+        vec4 colour = texture(u_color, v_uv);
+        frag = vec4(colour.rgb, colour.a * v_color.a);
+    } else {
+        float coverage = texture(u_mask, v_uv).r;
+        frag = vec4(v_color.rgb, v_color.a * coverage);
+    }
 }
 "#;
 
@@ -124,7 +132,9 @@ impl Gl {
 pub struct Pipeline {
     program: glow::Program,
     viewport: Option<glow::UniformLocation>,
-    atlas: Option<glow::UniformLocation>,
+    mask: Option<glow::UniformLocation>,
+    colour: Option<glow::UniformLocation>,
+    kind: Option<glow::UniformLocation>,
     vao: glow::VertexArray,
     vbo: glow::Buffer,
 }
@@ -164,7 +174,9 @@ pub fn pipeline(
         Ok(Pipeline {
             program,
             viewport: gl.get_uniform_location(program, "u_viewport"),
-            atlas: gl.get_uniform_location(program, "u_atlas"),
+            mask: gl.get_uniform_location(program, "u_mask"),
+            colour: gl.get_uniform_location(program, "u_color"),
+            kind: gl.get_uniform_location(program, "u_kind"),
             vao,
             vbo,
         })
@@ -192,11 +204,20 @@ impl Pipeline {
         }
     }
 
-    /// Binds the glyph atlas for pipelines that sample one.
-    pub fn bind_atlas(&self, gl: &glow::Context) {
+    /// Points the glyph shader at the two atlases (units 0 and 1).
+    pub fn bind_atlases(&self, gl: &glow::Context) {
         unsafe {
             gl.use_program(Some(self.program));
-            gl.uniform_1_i32(self.atlas.as_ref(), 0);
+            gl.uniform_1_i32(self.mask.as_ref(), 0);
+            gl.uniform_1_i32(self.colour.as_ref(), 1);
+        }
+    }
+
+    /// `0` = coverage mask, `1` = premultiplied colour (`atlas::Layer`).
+    pub fn set_kind(&self, gl: &glow::Context, kind: i32) {
+        unsafe {
+            gl.use_program(Some(self.program));
+            gl.uniform_1_i32(self.kind.as_ref(), kind);
         }
     }
 }

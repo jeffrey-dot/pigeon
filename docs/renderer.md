@@ -160,23 +160,32 @@ clients/linux/src/
 ├── pane.rs        GLArea + 渲染器 + 输入 + 尺寸：换成 cols/rows 就发 `resize_pane`
 ├── input.rs       按键 → 字节（xterm legacy 编码，含 DECCKM）
 └── render/
-    ├── mod.rs     Renderer：一帧 = 清屏 + 背景批 + 字形批
+    ├── mod.rs     Renderer：一帧 = 清屏 + 背景批 + 字形批 + 彩色字形批
     ├── gl.rs      加载器、两套 shader 头（GLSL ES / 330）、pipeline、实例缓冲
-    ├── atlas.rs   R8 字形图集 + swash 光栅化 + 上传
-    ├── font.rs    字体发现、fallback 链、单元格度量
-    ├── instances.rs 屏幕 → 两组实例（连带下划线/删除线/光标）
+    ├── atlas.rs   R8 掩码图集 + RGBA 彩色图集（swash 光栅化、架子装箱、上传）
+    ├── font.rs    字体发现、fallback 链（含 emoji）、单元格度量
+    ├── boxdraw.rs 制表符（U+2500–257F）与方块元素（U+2580–2593）→ 矩形
+    ├── instances.rs 屏幕 → 实例（背景/制表符/下划线/删除线/光标 + 两组字形）
     └── palette.rs 颜色语义：`0x01000000|idx`、xterm 256、默认色、反色
 ```
 
-### 5.3 一帧的三种四边形
+### 5.3 一帧的四组四边形
 
-和 macOS/Ghostty 一样是**实例化四边形**，只是第一版分两批：
+和 macOS/Ghostty 一样是**实例化四边形**，每帧三次 draw：
 
-1. **背景**：每格一个带颜色的四边形（改成"同行同色合并"是后续优化）；
-2. **字形**：每格一个四边形，采样 R8 图集的一个矩形，颜色走顶点属性；
-3. **光标**：一块矩形（方块/下划线/竖线按 `cursor.shape`），用反色画在同一批里。
+1. **矩形批**：格背景（改成"同行同色合并"是后续优化）、下划线/删除线、光标
+   （方块/下划线/竖线按 `cursor.shape`），以及**制表符与方块元素**——
+   它们由 `boxdraw.rs` 直接从单元格几何算出来，不走字体；
+2. **文字批**：每格一个四边形，采样 R8 掩码图集的一个矩形，颜色走顶点属性
+   （`ATTR_DIM` 用 alpha 0.6，与 macOS 一致）；
+3. **彩色字形批**：emoji 采样 RGBA 图集，**预乘 alpha**（`ONE, ONE_MINUS_SRC_ALPHA`），
+   文字用直通 alpha（`SRC_ALPHA, ONE_MINUS_SRC_ALPHA`）——同一个 shader，`u_kind` 选采样器与公式。
 
-shader 用 `gl_VertexID` 生成单位四边形（6 顶点，`draw_arrays_instanced`），每实例 12–24 字节。
+shader 用 `gl_VertexID` 生成单位四边形（6 顶点，`draw_arrays_instanced`）；矩形实例 32 字节、字形实例 48 字节。
+
+宽字符占两格：字形比两格窄时**居中**而不是拉伸（fallback 面的全角字形常常偏窄）。
+emoji 的 ZWJ 序列、肤色/旗帜组合不做整形——协议按单元格给码点，`👍🏽`/`🇨🇳` 是两个码点，
+和 macOS 客户端一样画成两个字形。
 
 ### 5.4 第一版明确不做（与代码现状同步）
 
@@ -185,24 +194,27 @@ shader 用 `gl_VertexID` 生成单位四边形（6 顶点，`draw_arrays_instanc
 - 侧栏、分屏、zoom；
 - kitty keyboard protocol（先用 xterm legacy 编码）；
 - 鼠标上报、焦点事件、括号粘贴；
-- 彩色字形图集（emoji，走 fallback 面时会画成空白）；
-- 程序化 box-drawing：`┌─┐` 现在来自 fallback 面，横线不接缝（macOS 有 `BoxDrawing.swift`，这里照抄思路即可）；
-- 全角/宽字符的字形宽度：格子宽度是对的（两格），但 fallback 面给的字形比两格窄，看起来偏小；
 - DMABUF / 后台渲染线程（先主线程 GLArea，等有性能数字再换）。
+
+已补上（原先列在这里的三项）：制表符/方块元素改由矩形画（`boxdraw.rs`，从 macOS 的
+`BoxDrawing.swift` 移植，同一张权重表）、宽字符字形居中、emoji 彩色图集（COLR + CBDT 位图）。
 
 ### 5.5 验收（第一片已过）
 
 在 Asahi + NVIDIA eGPU、niri/Wayland、GTK 4.24 上实跑：
 
-1. ✅ `cargo build -p pigeon-linux`、`cargo clippy -p pigeon-linux -- -D warnings`、`cargo test -p pigeon-linux`（10 个单测）；
+1. ✅ `cargo build -p pigeon-linux`、`cargo clippy -p pigeon-linux -- -D warnings`、`cargo test -p pigeon-linux`（14 个单测）；
 2. ✅ 自动拉起本机 `pigeon-server`（`--detach`）→ 握手 → `attach` → 画网格；用 `wtype` 打字验证
    输入 → 宿主 → 回显全链路（`echo hello from pigeon` 正常执行并显示）；
 3. ✅ fish 的语法高亮（绿 `~`、青分支、粗体 `help`）与 CJK（`中文`）、全角（`ＡＢＣ`）、组合字符（`é ñ`）都能显示
    —— 靠 `fontdb` 的静态 fallback 链（`Noto Sans Mono CJK SC` 等）；
 4. ✅ 缩放窗口：`stty size` 打印 `58 140`，与窗口像素 / 单元格尺寸一致（PTY 收到了新尺寸）；
-5. ✅ `cargo test --manifest-path core/Cargo.toml` 在 Linux 上 45 个用例全绿（不变量 7）。
+5. ✅ 制表符：`printf "┌───┐\n│abc│\n└───┘"` 连成一体的方框（横线不接缝）、`█▓▒░` 四档亮度正确；
+6. ✅ 彩色 emoji：`😀 🚀 ❤️ 👍🏽 🇨🇳` 走 RGBA 图集正常上色（本机只有 `Twemoji`，没有 Noto Color Emoji）；
+7. ✅ `vim`：备用屏能进能出（`:q!` 后回到 shell 原屏）、`~` 填充列、状态行、文本光标；
+8. ✅ `cargo test --manifest-path core/Cargo.toml` 在 Linux 上 45 个用例全绿（不变量 7）。
 
-未验证（需要手动 / 后续）：`vim`/`htop` 的备用屏与鼠标、IME、`Ctrl-D` 后重连复原、多客户端尺寸策略标注。
+未验证（需要手动 / 后续）：鼠标上报、IME、`Ctrl-D` 后重连复原、多客户端尺寸策略标注。
 
 ## 6. 后续（M5 剩余 → M6）
 

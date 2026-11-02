@@ -1,9 +1,9 @@
-//! Turning one screen into the two instance batches the shaders eat.
+//! Turning one screen into the instance batches the shaders eat.
 //!
-//! Field order and sizes must match `MetalShaders`-style GLSL in `gl.rs`
-//! (`docs/renderer.md` §5.3).
+//! Field order and sizes must match the GLSL in `gl.rs` (`docs/renderer.md` §5.3).
 
-use super::atlas::{Atlas, Key};
+use super::atlas::{Atlas, Key, Layer};
+use super::boxdraw;
 use super::font::{Font, GridMetrics};
 use super::palette::{decoration, Palette};
 use crate::screen::Screen;
@@ -38,7 +38,10 @@ impl GlyphInstance {
 #[derive(Default)]
 pub struct Batch {
     pub rects: Vec<RectInstance>,
+    /// Glyphs from the 8-bit atlas, tinted by `color`.
     pub glyphs: Vec<GlyphInstance>,
+    /// Colour glyphs (emoji) from the RGBA atlas, drawn premultiplied.
+    pub color_glyphs: Vec<GlyphInstance>,
 }
 
 /// Draws every cell of `screen` plus the cursor.
@@ -88,6 +91,25 @@ pub fn build(
             let under_cursor =
                 cursor_on && cursor.visible && cursor.shape == 0 && (x, y) == cursor_cell;
             let glyph_color = if under_cursor { bg } else { fg };
+            let mut text = Palette::components(glyph_color);
+            if attrs & pigeon_core::api::ATTR_DIM != 0 {
+                text[3] *= 0.6;
+            }
+
+            // Box drawing and blocks are rectangles: a font's `─` rarely meets its
+            // neighbour, and TUI borders then break into dashes.
+            if boxdraw::handles(cell.codepoint)
+                && boxdraw::draw(
+                    cell.codepoint,
+                    [left, top],
+                    [width, metrics.cell_h],
+                    metrics.line_thickness,
+                    text,
+                    &mut batch.rects,
+                )
+            {
+                continue;
+            }
 
             if cell.codepoint > 0x20 && cell.codepoint != 0x7f {
                 if let Some(ch) = char::from_u32(cell.codepoint) {
@@ -99,28 +121,39 @@ pub fn build(
                         };
                         if let Some(slot) = atlas.slot(gl, font, key) {
                             let baseline = top + metrics.baseline;
-                            batch.glyphs.push(GlyphInstance {
-                                pos: [left + slot.left as f32, baseline - slot.top as f32],
+                            // A wide cell is two cells; a fallback face's glyph is often
+                            // narrower than that, so centre it instead of stretching it.
+                            let inset = if slot.w as f32 > width {
+                                0.0
+                            } else {
+                                (width - slot.w as f32) / 2.0
+                            };
+                            let instance = GlyphInstance {
+                                pos: [left + inset + slot.left as f32, baseline - slot.top as f32],
                                 size: [slot.w as f32, slot.h as f32],
                                 uv: slot.uv(),
-                                color: Palette::components(glyph_color),
-                            });
+                                color: text,
+                            };
+                            match slot.layer {
+                                Layer::Mask => batch.glyphs.push(instance),
+                                Layer::Color => batch.color_glyphs.push(instance),
+                            }
                         }
                     }
                 }
             }
 
             if let Some(attr) = decoration(attrs) {
-                let thickness = (metrics.cell_h * 0.06).max(1.0);
+                let thickness = metrics.line_thickness;
                 let y_offset = if attr == pigeon_core::api::ATTR_UNDERLINE {
-                    metrics.baseline + (metrics.cell_h * 0.08).max(1.0)
+                    metrics.baseline + metrics.line_thickness
                 } else {
                     metrics.baseline - metrics.cell_h * 0.25
                 };
                 batch.rects.push(RectInstance {
                     pos: [left, top + y_offset],
                     size: [width, thickness],
-                    color: Palette::components(fg),
+                    color: text,
                 });
             }
         }
