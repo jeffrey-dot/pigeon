@@ -128,9 +128,7 @@ final class UpdaterTests: XCTestCase {
 
     /// The release workflow signs exactly the message the app verifies.
     func testTheReleaseWorkflowSignsWhatTheAppChecks() throws {
-        let workflow = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent(".github/workflows/release.yml")
+        let workflow = RepoRoot.file(".github/workflows/release.yml")
         let text = try String(contentsOf: workflow, encoding: .utf8)
         XCTAssertTrue(text.contains(#"printf 'pigeon-update %s %s' "$version" "$sha""#), "signed message")
         XCTAssertTrue(text.contains("latest.json"))

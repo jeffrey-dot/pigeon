@@ -93,9 +93,7 @@ final class ServerDownloadTests: XCTestCase {
     /// Every platform the app can serve has a release build, and the release builds nothing
     /// the app would never ask for: the workflow matrix and `HostInstaller.platforms` agree.
     func testTheReleaseBuildsExactlyThePlatformsTheAppServes() throws {
-        let workflow = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent(".github/workflows/release.yml")
+        let workflow = RepoRoot.file(".github/workflows/release.yml")
         let text = try String(contentsOf: workflow, encoding: .utf8)
         let built = Set(text.split(whereSeparator: \.isNewline).compactMap { line -> String? in
             guard let range = line.range(of: "triple: ") else { return nil }
