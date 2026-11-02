@@ -215,9 +215,6 @@ extension AppDelegate {
         return sessions
     }
 
-    /// "Jeffrey's MacBook Air"; looked up once because the lookup can touch the resolver.
-    private lazy var localMachineName: String = Host.current().localizedName ?? ""
-
     func refreshSidebar() {
         // Inside a background host's message the active host is swapped; draw afterwards.
         if swappedFrom != nil {

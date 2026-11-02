@@ -4,7 +4,7 @@ import PigeonCore
 /// Wires the window to a `pigeon-server`: sidebar on the left, split container on
 /// the right, and the protocol messages that keep both in sync.
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private typealias Row = SessionRow
+    typealias Row = SessionRow
 
     var window: NSWindow!
     var splitView: NSSplitView!
@@ -105,6 +105,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// then points at the background one). Sidebar redraws wait until it is restored.
     var swappedFrom: String?
     var sidebarDirty = false
+    /// "Jeffrey's MacBook Air"; looked up once because the lookup can touch the resolver.
+    lazy var localMachineName: String = Host.current().localizedName ?? ""
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // `PIGEON_APPEARANCE=light|dark|system` pins the app's appearance for the screenshot
