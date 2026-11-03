@@ -15,11 +15,19 @@ extension AppDelegate {
             defer: false
         )
         window.title = "pigeon"
-        // `docs/ui.md` §7.1: the sidebar runs under a transparent titlebar, with the traffic
+        // `docs/ui.md` §2: the sidebar runs under a transparent titlebar, with the traffic
         // lights sitting inside its 56pt header (harp: TL:64, VT:9112).
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.isMovableByWindowBackground = true
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.contentMinSize = NSSize(width: 640, height: 400)
+        // Native unified chrome gives the traffic lights a full-height header hit area.
+        let toolbar = NSToolbar(identifier: "pigeon.window")
+        toolbar.showsBaselineSeparator = false
+        window.toolbar = toolbar
+        window.toolbarStyle = .unified
 
         sidebar = SidebarViewController()
         sidebar.onSelect = { [weak self] id in self?.select(id) }
@@ -48,10 +56,10 @@ extension AppDelegate {
         container.onPaneScrollBottom = { [weak self] pane in self?.sendScroll(pane, lines: 0) }
         container.onToggleZoom = { [weak self] in self?.toggleZoom() }
 
-        splitView = NSSplitView()
+        splitView = SidebarSplitView()
         splitView.isVertical = true
         splitView.dividerStyle = .thin
-        // `docs/ui.md` §7.1: harp's 272pt by default, user drag overrides (low priority).
+        // `docs/ui.md` §2: harp's 272pt by default, user drag overrides (low priority).
         let defaultWidth = sidebar.view.widthAnchor.constraint(equalToConstant: SidebarMetrics.width)
         defaultWidth.priority = .defaultLow
         defaultWidth.isActive = true

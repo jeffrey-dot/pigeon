@@ -2,7 +2,7 @@ import AppKit
 import XCTest
 @testable import PigeonApp
 
-/// The palette in `docs/ui.md` §7.2 is copied from harp; these tests pin the two
+/// The palette in `docs/ui.md` §4 is copied from harp; these tests pin the two
 /// branches so a stray `systemOrange` cannot creep back in.
 final class SidebarThemeTests: XCTestCase {
     private func resolved(_ color: NSColor, dark: Bool) -> (r: Int, g: Int, b: Int) {
@@ -20,16 +20,16 @@ final class SidebarThemeTests: XCTestCase {
 
     func testTokensMatchTheDesignedLightAndDarkValues() {
         let cases: [(String, NSColor, Int, Int, Int, Int, Int, Int)] = [
-            ("ink", SidebarTheme.ink, 0x1d, 0x1d, 0x1f, 0xe6, 0xe6, 0xe6),
+            ("ink", SidebarTheme.ink, 0x1d, 0x1d, 0x1f, 0xf5, 0xf5, 0xf7),
             ("gray", SidebarTheme.gray, 0x6e, 0x6e, 0x73, 0x8e, 0x8e, 0x93),
             ("sectionName", SidebarTheme.sectionName, 0x7c, 0x7c, 0x82, 0x8e, 0x8e, 0x93),
             ("needsText", SidebarTheme.needsText, 0x9a, 0x57, 0x00, 0xf0, 0xb3, 0x5c),
             ("iconStrong", SidebarTheme.iconStrong, 0x3a, 0x3a, 0x3c, 0xe5, 0xe5, 0xea),
-            ("sidebar", SidebarTheme.sidebar, 0xe8, 0xe8, 0xeb, 0x16, 0x17, 0x1a),
-            ("selected", SidebarTheme.selected, 0xff, 0xff, 0xff, 0x2a, 0x2b, 0x2f),
-            ("terminalBackground", SidebarTheme.terminalBackground, 0xff, 0xff, 0xff, 0x0e, 0x0f, 0x11),
-            ("terminalForeground", SidebarTheme.terminalForeground, 0x11, 0x11, 0x11, 0xe6, 0xe6, 0xe6),
-            ("divider", SidebarTheme.divider, 0xec, 0xec, 0xef, 0x24, 0x26, 0x2a),
+            ("sidebar", SidebarTheme.sidebar, 0xe8, 0xe8, 0xeb, 0x23, 0x23, 0x26),
+            ("selected", SidebarTheme.selected, 0xff, 0xff, 0xff, 0x3a, 0x3a, 0x3d),
+            ("terminalBackground", SidebarTheme.terminalBackground, 0xff, 0xff, 0xff, 0x05, 0x05, 0x05),
+            ("terminalForeground", SidebarTheme.terminalForeground, 0x11, 0x11, 0x11, 0xff, 0xff, 0xff),
+            ("divider", SidebarTheme.divider, 0xec, 0xec, 0xef, 0x3a, 0x3a, 0x3c),
         ]
         for (name, color, lr, lg, lb, dr, dg, db) in cases {
             let light = resolved(color, dark: false)

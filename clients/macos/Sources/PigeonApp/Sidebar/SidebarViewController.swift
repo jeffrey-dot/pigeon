@@ -51,6 +51,9 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
     override func loadView() {
         let root = SidebarBackgroundView()
         scroll.hasVerticalScroller = true
+        scroll.scrollerStyle = .overlay
+        scroll.autohidesScrollers = true
+        scroll.automaticallyAdjustsContentInsets = false
         scroll.drawsBackground = false
         table.headerView = nil
         table.rowHeight = SidebarMetrics.rowHeight
@@ -71,11 +74,12 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
         // `docs/ui.md` §2.3: collapse and new-session buttons, right-aligned.
         let plus = symbolButton("plus", action: #selector(newSessionClicked))
         plus.setAccessibilityLabel("New Session")
+        plus.toolTip = "New Session"
         plusButton = plus
-        let buttons = NSStackView(views: [
-            symbolButton("sidebar.left", action: #selector(toggleSidebarClicked)),
-            plus,
-        ])
+        let collapse = symbolButton("sidebar.left", action: #selector(toggleSidebarClicked))
+        collapse.setAccessibilityLabel("Toggle Sidebar")
+        collapse.toolTip = "Toggle Sidebar (⌘B)"
+        let buttons = NSStackView(views: [collapse, plus])
         buttons.orientation = .horizontal
         buttons.spacing = SidebarMetrics.headerButtonSpacing
 
@@ -157,8 +161,9 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
         self.selected = selected
         var built: [Row] = []
         var lastHost: String?
+        let showMachines = sections.contains { !$0.host.isEmpty && $0.host != "local" }
         for section in sections {
-            if section.host != lastHost {
+            if showMachines, section.host != lastHost {
                 built.append(.machine(machineName(section.host)))
                 lastHost = section.host
             }
@@ -216,11 +221,13 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
         case .machine:
             return SidebarMetrics.machineHeaderHeight + (row == 0 ? 0 : SidebarMetrics.machineGap)
         case .group:
-            return SidebarMetrics.sectionHeaderHeight + SidebarMetrics.sectionGap
-        case let .session(session):
-            return SidebarModel.detailLine(for: session) == nil
-                ? SidebarMetrics.rowHeight
-                : SidebarMetrics.rowHeightWithDetail
+            let followsMachine: Bool
+            if row > 0, case .machine = rows[row - 1] { followsMachine = true }
+            else { followsMachine = false }
+            let gap = row == 0 || followsMachine ? 0 : SidebarMetrics.sectionGap
+            return SidebarMetrics.sectionHeaderHeight + gap
+        case .session:
+            return SidebarMetrics.rowHeight
         }
     }
 

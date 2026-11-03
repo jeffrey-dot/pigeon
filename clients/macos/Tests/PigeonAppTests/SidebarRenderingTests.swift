@@ -7,6 +7,7 @@ import XCTest
 final class SidebarRenderingTests: XCTestCase {
     private func pixel(of view: NSView, appearance name: NSAppearance.Name) -> (Int, Int, Int) {
         view.appearance = NSAppearance(named: name)
+        view.layoutSubtreeIfNeeded()
         let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
         view.cacheDisplay(in: view.bounds, to: rep)
         let color = rep.colorAt(x: 4, y: 4)!.usingColorSpace(.sRGB)!
@@ -47,8 +48,8 @@ final class SidebarRenderingTests: XCTestCase {
         }
         XCTAssertEqual(rgb(.aqua).0, 0xff) // theme background light
         XCTAssertEqual(rgb(.aqua).2, 0xff)
-        XCTAssertEqual(rgb(.darkAqua).0, 0x0e) // card dark (#0E0F11)
-        XCTAssertEqual(rgb(.darkAqua).2, 0x11)
+        XCTAssertEqual(rgb(.darkAqua).0, 0x05) // Harp dark card (#050505)
+        XCTAssertEqual(rgb(.darkAqua).2, 0x05)
     }
 
     /// Cells without an explicit colour take the theme's foreground/background, resolved for
@@ -58,19 +59,17 @@ final class SidebarRenderingTests: XCTestCase {
         let dark = CellPalette.resolve(for: NSAppearance(named: .darkAqua)!)
         XCTAssertEqual(light.foreground, 0x0011_1111) // #111111
         XCTAssertEqual(light.background, 0x00ff_ffff) // #ffffff
-        XCTAssertEqual(dark.foreground, 0x00e6_e6e6) // #E6E6E6
-        XCTAssertEqual(dark.background, 0x000e_0f11) // #0E0F11
+        XCTAssertEqual(dark.foreground, 0x00ff_ffff) // #FFFFFF
+        XCTAssertEqual(dark.background, 0x0005_0505) // #050505
     }
 
     func testTheSidebarSurfaceFollowsTheAppearanceOnTheSameView() {
         let view = SidebarBackgroundView(frame: NSRect(x: 0, y: 0, width: 120, height: 80))
         let light = pixel(of: view, appearance: .aqua)
         let dark = pixel(of: view, appearance: .darkAqua)
-        // Bitmap round-tripping can shift a channel by one; the exact values are pinned
-        // in SidebarThemeTests, here we only care that the two branches are both live.
-        XCTAssertEqual(light.0, 0xe8, accuracy: 2) // SIDEBAR light
-        XCTAssertEqual(light.2, 0xeb, accuracy: 2)
-        XCTAssertEqual(dark.0, 0x16, accuracy: 2) // SIDEBAR dark (#16171A)
-        XCTAssertEqual(dark.2, 0x1a, accuracy: 2)
+        // The material blends with its backdrop; only the light/dark separation is fixed.
+        // Exact source tokens are checked in SidebarThemeTests.
+        XCTAssertGreaterThan(light.0, dark.0 + 100)
+        XCTAssertGreaterThan(light.2, dark.2 + 100)
     }
 }

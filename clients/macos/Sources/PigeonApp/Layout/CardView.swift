@@ -1,6 +1,6 @@
 import AppKit
 
-/// The right pane is one card in harp (`docs/ui.md` §7.1): 10pt radius, a 0.5pt edge and a
+/// The right pane is one card in Harp (`docs/ui.md` §2): 10pt radius, a 0.5pt edge and a
 /// soft shadow, inset 8pt from the window's top/right/bottom edge so the sidebar's surface
 /// shows through the gutter. The left edge stays flush with the divider.
 final class CardView: NSView {

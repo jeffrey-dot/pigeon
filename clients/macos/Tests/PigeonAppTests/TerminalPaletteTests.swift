@@ -102,8 +102,8 @@ final class TerminalPaletteTests: XCTestCase {
         let dark = NSAppearance(named: .darkAqua)!
         XCTAssertEqual(TerminalPalette.hex(SidebarTheme.terminalBackground, appearance: light), 0xFFFFFF)
         XCTAssertEqual(TerminalPalette.hex(SidebarTheme.terminalForeground, appearance: light), 0x111111)
-        XCTAssertEqual(TerminalPalette.hex(SidebarTheme.terminalBackground, appearance: dark), 0x0E0F11)
-        XCTAssertEqual(TerminalPalette.hex(SidebarTheme.terminalForeground, appearance: dark), 0xE6E6E6)
+        XCTAssertEqual(TerminalPalette.hex(SidebarTheme.terminalBackground, appearance: dark), 0x050505)
+        XCTAssertEqual(TerminalPalette.hex(SidebarTheme.terminalForeground, appearance: dark), 0xFFFFFF)
     }
 
     func testCellHeightUsesTheConfiguredLineHeight() {

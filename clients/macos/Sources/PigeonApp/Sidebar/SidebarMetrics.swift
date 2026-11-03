@@ -1,6 +1,6 @@
 import CoreGraphics
 
-/// Sidebar and window-chrome numbers from harp (`docs/ui.md` §7.1 / §7.3, source
+/// Sidebar and window-chrome numbers from Harp (`docs/ui.md` §2–3, source
 /// `app/src/workspace/view/vertical_tabs.rs` `mod sidebar` and
 /// `app/src/util/traffic_lights.rs`).
 ///
@@ -17,9 +17,6 @@ enum SidebarMetrics {
     static let rowGap: CGFloat = 1
 
     static let rowHeight: CGFloat = 30
-    /// A row whose agent says what it is doing gets a second, smaller line.
-    static let rowHeightWithDetail: CGFloat = 44
-    static let rowDetailSize: CGFloat = 11
     static let rowRadius: CGFloat = 8
     static let rowInsetLeft: CGFloat = 12
     static let rowInsetRight: CGFloat = 8
@@ -37,15 +34,9 @@ enum SidebarMetrics {
     static let sectionInsetLeft: CGFloat = 12
     static let sectionInsetRight: CGFloat = 9
 
-    /// harp gives every row a 24pt circular icon with the status on its corner
-    /// (`VERTICAL_TABS_ICON_SIZE`, `ICON_WITH_STATUS_GAP`).
-    static let rowIconSize: CGFloat = 24
-    static let rowIconGap: CGFloat = 8
-    static let statusBadgeSize: CGFloat = 13
     /// Selection, hover and status changes: short enough to feel immediate.
     static let motion: CFTimeInterval = 0.12
-    static let statusBadgeRing: CGFloat = 2
-    /// The hover `×` chip harp shows in place of the time (`VT` `row_close`, 18pt / radius 5).
+    /// The hover close chip occupies the status slot without shifting the time.
     static let rowCloseSize: CGFloat = 18
     static let rowCloseRadius: CGFloat = 5
     static let groupActionSize: CGFloat = 18
@@ -75,7 +66,7 @@ enum SidebarMetrics {
     static let dividerWidth: CGFloat = 0.5
 
     /// The right pane is a card, not a flush pane: 10pt radius, 8pt inset on the three
-    /// window edges, a 0.5pt edge and a soft shadow (`docs/ui.md` §7.1).
+    /// window edges, a 0.5pt edge and a soft shadow (`docs/ui.md` §2).
     static let cardRadius: CGFloat = 10
     static let cardInset: CGFloat = 8
     static let cardEdgeWidth: CGFloat = 0.5

@@ -1,23 +1,17 @@
 import AppKit
 
-/// One session row, shaped like harp's: a 24pt circle with the program's glyph, the status on
-/// the circle's corner, the title, and the age on the right — which the pointer swaps for a
-/// close chip (`VT` `row_close`).
+/// A compact session row: name, age, and a trailing status slot. Agent details stay in the
+/// tooltip so a long task or permission question cannot change the list's rhythm.
 final class SidebarRowCellView: NSTableCellView {
     var onClose: (() -> Void)?
 
-    private let circle = NSView()
-    private let glyph = NSImageView()
     private let badge = SidebarStatusBadge()
     private let title = NSTextField(labelWithString: "")
-    /// The agent's task or question, under the title; hidden for a one-line row.
-    private let detail = NSTextField(labelWithString: "")
     private let age = NSTextField(labelWithString: "")
-    /// Title centred alone, or lifted to make room for `detail`.
-    private var titleCentered: NSLayoutConstraint!
-    private var titleRaised: NSLayoutConstraint!
-    private let close = NSButton()
+    private let close = SidebarHeaderButton()
     private var tracking: NSTrackingArea?
+    private var hovered = false
+    private var hasStatus = false
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -29,47 +23,28 @@ final class SidebarRowCellView: NSTableCellView {
         build()
     }
 
-    /// `pulse`: the session just turned `blocked` (`SidebarModel.shouldPulse`).
     func configure(with session: SidebarSession, pulse: Bool = false) {
-        let tint = SidebarTheme.appTints[
-            SidebarModel.tintIndex(cwd: session.cwd, buckets: SidebarTheme.appTints.count)]
-        circle.layer?.backgroundColor = tint.cgColor
-        glyph.image = Self.symbol(
-            SidebarModel.appKind(session.app).symbol,
-            size: SidebarMetrics.statusGlyphSize,
-            weight: .semibold
-        )
-        // The circle is a mid-tone in light and a pastel in dark, so a dark glyph reads on both.
-        glyph.contentTintColor = NSColor.black.withAlphaComponent(0.72)
-
-        let unread = session.unread > 0
         title.stringValue = SidebarModel.rowTitle(for: session)
-        title.font = .systemFont(ofSize: SidebarMetrics.rowTitleSize, weight: unread ? .semibold : .regular)
+        title.font = .systemFont(
+            ofSize: SidebarMetrics.rowTitleSize,
+            weight: session.unread > 0 ? .semibold : .regular)
         title.textColor = SidebarTheme.ink
         age.stringValue = SidebarModel.ageText(for: session)
-        // Tabular figures: `9m` → `10m` must not shift the column.
-        age.font = .monospacedDigitSystemFont(ofSize: SidebarMetrics.rowTimeSize, weight: .regular)
-        age.textColor = session.status == .blocked ? SidebarTheme.needsAccent : SidebarTheme.gray
+        age.textColor = SidebarTheme.gray
+        let detail = SidebarModel.detailLine(for: session)
+        toolTip = [title.stringValue, session.cwd, detail ?? "", age.stringValue]
+            .filter { !$0.isEmpty }.joined(separator: "\n")
+        title.toolTip = toolTip
+        age.toolTip = age.stringValue
+        close.setAccessibilityLabel("Close \(title.stringValue)")
 
-        // Program-controlled text: a plain label, one line, never parsed (AGENTS.md §8).
-        if let line = SidebarModel.detailLine(for: session) {
-            detail.stringValue = line
-            detail.textColor = session.status == .blocked ? SidebarTheme.needsAccent : SidebarTheme.gray
-            detail.isHidden = false
-            titleCentered.isActive = false
-            titleRaised.isActive = true
-        } else {
-            detail.isHidden = true
-            titleRaised.isActive = false
-            titleCentered.isActive = true
-        }
-
-        // Status on the circle's corner, the way harp draws it; no state → no badge.
+        let symbol = session.reported ? SidebarModel.statusSymbol(for: session) : nil
+        hasStatus = symbol != nil
         badge.show(
-            symbol: SidebarModel.statusSymbol(for: session), color: statusColor(session),
-            working: session.status == .working, pulse: pulse)
-        close.isHidden = true
-        age.isHidden = false
+            symbol: symbol, color: statusColor(session),
+            working: session.reported && session.status == .working, pulse: pulse)
+        badge.setAccessibilityLabel(SidebarModel.headerBadge(for: session))
+        updateHover()
     }
 
     private func statusColor(_ session: SidebarSession) -> NSColor {
@@ -82,71 +57,46 @@ final class SidebarRowCellView: NSTableCellView {
         }
     }
 
-    private static func symbol(_ name: String, size: CGFloat, weight: NSFont.Weight) -> NSImage? {
-        let config = NSImage.SymbolConfiguration(pointSize: size, weight: weight)
-        return NSImage(systemSymbolName: name, accessibilityDescription: nil)?
-            .withSymbolConfiguration(config)
-    }
-
     private func build() {
-        circle.wantsLayer = true
-        circle.layer?.cornerRadius = SidebarMetrics.rowIconSize / 2
-        addSubview(circle)
-
-        addSubview(glyph)
-        glyph.imageScaling = .scaleProportionallyDown
-        addSubview(badge)
-        addSubview(title)
-        addSubview(detail)
-        detail.font = .systemFont(ofSize: SidebarMetrics.rowDetailSize)
-        detail.lineBreakMode = .byTruncatingTail
-        detail.maximumNumberOfLines = 1
-        detail.cell?.truncatesLastVisibleLine = true
+        title.identifier = .init("session.title")
+        age.identifier = .init("session.age")
+        badge.identifier = .init("session.status")
         title.lineBreakMode = .byTruncatingTail
-        addSubview(age)
-        addSubview(close)
+        title.maximumNumberOfLines = 1
+        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        age.font = .monospacedDigitSystemFont(ofSize: SidebarMetrics.rowTimeSize, weight: .regular)
+        age.lineBreakMode = .byTruncatingMiddle
+        age.maximumNumberOfLines = 1
+        age.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
 
-        close.isBordered = false
-        close.image = Self.symbol("xmark", size: 9, weight: .bold)
+        close.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 9, weight: .semibold))
         close.contentTintColor = SidebarTheme.gray
         close.target = self
         close.action = #selector(closeClicked)
-        close.wantsLayer = true
-        close.layer?.cornerRadius = SidebarMetrics.rowCloseRadius
-        close.layer?.backgroundColor = SidebarTheme.hover.cgColor
+        close.isHidden = true
 
-        for view in [circle, glyph, badge, title, detail, age, close] {
+        for view in [title, age, badge, close] {
+            addSubview(view)
             view.translatesAutoresizingMaskIntoConstraints = false
         }
         let leading = SidebarMetrics.listSidePadding + SidebarMetrics.rowInsetLeft
         let trailing = SidebarMetrics.listSidePadding + SidebarMetrics.rowInsetRight
-        titleCentered = title.centerYAnchor.constraint(equalTo: centerYAnchor)
-        titleRaised = title.bottomAnchor.constraint(equalTo: centerYAnchor, constant: 1)
-        titleCentered.isActive = true
         NSLayoutConstraint.activate([
-            circle.leadingAnchor.constraint(equalTo: leadingAnchor, constant: leading),
-            circle.centerYAnchor.constraint(equalTo: centerYAnchor),
-            circle.widthAnchor.constraint(equalToConstant: SidebarMetrics.rowIconSize),
-            circle.heightAnchor.constraint(equalToConstant: SidebarMetrics.rowIconSize),
-            glyph.centerXAnchor.constraint(equalTo: circle.centerXAnchor),
-            glyph.centerYAnchor.constraint(equalTo: circle.centerYAnchor),
-            glyph.widthAnchor.constraint(equalToConstant: 14),
-            glyph.heightAnchor.constraint(equalToConstant: 14),
-            // Corner of the circle, like harp's `render_with_optional_status_badge`.
-            badge.trailingAnchor.constraint(equalTo: circle.trailingAnchor, constant: 3),
-            badge.bottomAnchor.constraint(equalTo: circle.bottomAnchor, constant: 2),
-            badge.widthAnchor.constraint(equalToConstant: SidebarMetrics.statusBadgeSize),
-            badge.heightAnchor.constraint(equalToConstant: SidebarMetrics.statusBadgeSize),
-            title.leadingAnchor.constraint(
-                equalTo: circle.trailingAnchor, constant: SidebarMetrics.rowIconGap),
-            title.trailingAnchor.constraint(lessThanOrEqualTo: age.leadingAnchor, constant: -6),
-            detail.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            detail.topAnchor.constraint(equalTo: centerYAnchor, constant: 1),
-            detail.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -trailing),
-            age.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -trailing),
+            title.leadingAnchor.constraint(equalTo: leadingAnchor, constant: leading),
+            title.centerYAnchor.constraint(equalTo: centerYAnchor),
+            title.trailingAnchor.constraint(
+                lessThanOrEqualTo: age.leadingAnchor, constant: -SidebarMetrics.rowSpacing),
+            title.widthAnchor.constraint(greaterThanOrEqualToConstant: 24),
+            age.trailingAnchor.constraint(equalTo: badge.leadingAnchor, constant: -SidebarMetrics.rowSpacing),
             age.centerYAnchor.constraint(equalTo: centerYAnchor),
-            close.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -trailing),
-            close.centerYAnchor.constraint(equalTo: centerYAnchor),
+            age.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, multiplier: 0.45),
+            badge.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -trailing),
+            badge.centerYAnchor.constraint(equalTo: centerYAnchor),
+            badge.widthAnchor.constraint(equalToConstant: SidebarMetrics.statusGlyphSlot),
+            badge.heightAnchor.constraint(equalToConstant: SidebarMetrics.statusGlyphSlot),
+            close.centerXAnchor.constraint(equalTo: badge.centerXAnchor),
+            close.centerYAnchor.constraint(equalTo: badge.centerYAnchor),
             close.widthAnchor.constraint(equalToConstant: SidebarMetrics.rowCloseSize),
             close.heightAnchor.constraint(equalToConstant: SidebarMetrics.rowCloseSize),
         ])
@@ -158,20 +108,25 @@ final class SidebarRowCellView: NSTableCellView {
         let area = NSTrackingArea(
             rect: bounds,
             options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
-            owner: self
-        )
+            owner: self)
         addTrackingArea(area)
         tracking = area
     }
 
     override func mouseEntered(with event: NSEvent) {
-        age.isHidden = true
-        close.isHidden = false
+        hovered = true
+        updateHover()
     }
 
     override func mouseExited(with event: NSEvent) {
-        age.isHidden = false
-        close.isHidden = true
+        hovered = false
+        updateHover()
+    }
+
+    private func updateHover() {
+        // The close button replaces the status; the age and title never move on hover.
+        badge.isHidden = hovered || !hasStatus
+        close.isHidden = !hovered
     }
 
     @objc private func closeClicked() { onClose?() }

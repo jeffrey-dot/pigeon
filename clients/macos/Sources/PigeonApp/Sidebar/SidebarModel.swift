@@ -212,8 +212,7 @@ public enum SidebarModel {
         return nil
     }
 
-    /// The row's second line: what the agent is doing or what it is waiting for. Only live
-    /// states get one, so a quiet sidebar stays one line per session; `nil` = single line.
+    /// Agent detail for the row's tooltip and card header. It never adds a second row line.
     public static func detailLine(for session: SidebarSession) -> String? {
         let text = session.agent.message.trimmingCharacters(in: .whitespacesAndNewlines)
         switch session.status {
@@ -229,13 +228,11 @@ public enum SidebarModel {
         }
     }
 
-    /// The card header's state: `Needs you · 2m · Run tests?`; blank when the pane never
+    /// The card header's state: `Needs you · 2m`; blank when the pane never
     /// reported, because there is no state to describe.
     public static func headerBadge(for session: SidebarSession, now: Date = Date()) -> String {
         guard session.reported, session.status != .idle else { return "" }
-        let base = subtitle(status: session.status, since: session.lastSeen, now: now)
-        guard let line = detailLine(for: session) else { return base }
-        return "\(base) · \(line)"
+        return subtitle(status: session.status, since: session.lastSeen, now: now)
     }
 
     /// The row's name: what the user called it, else the agent that reported, else the program.
@@ -354,21 +351,21 @@ public enum SidebarModel {
     }
 
     /// A stable tint per project, so two shells in one project still differ from another
-    /// project's. Same `cwd` → same tint on every launch (`SidebarTheme.appTints.count` buckets).
+    /// project's. Same `cwd` → same tint on every launch.
     public static func tintIndex(cwd: String, buckets: Int = 6) -> Int {
         var hash: UInt32 = 5381
         for byte in cwd.utf8 { hash = hash &* 33 &+ UInt32(byte) }
         return Int(hash % UInt32(max(buckets, 1)))
     }
 
-    /// The row's trailing icon as an SF Symbol (`docs/ui.md` §2.2/§7.4); `idle` has none.
+    /// The row's trailing icon. Only an explicitly reported idle state gets a moon.
     public static func statusSymbol(for session: SidebarSession) -> String? {
         switch session.status {
         case .working: return "circle.dashed"
-        case .blocked: return "exclamationmark.circle"
+        case .blocked: return "record.circle"
         case .done: return session.unread > 0 ? "checkmark.circle.fill" : "checkmark"
         case .error: return "exclamationmark.triangle.fill"
-        case .idle: return nil
+        case .idle: return session.reported ? "moon.fill" : nil
         }
     }
 
