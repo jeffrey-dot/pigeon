@@ -55,12 +55,12 @@ Rust core（VT / 布局 / 状态 / 协议）  ── C ABI ──┬─ mac 客�
   信箱空了就暂停，大量输出时每次刷新只画一帧；macOS 13 退回"投递即画"。
   被遮挡的窗口，系统会把 display link 限到约 1Hz，所以遮挡时几乎不出帧。
   基准：`PIGEON_FRAME_STATS=1` 每秒打一行帧时间 p50/p99（含 GPU 时间），
-  `tools/render-bench.sh` 跑同一份大文件 `cat` 加 5 秒持续输出；跑的时候窗口要在最前。
+  `tools/bench/render-bench.sh` 跑同一份大文件 `cat` 加 5 秒持续输出；跑的时候窗口要在最前。
   删除前在前台窗口实测（2560×1664 60Hz，10 万行 cat + 5 秒持续输出）：
   CoreText 帧 CPU p50 3.6ms / p99 12.4ms，App CPU 3.36s；Metal 帧 CPU p50 1.6ms / p99 1.8ms
   （GPU p50 0.3–0.5ms，偶发 p99 到 15ms），App CPU 2.68s；两者都跟满 60 帧/秒。
   未做：Linux 后端（OpenGL/EGL + DMABUF）、滚动的行复用、DEC mode 2033 可见性通知。
-  对账：`tools/metal-gui-check.sh`（两种外观各截一张）。
+  对账：`tools/checks/metal-gui-check.sh`（两种外观各截一张）。
 - **输入法**：实现 `NSTextInputClient`（候选窗定位、marked text）；这是原生前端的额外活，
   但也是 Electron/winit 路线最难对齐的部分，正是选 A 的理由之一。
 - **Linux（M5）**：GTK4 + `GtkTextView` 不行（终端要自绘网格），用 `GtkDrawingArea` + Pango 排版；

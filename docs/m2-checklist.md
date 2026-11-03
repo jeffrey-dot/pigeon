@@ -17,7 +17,7 @@ swift build && swift test                          # 103 executed，5 skipped（
 PIGEON_SSH_HOST=arch PIGEON_HOST_ARTIFACTS=$PWD/core/target/x86_64-unknown-linux-musl/release \
   swift test                                       # 103 passed，0 skipped，exit 0
 tools/vt-parity/run.sh                             # 8/8 ok（tmux 3.8，80x24）
-tools/m2-gui-check.sh                              # 全部 PASS（1 条 OS 按键 SKIP），含自检与远端侧栏，见 §2
+tools/checks/m2-gui-check.sh                              # 全部 PASS（1 条 OS 按键 SKIP），含自检与远端侧栏，见 §2
 ```
 
 新增覆盖：
@@ -37,7 +37,7 @@ tools/m2-gui-check.sh                              # 全部 PASS（1 条 OS 按�
 | 多主机分组 | `SidebarOrderingTests`：机器标题在分组之上（本机电脑名 / 远端 ssh 名或地址）、分组只显示项目名、同一项目在两台机器上分成两组；离线主机不产生会话行；`Grouping.pinnedGroup` 保证**组在会话首次出现时钉住，`cd` 不换组** |
 | VT 对账 | `tools/vt-parity/`：8 条语料（basic/cursor/erase/wide/scroll-region/alt-screen/insert-delete/wrap）与 tmux `capture-pane` 逐行一致 |
 
-## 2. GUI（真窗口，`tools/m2-gui-check.sh`）
+## 2. GUI（真窗口，`tools/checks/m2-gui-check.sh`）
 
 脚本起真宿主 + 真 `Pigeon.app`，证据是宿主日志（`PIGEON_DEBUG` 打印收到的每条消息）与 `PIGEON_SELFTEST=1`
 的自检输出。真实输出（macOS，`PIGEON_SSH_HOST=arch`）：
@@ -76,7 +76,7 @@ m2-gui-check: no failures
 返回 true 而 `isActive` 仍 false），而菜单快捷键由**活动应用**分发。`CGEventPostToPid` 能送键盘（审计侧用 PageUp 证实
 `<- scroll` 能到宿主），但送不了鼠标点击（把点击投到 pane 上没有任何 `<- focus`）。所以：
 - **按键 → 协议消息**这条链路上面的自检覆盖了；
-- **窗口服务把物理键盘/鼠标交给本窗口**这一步只能在正常桌面会话里验，`tools/click-at-pid.swift` 留给那种会话。
+- **窗口服务把物理键盘/鼠标交给本窗口**这一步只能在正常桌面会话里验，`tools/checks/helpers/click-at-pid.swift` 留给那种会话。
 
 ## 3. 这轮抓到的真 bug（都已修）
 | 问题 | 表现 | 位置 |
@@ -92,7 +92,7 @@ m2-gui-check: no failures
 
 | 项 | 自动化到哪一步 | 还缺什么 |
 |---|---|---|
-| 物理键盘/鼠标投递 | **按键 → 协议消息**已由 `PIGEON_SELFTEST` 覆盖（菜单 action、第一响应者 PageUp、侧栏选中），宿主日志确认收到 `split_pane`/`zoom_pane`/`unzoom`/`scroll` | 窗口服务把物理事件交给本窗口（本会话无法激活任何应用）；在正常桌面会话里跑 `tools/m2-gui-check.sh` 会走 OS 那一段并 PASS/FAIL |
+| 物理键盘/鼠标投递 | **按键 → 协议消息**已由 `PIGEON_SELFTEST` 覆盖（菜单 action、第一响应者 PageUp、侧栏选中），宿主日志确认收到 `split_pane`/`zoom_pane`/`unzoom`/`scroll` | 窗口服务把物理事件交给本窗口（本会话无法激活任何应用）；在正常桌面会话里跑 `tools/checks/m2-gui-check.sh` 会走 OS 那一段并 PASS/FAIL |
 | 滚轮（真实触控板） | 像素累积/方向单测 + `scrollRequest` 的 alt 规则 + 自检里 PageUp 到 `scroll` | 触控板真的滚一下；`alt` 屏里（vim）确认键还归程序 |
 | `size_state` 在侧栏 age 位的显示 | 纯逻辑单测（`10m · 2× latest`） | 两个窗口下看一眼侧栏文案 |
 | 多客户端首次 attach 决定策略 | `locked`/`smallest` 用两个客户端验过 | 客户端目前不发送 `size_policy`（默认 `latest`），要在 UI 里选策略才有意义 |

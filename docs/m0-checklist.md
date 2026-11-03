@@ -53,11 +53,11 @@ swift test                                         # 18 个用例
 | htop：按 `q` 退出后回到 `sh-3.2$` 提示符（pane 是 `htop` 然后 `exec /bin/sh`；脚本打印 `htop processes after pressing q: 1`，那个 1 就是 shell） | ![htop-quit](images/m0/htop-quit.jpg) |
 | 真彩色 + 调色板反显 + 中文宽字符（渲染器按列定位后：`中文宽字符` 占 10 列，后面的 `wide` 从第 11 列开始） | ![truecolor](images/m0/truecolor.jpg) |
 
-一键复现（`tools/m0-gui-check.sh`）：
+一键复现（`tools/checks/m0-gui-check.sh`）：
 
 ```sh
 cargo build --release --bin pigeon-host && cargo build && swift build   # 先构建
-./tools/m0-gui-check.sh
+./tools/checks/m0-gui-check.sh
 ```
 
 真实输出（macOS，htop 3.5.3；没装 htop 时该段自动跳过）：

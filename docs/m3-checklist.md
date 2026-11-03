@@ -24,7 +24,7 @@ swift build && swift test                          # 通过 / 55 passed
 | 侧栏逻辑 | `blocked` 优先且按持久化顺序、`nextNeedsYou` 回绕、协议状态字符串映射、`relativeTime` 四档（`now`/`1m`/`1h`/`1d`）、`statusGlyph` 覆盖五个状态（`idle` 为空）、`ageText` 未上报时为空、`subtitle(status:since:)` = `Needs you · 2m` / `Idle · now` |
 | 持久化 | `SidebarStore` 往返 + 原子写、默认路径在 `~/.config/pigeon`、损坏文件回退为空状态 |
 
-## 2. GUI（真键盘 / 真鼠标，`tools/m3-gui-check.sh`）
+## 2. GUI（真键盘 / 真鼠标，`tools/checks/m3-gui-check.sh`）
 
 四个 session：`A` 组两个（同 cwd，用来演示组内拖拽）、`B` 组的 shell 隔 2s 打印 `done`（保持未读）、
 `C` 组的 shell 启动即打印 `blocked:kind=permission`。空态在创建任何 session 之前截；
@@ -121,7 +121,7 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 - **按 `docs/ui.md` + 参考图对齐行版式**（2026-10-28 晚）：行从两行改成单行——标题左、右侧固定列放
   `now/1m/1h/1d` + 状态字形（`◐ ◷ ✓ !`，`idle` 无字形），行高 46 → 26；分组头右对齐橙色 `N needs you`
   （与组内 blocked 数一致）；未读才加粗 + 行首圆点，去掉整行染色；相对时间每分钟自动刷新。
-  `tools/m3-gui-check.sh` 的点击步长同步 46 → 26。
+  `tools/checks/m3-gui-check.sh` 的点击步长同步 46 → 26。
 - **副标题的去处**（2026-10-28 用户确认）：行保持参考图的单行（标题 + 时间 + 图标），
   `Working · 1m` / `Needs you · 2m` 这句话改由右栏头部徽标承担（`SessionHeaderView`），文案仍来自
   `SidebarModel.subtitle`。
@@ -180,7 +180,7 @@ harp 出处见 `docs/ui.md` §7（`VT` = `app/src/workspace/view/vertical_tabs.r
 
 | 项 | 说明 |
 |---|---|
-| 拖拽排序（自动化） | 合成鼠标事件无法启动 AppKit 拖拽：`SidebarViewController.pasteboardWriterForRow` 里的 `drag start` 调试行，在一次完整跑（`PIGEON_DEBUG=1 tools/m3-gui-check.sh`）的 app 日志里是 **0 次**（`grep -c 'drag start' /tmp/pigeon-m3-*/app-light.log`）。`cliclick` 的 `dd/dm/du`、单进程连发、先 `m:` 定位都试过，落点仍停在起始行。机制本身可用：`acceptDrop` → `onReorder` → `SidebarStore` 原子写，`SidebarStoreTests` 覆盖往返；更早一次人手拖拽把 `sidebar.json` 写成 `{"order":[1,3,2],…}` 并重开生效 |
+| 拖拽排序（自动化） | 合成鼠标事件无法启动 AppKit 拖拽：`SidebarViewController.pasteboardWriterForRow` 里的 `drag start` 调试行，在一次完整跑（`PIGEON_DEBUG=1 tools/checks/m3-gui-check.sh`）的 app 日志里是 **0 次**（`grep -c 'drag start' /tmp/pigeon-m3-*/app-light.log`）。`cliclick` 的 `dd/dm/du`、单进程连发、先 `m:` 定位都试过，落点仍停在起始行。机制本身可用：`acceptDrop` → `onReorder` → `SidebarStore` 原子写，`SidebarStoreTests` 覆盖往返；更早一次人手拖拽把 `sidebar.json` 写成 `{"order":[1,3,2],…}` 并重开生效 |
 | 拖拽排序（人手） | 需要真人拖一次才能给出可视化证据；脚本不产出 `reordered` 截图（旧图已删） |
 | ~~右键 Close Session~~ | 已稳定：`close_pane 0 -> 1` |
 | 悬停 `×` 关闭 | ui.md §2.1 提到，未实现；关闭走右键菜单 / ⌘⇧W |

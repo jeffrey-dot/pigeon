@@ -1,6 +1,6 @@
 # 软件更新
 
-Pigeon.app 自己检查、下载、安装新版本，不依赖 Sparkle 或其它框架。代码在 `Sources/PigeonApp/Update/`。
+Pigeon.app 自己检查、下载、安装新版本，不依赖 Sparkle 或其它框架。代码在 `clients/macos/Sources/PigeonApp/Update/`。
 
 ## 用户看到什么
 
@@ -17,7 +17,7 @@ Pigeon.app 自己检查、下载、安装新版本，不依赖 Sparkle 或其它
 
 | 资产 | 内容 |
 |---|---|
-| `Pigeon-<版本>.zip` | `UNIVERSAL=1 tools/bundle-app.sh` 打的 Pigeon.app（arm64 + x86_64），用 `ditto -c -k --keepParent` 压缩 |
+| `Pigeon-<版本>.zip` | `UNIVERSAL=1 tools/build/bundle-app.sh` 打的 Pigeon.app（arm64 + x86_64），用 `ditto -c -k --keepParent` 压缩 |
 | `latest.json` | `{version, url, sha256, signature}` |
 
 客户端读 `https://github.com/jeffrey-dot/pigeon/releases/latest/download/latest.json`；发布步骤会把该 release

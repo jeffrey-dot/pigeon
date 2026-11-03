@@ -5,6 +5,8 @@
 **M0 已可运行**：Rust 内核 + `pigeon-server` + AppKit 单 pane 客户端（关窗口进程不死、重开屏幕原样）。
 
 - [AGENTS.md](AGENTS.md) —— 给编码 agent 的工作说明：**模块划分**、风格、测试、不变量
+- [GLOSSARY.md](GLOSSARY.md) —— 领域词汇：一个概念只有一个名字，含「禁用的说法」
+- [docs/adr/](docs/adr/README.md) —— **架构决策记录**：为什么是 Rust 内核、为什么宿主持有 PTY、否掉过哪些选项
 - [docs/m0-checklist.md](docs/m0-checklist.md) —— **M0 验收记录**：自动化结果、截图证据、未验项
 - [docs/m1-checklist.md](docs/m1-checklist.md) —— **M1 验收记录**：分屏、拖动分隔线、关窗重开
 - [docs/m3-checklist.md](docs/m3-checklist.md) —— **M3 验收记录**：侧栏、状态流、未读、持久化
