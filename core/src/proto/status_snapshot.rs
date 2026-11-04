@@ -21,6 +21,29 @@ pub struct WireStatusRecord {
 
 /// Validates locally constructed messages as well as decoded wire input.
 pub fn snapshot_of(message: &Message) -> PgResult<(u32, StatusSnapshot)> {
+    let (pane_id, revision, records) = validated_records(message)?;
+    let mut decoded = records
+        .iter()
+        .map(|record| {
+            let (state, kind) = record_tags(record)?;
+            Ok(StatusSnapshotRecord {
+                id: record.id.clone(),
+                seq: record.seq,
+                state,
+                kind,
+                msg: record.msg.clone(),
+                app: record.app.clone(),
+                age_ms: record.age_ms,
+            })
+        })
+        .collect::<PgResult<Vec<_>>>()?;
+    // Producers use id order; receivers accept any order without assigning UI priority.
+    decoded.sort_by(|a, b| a.id.cmp(&b.id));
+    Ok((pane_id, StatusSnapshot { revision, records: decoded }))
+}
+
+/// Validation borrows strings; encoding/decoding must not build and discard an owned sample.
+fn validated_records(message: &Message) -> PgResult<(u32, u64, &[WireStatusRecord])> {
     let Message::StatusSnapshot {
         pane_id,
         revision,
@@ -34,7 +57,6 @@ pub fn snapshot_of(message: &Message) -> PgResult<(u32, StatusSnapshot)> {
     }
     let mut ids = BTreeSet::new();
     let mut seqs = BTreeSet::new();
-    let mut decoded = Vec::with_capacity(records.len());
     for record in records {
         if record.seq == 0
             || !ids.insert(&record.id)
@@ -46,40 +68,28 @@ pub fn snapshot_of(message: &Message) -> PgResult<(u32, StatusSnapshot)> {
         {
             return Err(PgError::InvalidArg);
         }
-        let state = match record.state.as_str() {
-            "idle" => State::Idle,
-            "working" => State::Working,
-            "blocked" => State::Blocked,
-            "done" => State::Done,
-            "error" => State::Error,
-            _ => return Err(PgError::InvalidArg),
-        };
-        let kind = match record.kind.as_str() {
-            "" => Kind::None,
-            "permission" => Kind::Permission,
-            "question" => Kind::Question,
-            "auth" => Kind::Auth,
-            _ => return Err(PgError::InvalidArg),
-        };
-        decoded.push(StatusSnapshotRecord {
-            id: record.id.clone(),
-            seq: record.seq,
-            state,
-            kind,
-            msg: record.msg.clone(),
-            app: record.app.clone(),
-            age_ms: record.age_ms,
-        });
+        record_tags(record)?;
     }
-    // Producers use id order; receivers accept any order without assigning UI priority.
-    decoded.sort_by(|a, b| a.id.cmp(&b.id));
-    Ok((
-        *pane_id,
-        StatusSnapshot {
-            revision: *revision,
-            records: decoded,
-        },
-    ))
+    Ok((*pane_id, *revision, records))
+}
+
+fn record_tags(record: &WireStatusRecord) -> PgResult<(State, Kind)> {
+    let state = match record.state.as_str() {
+        "idle" => State::Idle,
+        "working" => State::Working,
+        "blocked" => State::Blocked,
+        "done" => State::Done,
+        "error" => State::Error,
+        _ => return Err(PgError::InvalidArg),
+    };
+    let kind = match record.kind.as_str() {
+        "" => Kind::None,
+        "permission" => Kind::Permission,
+        "question" => Kind::Question,
+        "auth" => Kind::Auth,
+        _ => return Err(PgError::InvalidArg),
+    };
+    Ok((state, kind))
 }
 
 pub fn message(pane_id: u32, snapshot: StatusSnapshot) -> Message {
@@ -104,7 +114,7 @@ pub fn message(pane_id: u32, snapshot: StatusSnapshot) -> Message {
 
 pub(super) fn validate(message: &Message) -> PgResult<()> {
     if matches!(message, Message::StatusSnapshot { .. }) {
-        snapshot_of(message)?;
+        validated_records(message)?;
     }
     Ok(())
 }
