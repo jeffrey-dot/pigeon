@@ -39,6 +39,7 @@ extension AppDelegate {
         sidebar = SidebarViewController()
         sidebar.onSelect = { [weak self] id in self?.select(id) }
         sidebar.onClose = { [weak self] id in self?.closeSession(id) }
+        sidebar.onShowStatusRecords = { [weak self] id in self?.showStatusRecords(for: id) }
         sidebar.onMarkRead = { [weak self] id in self?.markRead(id) }
         sidebar.onRename = { [weak self] id, name in self?.rename(id, name) }
         sidebar.onRenameGroup = { [weak self] group, name in self?.renameGroup(group, name) }
@@ -206,6 +207,7 @@ extension AppDelegate {
         let sessionItem = NSMenuItem()
         mainMenu.addItem(sessionItem)
         let sessionMenu = NSMenu(title: "Session")
+        sessionMenu.addItem(withTitle: "Status Records…", action: #selector(showStatusRecords(_:)), keyEquivalent: "")
         sessionMenu.addItem(withTitle: "Next Needs You", action: #selector(nextNeedsYou(_:)), keyEquivalent: "j")
         sessionMenu.addItem(withTitle: "New Session", action: #selector(newSession(_:)), keyEquivalent: "t")
         if ProcessInfo.processInfo.environment["PIGEON_DEBUG"] != nil {

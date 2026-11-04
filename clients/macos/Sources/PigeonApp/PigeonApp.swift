@@ -109,6 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var swappedFrom: String?
     var sidebarDirty = false
     var statusReadScheduled = false
+    var statusPanel: StatusRecordsPanel?
     /// "Jeffrey's MacBook Air"; looked up once because the lookup can touch the resolver.
     lazy var localMachineName: String = Host.current().localizedName ?? ""
 

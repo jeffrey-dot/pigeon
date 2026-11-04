@@ -83,6 +83,10 @@ extension AppDelegate {
 
     func markRead(_ id: Int) {
         guard let (host, session) = splitRowId(id) else { return }
+        if connections[host]?.statusSnapshot == true {
+            showStatusRecords(for: id)
+            return
+        }
         onHost(host) { markReadOnActiveHost(session) }
     }
 

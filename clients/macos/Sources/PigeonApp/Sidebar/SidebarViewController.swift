@@ -38,6 +38,7 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
         return true
     }
     var onClose: ((Int) -> Void)?
+    var onShowStatusRecords: ((Int) -> Void)?
     var onMarkRead: ((Int) -> Void)?
     var onRename: ((Int, String) -> Void)?
     var onRenameGroup: ((String, String) -> Void)?
@@ -302,6 +303,7 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
     private func buildMenu() -> NSMenu {
         let menu = NSMenu()
         menu.addItem(withTitle: "Close Session", action: #selector(closeClicked), keyEquivalent: "")
+        menu.addItem(withTitle: "Status Records…", action: #selector(showStatusRecordsClicked), keyEquivalent: "")
         menu.addItem(withTitle: "Mark as Read", action: #selector(markReadClicked), keyEquivalent: "")
         menu.addItem(withTitle: "Rename Session…", action: #selector(renameClicked), keyEquivalent: "")
         menu.addItem(withTitle: "Rename Group…", action: #selector(renameGroupClicked), keyEquivalent: "")
@@ -311,6 +313,10 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
 
     @objc private func closeClicked() {
         if let session = session(at: table.clickedRow) { onClose?(session.id) }
+    }
+
+    @objc private func showStatusRecordsClicked() {
+        if let session = session(at: table.clickedRow) { onShowStatusRecords?(session.id) }
     }
 
     @objc private func markReadClicked() {

@@ -134,6 +134,7 @@ extension AppDelegate {
             Wire.set(message, u32: "pane_id", pane)
         }, type: PG_MSG_UNZOOM)
         focus(pane)
+        if connection.statusSnapshot { showStatusRecords(for: next.id) }
     }
 
     @objc func newSession(_ sender: Any?) {
@@ -258,6 +259,7 @@ extension AppDelegate {
         let needs = SidebarModel.needsYou(sidebarSessions())
         window.title = needs > 0 ? "pigeon — \(needs) needs you" : "pigeon"
         updateHeader()
+        refreshStatusPanel()
     }
 
     /// `docs/ui.md` §3: name, cwd, and the same status wording as the sidebar.

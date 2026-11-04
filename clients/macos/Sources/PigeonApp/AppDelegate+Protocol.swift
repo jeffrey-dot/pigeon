@@ -28,6 +28,7 @@ extension AppDelegate {
                 displayedHost = nil
                 displayedSession = nil
             }
+            connection.statusSnapshot = Wire.contains(message, strings: "features", "status_snapshot")
             connection.statusAll = Wire.contains(message, strings: "features", "status_all")
             // Tell the host what we are drawing with, so programs inside the panes can pick
             // their light or dark theme (`OSC 4/10/11`).
@@ -80,7 +81,9 @@ extension AppDelegate {
         case PG_MSG_DELTA:
             applyDelta(message, visible: visible)
         case PG_MSG_STATUS:
-            applyStatus(message)
+            if !connection.statusSnapshot { applyStatus(message) }
+        case PG_MSG_STATUS_SNAPSHOT:
+            if connection.statusSnapshot { applyStatusSnapshot(message) }
         case PG_MSG_SIZE_STATE:
             // Protocol §6: more than one window means the user should be able to tell who
             // decided the size, so it rides along in the row's age label.

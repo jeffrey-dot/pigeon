@@ -31,6 +31,7 @@ extension AppDelegate {
         RunLoop.main.perform(inModes: [.common]) { [weak self] in
             guard let self else { return }
             self.statusReadScheduled = false
+            self.refreshStatusPanel()
             self.acknowledgeVisibleStatuses()
         }
     }
@@ -65,6 +66,14 @@ extension AppDelegate {
         }
     }
 
+    func applyStatusSnapshot(_ message: OpaquePointer) {
+        guard let instance = connection.instance, let snapshot = StatusSnapshot(message: message) else { return }
+        let effects = SessionReducer.apply(snapshot, to: &rows, host: activeHost, instance: instance)
+        applyStatusEffects(effects)
+        refreshSidebar()
+        requestStatusScreen(snapshot.pane)
+    }
+
     func applyStatus(_ message: OpaquePointer) {
         guard let instance = connection.instance else { return }
         let report = SessionReducer.Report(
@@ -77,18 +86,23 @@ extension AppDelegate {
             selected: selectedSession, visiblePanes: [])
         applyStatusEffects(effects)
         refreshSidebar()
+        requestStatusScreen(report.pane)
+    }
+
+    private func requestStatusScreen(_ pane: UInt32) {
         // A status-only replay can precede any new screen, even when since is current
         // and the host has no delta to send. Ask for one picture before auto-ack.
         if swappedFrom == nil, let session = selectedSession,
-           rows[session]?.panes.contains(report.pane) == true,
-           !connection.receivedScreen.contains(report.pane),
-           !requested.contains(report.pane) {
-            sendAttach(report.pane, force: true, resume: false)
+           rows[session]?.panes.contains(pane) == true,
+           !connection.receivedScreen.contains(pane),
+           !requested.contains(pane) {
+            sendAttach(pane, force: true, resume: false)
         }
         markVisibleStatusesSeen()
     }
 
     @objc func statusWindowBecameVisible(_ notification: Notification) {
+        refreshStatusPanel()
         markVisibleStatusesSeen()
     }
 }

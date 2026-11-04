@@ -62,7 +62,7 @@ extension AppDelegate {
             Wire.set(message, str: "client", "pigeon-mac")
             // `delta` sends only the rows that changed: a keystroke costs ~2 KB instead of a
             // full screen (~100 KB on a large pane), which is what makes ssh feel slow.
-            Wire.set(message, strings: "features", ["scrollback", "delta", "status_all"])
+            Wire.set(message, strings: "features", ["scrollback", "delta", "status_all", "status_snapshot"])
         }, type: PG_MSG_HELLO)
     }
 

@@ -186,6 +186,7 @@ extension AppDelegate {
     func hostLost(host: String, _ reason: String) {
         clients[host] = nil
         connections[host]?.disconnected()
+        refreshStatusPanel()
         connections[host]?.heartbeat = nil
         if host == "local", stoppedByUser {
             stoppedByUser = false
