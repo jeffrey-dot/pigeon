@@ -3,13 +3,18 @@
 > **自己做终端 + 自己做最小 multiplexer**，参考成熟项目而不是 fork：fork 来的终端界面做不出原生侧栏，
 > tmux 会丢掉它不认识的 OSC 7501。
 
+> **状态核对：2026-11-04**。下文“目标架构”“能力清单”“验收”描述设计目标；当前实现与剩余工作集中在 §11。
+> M0–M4 主体已落地，M5 Linux 功能对齐进行中，M6 尚未整体验收。
+> 本次竞品对照与建议顺序见 [终端差距评估](terminal-gap-analysis.md)。
+> 后续执行以 [前沿终端优化计划](optimization-plan.md) 的阶段、依赖和验收门槛为准；本页 §11 继续维护当前实现。
+
 ## 1. 产品范围
 
 ### 首发（v0.1 Beta）必须有
 - 桌面应用，**macOS 首发，Linux 是明确的第二个目标**。窗口内是真正的终端：vim/htop/less/Pi TUI 都能跑。
   跨平台的做法见 §3.2：后台会话进程与协议全平台共用，客户端按平台实现。
-- **左侧栏是一等公民**：按 `项目/会话 → 窗口 → pane` 分组的树，行尾是状态图标 + 相对时间，
-  组头有 `1 needs you` 计数，可折叠；点击切换、可跳到下一个等待中的位置。
+- **左侧栏是一等公民**：按 `机器 → 项目 → 会话` 分组的列表（会话包含 pane），行尾是状态图标 + 相对时间，
+  组头有 `1 needs you` 计数；项目组不折叠，整条侧栏可收起；点击切换、可跳到下一个等待中的位置。
 - 分屏与多窗口：任意矩形布局（vsplit/hsplit 嵌套），可拖动分隔线，可放大单个 pane。
 - **会话持久化**：关掉窗口/应用崩溃后任务继续跑；重开自动接回（等于 tmux 的 detach/attach）。
 - 状态：直接消费 **OSC 7501**（程序自己上报 idle/working/blocked/done/error），
@@ -47,7 +52,7 @@
 2. **协议保持极简**：客户端 attach 时先拉全量快照（含光标、备用屏、滚动区），之后收增量；
    键盘/鼠标/尺寸走同一条连接。参考 tmux control mode 的 `%output` 思路，但我们自己定。
 3. **OSC 7501 由我们解析**：我们就是终端，不再有 tmux 那种“不认识的 OSC 直接丢”的中间层。
-   顺带把 OSC 9;4（进度）、OSC 52（剪贴板）、OSC 133（shell 集成）一起支持。
+   OSC 7/0/2 与 OSC 133A 提示符已用于目录、标题和状态生命周期；OSC 9;4 进度、OSC 52 剪贴板与完整命令级 shell 集成仍待实现。
 4. 布局是我们自己的树（嵌套 vsplit/hsplit + 比例），**不用 tmux 的 layout 字符串**；
    解析函数可以留着做导入工具（一次性迁移 tmux 布局）。
 
@@ -79,13 +84,12 @@ Rust 写的客户端（如 GTK4 + `gtk4-rs`）走与之一一对应的安全 API
 
 | 层 | 平台 | 说明 |
 |---|---|---|
-| `core/`（VT / 布局 / OSC 7501 / 协议 / 会话） | 全平台 | Rust；只许 std + POSIX 绑定；无 UI、无字体、无图形 API；`unsafe` 只在 `ffi.rs` |
+| `core/`（VT / 布局 / OSC 7501 / 协议 / 会话） | 全平台 | Rust；只许 std + POSIX 绑定；无 UI、无字体、无图形 API；`unsafe` 只在 `ffi/` |
 | `pigeon-server`（PTY + 会话宿主；本机与远端同一个二进制） | 全平台 | `core/` 里的 bin；用 `portable-pty`（forkpty/openpty 的安全封装）；静态单文件 3–8MB（见 `docs/remote.md`） |
 | `include/pigeon_core.h` | 全平台 | 由 `cbindgen` 从 `core/src/ffi/mod.rs` 生成，非 Rust 客户端共用的唯一 C ABI 面；Rust 客户端用对应的 `pigeon_core::api` |
-| 客户端 | 按平台 | macOS：**AppKit**（`NSOutlineView` 侧栏 + 自绘网格，M0 首发）；Linux：**GTK4**（M5）。为什么不用 winit/Qt/Electron 见 `docs/gui.md` |
+| 客户端 | 按平台 | macOS：**AppKit**（`NSTableView` 侧栏 + Metal 网格）；Linux：**GTK4**（M5）。为什么不用 winit/Qt/Electron 见 `docs/gui.md` |
 
-- **协议是跨语言契约**：长度前缀 + 版本号，字段语义写进 `docs/protocol.md`（M0 随快照复原一起产出）。Linux 客户端可以用
-  Swift + GTK，也可以换语言重写——内核与宿主一行不改。
+- **协议是跨语言契约**：长度前缀 + 版本号，字段语义写进 `docs/protocol.md`（M0 随快照复原一起产出）。Linux 客户端已采用 Rust + `gtk4-rs`，只依赖 `pigeon_core::api`——复用同一内核与宿主。
 - 如果将来更看重“一套 UI 代码跑两个平台”，那就要接受非原生侧栏外观（winit / Flutter / Tauri 路线），
   那是 `docs/gui.md` 的方案 C/D，首发不选。
 - **CI 从 M0 起就双平台**：macOS + Ubuntu 各跑一遍 `cargo test`（内核与宿主是跨平台的）；
@@ -149,7 +153,7 @@ tmux attach（前台，一个普通程序）
 旧版本注册过的 `~/Library/LaunchAgents/dev.pigeon.host.plist` 在启动时删掉（宿主还在跑就不 `bootout`，免得带走会话）。
 `End All Sessions on This Mac…` 发协议消息 `shutdown`：结束所有会话、删掉 socket，宿主退出。
 日志写 `~/.config/pigeon/host.log`（追加）。
-不需要 root，不开网络端口，`ps` 里只看到一个 `pigeon-server`。Linux 客户端届时用 systemd user unit 做同样的事。
+不需要 root，不开网络端口，`ps` 里只看到一个 `pigeon-server`。Linux 客户端同样调用 `pigeon-server --detach` 自动拉起本机宿主，目前不注册 systemd user unit。
 
 ### 3.4 远端（SSH：同一后台进程装到服务器上）
 
@@ -158,7 +162,7 @@ tmux attach（前台，一个普通程序）
 
 1. **三种对接**（自动探测并明示）：`ssh host pigeon-server --proxy`（stdio 桥接，推荐）→ unix socket 直转 →
    退化模式（普通 ssh，仍能显示 OSC 7501 状态，但没有远端持久化）。
-2. **安装**：客户端首次连接时自动推送并安装（先打印命令与版本再执行，`--no-remote-install` 可关）；
+2. **安装**：客户端首次连接时按需自动推送并安装（安装层有 `allowInstall` 开关，尚未提供用户可用的全局禁用选项）；
    远端已有能执行、协议大版本相同的 server 就直接用（发行版本不同也不重装）；否则推对应架构的静态二进制，在远端跑通 `--version` 才上线；不静默覆盖已有版本、不改远端 shell 配置。
 3. **安全**：只经 ssh，不开端口；远端只监听 0700 的 unix socket；`--proxy` 只转发协议帧；
    认证/密钥/known_hosts 全交给系统 `ssh`。
@@ -166,12 +170,12 @@ tmux attach（前台，一个普通程序）
 ## 4. OSC 7501 作为状态通道
 
 - 我们是终端 ⇒ 直接在 PTY 字节流里解析 `ESC ] 7501 ; … ST`（`kitty/tmux_control.py` 里的
-  `StatusStore` 逻辑可以直接搬：按 `id` 建记录、4096 字节上限、base64 解码、控制字符拒绝、
+  `StatusStore` 可作为规则参考，代码移植须遵守许可证要求；当前实现已在 `core/src/status/`：按 `id` 建记录、4096 字节上限、base64 解码、控制字符拒绝、
   `clear` 删子树）。
 - 状态归属：`pane` 级记录 → 侧栏把 window/项目级徽标按 `blocked > error > done > working > idle`
   聚合；`blocked` 优先并带 `kind`（permission/question/auth）与 `msg`。
 - 生命周期（规范把这件事交给终端）：pane 进程退出或出现 OSC 133A 提示符 → 丢弃 `working/blocked`；
-  `done/error` 保留到用户看过该 pane。**我们是终端，所以能准确知道进程何时退出**——比 tmux 旁路更可靠。
+  `done/error` 保留到用户看过该 pane。宿主监测的是 pane 的直接子进程（通常是 shell）；shell 内 agent 被杀但 shell 仍在时，要靠 OSC 133A 或程序主动清除记录，不能宣称任意 agent 退出都能自动识别。
 - 让程序开口：新建 pane 时注入 `PI_PROGRAM_STATUS=1`（Pi 用），其它程序各自有开关；
   未上报的显示“未监控”，不做启发式。
 
@@ -190,7 +194,7 @@ tmux attach（前台，一个普通程序）
 | **libvterm / pyte** | C / Python | 参考实现，用来**对账**我们内核的输出（见 §7） |
 | **Harp / cmux / Herdr / Agent Deck / TUIOS / Rex** | 各类 | **侧栏与状态呈现**的产品参照：分组、`needs you` 计数、相对时间、未读点、点击跳转 |
 
-## 6. 最小 multiplexer 的能力清单（按优先级）
+## 6. 最小 multiplexer 的目标能力清单（非已完成清单）
 
 1. **PTY + 生命周期**：每个 pane 一个 pty，fork/exec；退出、信号、`SIGHUP` 语义。
 2. **VT 状态机**：光标、SGR（含真彩色）、备用屏（1049/1047/47）、滚动区（DECSTBM）、宽字符/组合字符、
@@ -218,7 +222,7 @@ tmux attach（前台，一个普通程序）
 M0–M1 可以直接复用现有代码：内核的对账语料（来自 tmux 阶段录制的字节流）、SwiftTerm 原型作为**对照实现对账**、
 `StatusStore`（OSC 7501 解析）、`~/dev/gmux/app/compat.py` 的对账思路。
 
-## 8. 测试与验收
+## 8. 测试与验收目标（实际结果见各 checklist）
 
 | 维度 | 方法 |
 |---|---|
@@ -237,9 +241,9 @@ M0–M1 可以直接复用现有代码：内核的对账语料（来自 tmux 阶
 | 后台进程协议设计不当 | 重连丢屏/错位 | 先做“attach 全量快照 + 增量”两段式，快照包含备用屏与滚动区；用 tmux control mode 踩过的坑做输入 |
 | 多客户端尺寸冲突 | pane 尺寸跳变 | 显式策略：默认跟随“最近活跃”的客户端，并在侧栏显示当前尺寸来源；允许锁定尺寸 |
 | 原生 IME 与终端光标位置 | 候选窗错位 | 参考 SwiftTerm 的 IME 处理；M1 就测拼音 |
-| 性能（无 GPU 也要能看） | 大输出卡顿 | M1 用 CoreText/图层缓存；M5 前评估 Metal |
+| 渲染性能 | 大输出卡顿、输入延迟、耗电 | macOS 已用 Metal；Linux 已用 OpenGL，补多 pane、弱网和空闲功耗的可重复基准 |
 | Linux 客户端等于第二份 UI | 双倍 UI 工作 | 协议先行（`docs/protocol.md` 字段级）；`core/` 从第一天就 Linux 可编译，CI 双平台；交互规格 `docs/ui.md` 对齐两边行为 |
-| Swift 生态在 Linux 上的坑（GUI 绑定、字体、输入法） | Linux 版体验差 | M5 前只保证后台进程/协议在 Linux 可跑；客户端选型留到 M5（GTK 绑定 vs 换语言） |
+| Linux 功能对齐 | 第二个平台缺少日常操作 | 已选 Rust + GTK4；按 `clients/linux/README.md` 补侧栏、回看、选择/剪贴板、IME 与远端连接 |
 
 ## 9.5 许可证
 
@@ -259,42 +263,46 @@ M0–M1 可以直接复用现有代码：内核的对账语料（来自 tmux 阶
 | tmux 交互与配置影响的实测记录 | `~/dev/gmux/docs/tmux-integration.md` | 设计后台进程与尺寸策略时的反面教材 |
 | fork 阶段的结论 | `~/dev/gmux/docs/kitty-fork-status.md` | 为什么不 fork kitty、为什么不做字符侧栏 |
 
-## 11. 已知缺口
+## 11. 当前能力与已知缺口
 
-M2 落地后仍在的洞（M2 的验收记录见 `docs/m2-checklist.md`）。
+**2026-11-04 根据当前代码核对。** “已实现”不等于所有平台、真实输入设备和负载都已验收。
+历史测试数字与截图保留在 `m0`–`m4-checklist.md`；Linux 首片实跑见 [renderer.md §5.5](renderer.md#55-验收第一片已过)。
 
-**已关闭**：
+### 已实现
 
-| 旧缺口 | 关闭方式 |
+| 范围 | 当前能力与依据 |
 |---|---|
-| M0 文档层：`core/`、`Package.swift`、生成的头文件、`cbindgen.toml`、`Tests/`、C ABI 编解码 | 全部落地，见 `docs/m0-checklist.md` |
-| 布局只有单 pane | `core/src/layout/` 的布局树 + `pg_layout_*` 全实现；宿主每 pane 独立 PTY/actor；客户端按 `PgRect` 分屏 |
-| 滚动回看（翻页） | **宿主侧**回看：`scroll{pane_id, offset}`（负=往历史看，0=回到底部）由宿主在 10,000 行滚动缓冲里切片，回给客户端的是一屏 `snapshot`（`Snapshot::scrolled`），历史不再整段过线；每连接的 offset 独立，回看期间该 pane 的实时帧暂停。客户端只把滚轮/PageUp·PageDown 换成 `scroll` 请求。`scroll` 答复额外带 `history_len`/`offset`，侧栏位置条据此绘制；`scrollback` 仍随 `attach` 下发（重连要原样画回来） |
-| VT 对账（`tools/vt-parity`） | `run.sh` + `core/examples/vt-dump`：同一段字节喂内核与 tmux `capture-pane` 逐行比较，8 条语料（basic/cursor/erase/wide/scroll-region/alt-screen/insert-delete/wrap）全 ok；`--record` 重录 golden；顺带修掉 tab 占位符漏进快照的真 bug |
-| 远端（M4） | `pigeon-server --stdio`（ssh 通道 + socket 双入口）、`--proxy`（stdio↔socket 帧桥）、`--socket-path`；客户端 `HostInstaller`（uname 探测 → 平台匹配产物 → 已装 server 能跑且协议大版本相同就复用、否则上传到版本号目录并在远端跑通后才上线 → 只留两版）与 `RemoteSession`（A `--proxy` / B `ssh -L` / C plain ssh + 客户端本地 VT 的 A→B→C 探测）；多主机侧栏分组 `host / project` + `Hosts` 菜单 + 侧栏 `Machines` 分组（每台主机一行、connected/connecting/offline）、`~/.config/pigeon/hosts.json`、窗口级断线重连（远端模式重新探测 A→B→C）。在 `ssh arch`（Linux x86_64、fish 登录 shell）上实跑：首传/命中/坏文件拒绝、A、B 退化、30s 断连后 200 行逐行一致。见 `docs/m4-checklist.md` |
-| `zoom_pane` / `unzoom` | 布局树 `zoom` 字段 + 宿主两个 handler + `layout.zoom` 下发；客户端 ⌘⇧↩ 切换、兄弟 pane 隐藏但保活（unzoom 立即还原嵌套比例）；`pg_msg_layout_zoom` 进 C ABI |
-| 多客户端尺寸策略与 `size_state` | 宿主实现 `latest`/`smallest`/`locked`（策略由首个 `attach` 决定、`locked` 只认 owner、`latest` 跟最后一个 focus/keys），每次尺寸变化广播 `size_state{pane_id, cols, rows, source, clients}`；`hello_ack.client_id` 也换成真实的每连接 id。侧栏在 age 位显示 `2× latest`。见 `docs/m2-checklist.md` |
-| 程序的颜色查询（OSC 4/10/11） | 客户端通过 `appearance` 把当前色板交给宿主，宿主用 `Event::ColorRequest` 的 formatter 回 `rgb:rrrr/gggg/bbbb`；TUI（pi 等）因此能自己选亮/深主题；见 `docs/protocol.md` §3 与 `core/tests/host.rs` 的 `appearance_reaches_existing_panes_and_a_malformed_one_keeps_the_previous` |
-| 侧栏（M3） | 已落地：`SidebarModel`/`Grouping`（git 根）+ 侧栏、OSC 7501 `status` 广播 + `ack_status`、OSC 7/标题、未读/needs-you、⌘J/⌘T/⌘⇧W、右键菜单、**行标题=应用名 / 分组可改名 / 不折叠**、排序持久化；视觉按 harp 源码对齐：`docs/ui.md` §7 是从 harp（`/tmp/harp`，AGPL/MIT，只取数值不取代码）提取的色值/尺寸/字号规格表；行高 30、行圆角 8、组头 11.5/橙色 `N need you`、`SIDEBAR #e8e8eb/#232326`、透明标题栏 + 内嵌红绿灯、右栏是一张大卡片（10pt 圆角、0.5pt 描边、投影、三面 8pt 外缩）、40pt 右栏头部，全部是动态色（浅/深各一套）；截图见 `docs/m3-checklist.md` §2.1 的 light/dark 两套 |
-| Rust 客户端接口 `pigeon_core::api` | 已建：`core/src/api/` + `internals` feature；`ffi` 只调 `api`；见 `docs/core.md` §4.1 |
+| 内核与宿主 | Alacritty VT 包装、OSC 7501 记录、会话/pane、布局树、PTY 生命周期；同一宿主支持 macOS/Linux。`core/src/term/`、`status/`、`session/`、`bin/pigeon-server/` |
+| 会话保持与分屏 | 客户端关闭后任务继续；快照恢复、增量续传、嵌套分屏、resize、zoom/unzoom；宿主支持 `latest`/`smallest`/`locked`。宿主退出或机器重启后不恢复会话 |
+| macOS 终端 | Metal 网格、独立渲染线程、脏行更新、彩色字形图集；回看、拖选/双击选词/三击选行、复制粘贴、括号粘贴、鼠标/焦点事件、光标形状/闪烁、`NSTextInputClient`。`clients/macos/Sources/PigeonApp/Terminal/` |
+| macOS 增量与恢复 | 握手协商 `delta`/`scrollback`/`status_all`；缺序重新 attach，重连带 `since`；输入回显优先 flush、有界出站队列。`AppDelegate+Commands.swift`、`AppDelegate+Protocol.swift`、宿主 `connection/` |
+| macOS 侧栏 | 机器/项目/会话分组、状态与 `msg`/`app`、相对时间、未读、needs-you、跳转、改名和排序持久化；动态单/双行、悬停关闭、透明标题栏。具体口径见 [ui.md](ui.md) |
+| macOS 远端 | 系统 SSH，兼容宿主复用、按需下载/安装、A/B/C 三档对接与断线重连；15s 心跳、45s 静默超时。A/B 保持远端会话，C 明示不持久。见 [remote.md](remote.md) |
+| Linux 首片 | Rust + GTK4，`GtkGLArea` + OpenGL ES 3 / 3.3 core；本地自动拉起宿主、多 pane、分屏、zoom、焦点与 resize，灰度和彩色图集。见 [Linux README](../clients/linux/README.md) |
+| 质量与分发基础 | Rust 双平台 CI、Swift CI、无默认 feature 构建、头文件 diff、宿主体积上限；8 条 VT 文本 golden；macOS universal 包、Ed25519 应用更新、多个架构的远端宿主产物 |
 
-**仍在**：
+### 仍未完成或有限制
 
-| 缺口 | 现状 | 何时关闭 |
-|---|---|---|
-| 悬停 `×` 关闭 / 透明标题栏 | `docs/ui.md` §2.1/§2.3 写了，未实现：关闭走右键菜单或 `⌘⇧W`；红绿灯仍在原生标题栏 | 改窗口 chrome（`titlebarAppearsTransparent`）时 |
-| 未上报 session 的相对时间 | 没有 OSC 7501 记录的 session 行尾留空，不拿创建时间冒充“最后活动时间” | 宿主能上报 pane 活动时间时（未排期） |
-| OSC 8 超链接被丢弃 | `PgCell.hyperlink_id` 恒为 0，`cell[4]` 不上线 | 需要按链接跳转时 |
-| DECSTBM 滚动区恒等于整屏 | `alacritty_terminal` 不暴露 `scroll_region` | 需要按滚动区（而非历史位置）画行号/提示时；回看的位置条走 `scroll` 答复里的 `history_len`/`offset`，与 DECSTBM 无关 |
-| 退化模式（C）的远端 pty 尺寸 | `ssh -tt` 的 pty 固定 80×24：客户端没有本地 pty 去转发 `TIOCSWINSZ`，窗口再大远端也只按 80 列换行 | 客户端给 ssh 子进程开一个本地 pty（`forkpty`）时 |
-| Swift 客户端不协商 `delta` | 只收 `snapshot`（协议 §5 允许） | 做性能时开启增量 |
-| IME 候选窗未实现 | 走 AppKit 默认 `keyDown` | M6 |
-| `zstd` 能力只定义了帧内 tag | 阈值、何时启用未定 | 需要压远端带宽时（M4 已在远端实跑过，但没有为此开工） |
-| CI 缺 `unsafe` / 平台 crate 的静态检查 | 现有：fmt / clippy / test / tokio+portable-pty 引用检查 / `--lib --no-default-features` / 体积 / 头文件 diff / swift | 加 `unsafe`/`cfg(target_os)` 检查时 |
-| PTY 走 `portable-pty` 而不是原始 fd | 为了让 `core/src`（除 `ffi/`）零 `unsafe` | 需要原始 fd 做特殊 ioctl 时 |
-| `swift test` 依赖完整 Xcode | `xcode-select` 指向 CLT 时需 `DEVELOPER_DIR` | 换 swift-testing 或写进 README |
+| 缺口 | 代码现状与用户影响 |
+|---|---|
+| Unicode 字素与整形 | `term::Cell` / 协议 cell 仅带一个码点，`convert_row` 未保留 combining 字符；两端按单码点绘制。分解重音、ZWJ emoji 不能完整保真，尚无编程连字/多码点整形。需要从内核快照、协议/接口到客户端一起补 |
+| 搜索与完整文本选择 | 未实现终端搜索；macOS 选择和“Select All”只覆盖当前屏幕。已新增 `ATTR_WRAP` 并在 macOS 复制时保留逻辑换行；旧宿主无标志时仍按网格行处理 |
+| OSC 8 / OSC 52 | `convert_row` 的 `link` 恒为 0，`links` 不下发；OSC 52 事件被忽略。点击超链接、远端程序复制到本地剪贴板尚不可用；本地菜单复制粘贴已实现 |
+| 现代终端协议 | 两端 KeyEncoder 都是 xterm legacy，Kitty keyboard protocol 尚未贯通；图片协议、OSC 9;4 进度、完整 OSC 133 命令边界/命令输出导航未实现。不能把底层 VT 库的能力当成产品端到端能力 |
+| agent 记录同步 | 多 pane 最新状态聚合、来源 pane ack、隐藏 pane 未读和同连接重播去重已补，纯逻辑通过；同 pane 多记录、跨应用重启的未读事件身份仍待补，AppKit 交互待 macOS 验收 |
+| agent 接入与通知 | 目前注入 `PI_PROGRAM_STATUS=1`，其它程序必须自行上报 OSC 7501；没有通用的上报工具/接入指南、完整适配矩阵或桌面通知投递。不能把“能运行 agent”写成“能自动显示其状态” |
+| Linux 功能对齐 | 缺侧栏/会话选择、SSH 连接管理、回看、选择/剪贴板、IME、鼠标/焦点上报、括号粘贴、拖动分隔线、渲染脏行复用与自动断线恢复；协议 delta 已接，GTK CI 作业已加入但本轮未推送运行；GUI 发布产物未做 |
+| DECSTBM 元数据 | VT 引擎处理滚动区，但 `Snapshot.scroll` 导出为整屏；不是 VT 不支持滚动区。真正边界未暴露给客户端 |
+| C 档远端尺寸 | 退化模式本地 VT 会 resize，尚无本地 PTY 向 ssh 转发 `TIOCSWINSZ`，远端尺寸不能随窗口可靠更新 |
+| 配置与易用性 | 字体配置仅启动时读取；未提供完整自定义键位、主题配置与热重载、命令面板。宿主回看固定 10,000 行；嵌入接口的 100,000 行上限并非宿主可配置项 |
+| 多客户端尺寸设置 | 三种策略已有测试，但实现的 `SizeVote` 存在会话级，与协议的 pane 级契约有差异；macOS 默认 latest，缺策略选择 UI，Linux 未展示尺寸来源 |
+| 协议保留项与接口一致性 | `zstd` 尚未协商/实现；`new_session.env` 被宿主忽略，结构化 `mouse` 消息返回 unsupported（macOS 用 `keys` 发送编码后的鼠标字节）。`api::delta_of` 与 FFI 已统一，新增静态 import 检查 |
+| 安装控制与分发 | 远端安装层有 `allowInstall` 参数，但首次安装确认、`--no-remote-install` / `--remote-dir` 未接用户入口；macOS 缺 Developer ID 签名/公证，Linux GUI 无发布包。见 [update.md](update.md) |
+| 验收深度 | 未形成完整的 `vttest`/属性对账、fuzz、跨平台 GUI/IME/无障碍、16 pane 持续输出、弱网时延和功耗基线。8 条文本 golden 只覆盖基础场景；CI 仍缺 unsafe/平台依赖静态检查 |
+| TERM/terminfo 后续 | 已修复继承外部 TERM：新 pane 固定 xterm-256color/truecolor，四种外部环境回归通过；专用 terminfo 随现代能力完善 |
+| 其它限制 | 无 OSC 7501 的会话不显示虚构活动时间；宿主状态不写盘（既定取舍）；`swift test` 需要完整 Xcode |
 
-**平台说明**：`pigeon-server` 在 macOS 与 Linux 用同一份代码；CI 的 `rust` 作业在 ubuntu 与 macos 各跑一遍
-`cargo test`（含 spawn 真实 PTY 的宿主用例）。首跑记录：
-M0 <https://github.com/jeffrey-dot/pigeon/actions/runs/40633073432>（`4adc398`，64 passed）、
-M1 <https://github.com/jeffrey-dot/pigeon/actions/runs/40635575813>（`6637f5c`，86 passed）。
+**优化前核对证据**：8 条已提交 VT golden 通过。用 `vt-dump` 输入 `e\u0301` 得到 `e`，输入 `👩\u200d💻` 得到 `👩💻`，确认组合码点在快照转换时丢失；预组字符 `é` 保留。
+Linux 默认环境 `TERM=linux` 下，`cargo test --manifest-path core/Cargo.toml --offline` 的 `vim_alternate_screen_survives_a_reconnect` 超时。
+改用 `TERM=xterm-256color cargo test --manifest-path core/Cargo.toml --offline --quiet` 后全量通过：194 passed，2 ignored（含文档测试）。
+上述 TERM 问题已在本轮修复；后续实现与验证见 [优化执行记录](optimization-progress.md)。本轮 macOS 完整构建/GUI 未验。

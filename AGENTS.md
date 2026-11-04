@@ -1,9 +1,10 @@
 # AGENTS.md
 
 给编码 agent 的工作说明。人看的部分在 `README.md`，产品/架构在设计文档里（见 §11）。
-**当前状态：M2 与 M4 已落地**——`core/`（VT / OSC 7501 / 协议 / 布局 / C ABI）、`pigeon-server`（多 pane、状态流、
-`--stdio`/`--proxy` 远端传输）、AppKit 客户端（分屏、滚动回看、zoom、侧栏、未读/needs-you、远端自动安装与三档对接）；
-输入法（`NSTextInputClient`，preedit 在客户端画，提交后才发给宿主）已接入。验收记录见 `docs/m2-checklist.md`、`docs/m3-checklist.md`、`docs/m4-checklist.md`。
+**当前状态（2026-11-04 核对）：M0–M4 主体已落地，M5 Linux 客户端进行中**。
+macOS 已有分屏、回看、zoom、agent 侧栏、SSH 三档对接、Metal 渲染、增量更新、选择复制粘贴、鼠标上报与
+`NSTextInputClient` 输入法；Linux 已有 GTK4/OpenGL 网格、本地宿主连接、分屏与 zoom，尚未功能对齐。
+当前缺口以 `docs/plan.md` §11 为准；`docs/m*-checklist.md` 是各阶段的历史验收证据，不代表当前全功能已验收。
 
 ## 1. 项目是什么
 
@@ -32,10 +33,11 @@ swift build                     # 客户端（macOS only）
 swift test                      # 客户端纯逻辑单测（SidebarModel / Grouping / KeyEncoder）
 cargo build -p pigeon-linux     # Linux 客户端（需要 GTK4；不在根的 default-members 里）
 cargo test  -p pigeon-linux     # Linux 客户端纯逻辑单测（KeyEncoder / 调色板 / 实例布局）
-# tools/vt-parity/run.sh        # VT 对账（M1 建；现在还只有 core/tests 的确定性用例）
+tools/vt-parity/run.sh          # 8 条 VT 语料与已提交的 tmux golden 对账；--record 才需要 tmux
 ```
 
-这些命令在对应模块落地前会失败——**先建模块，再加功能**，不要为了跑通而把逻辑塞进 `main.rs` 或 `PigeonApp.swift`。
+新增功能须先确定模块归属，不要为了跑通而把逻辑塞进 `main.rs` 或 `PigeonApp.swift`。
+宿主为新 pane 固定声明 `TERM=xterm-256color` 与 `COLORTERM=truecolor`；真实 PTY 测试使用独立 HOME/配置目录，不继承用户 rc。`tools/checks/swift-logic.sh` 可在有 Swift 的 Linux/macOS 上复跑侧栏和选择纯逻辑，但不替代 macOS AppKit 验收。
 `swift test` 需要完整 Xcode（`xcode-select` 指向 CommandLineTools 时用 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`）。
 
 ## 3. 模块划分（强制）
@@ -62,7 +64,7 @@ Rust 客户端走 `pigeon_core::api`。客户端不认识 `core` 的内部类型
 - `include/pigeon_core.h` —— **生成物**：由 `cbindgen` 从 `core/src/ffi/mod.rs` 生成，**手改无效**（CI 会比对新旧输出）。
 - `clients/` —— **客户端层**，每个平台一个目录；客户端只通过客户端接口看图，不认识 `core` 内部类型。
 - `clients/macos/` —— **macOS only**：C 头封装（`Sources/PigeonCore/`）+ AppKit 客户端（`Sources/PigeonApp/`）。
-  AppKit 视图与 CoreText 渲染都在这里，不要往下泄漏。
+  AppKit 视图、Metal 渲染与 CoreText 字形光栅化都在这里，不要往下泄漏。
 - `clients/linux/` —— M5 的 **GTK4 客户端（Rust）**：workspace 成员但**不在 `default-members`**里
   （`cargo build`/`cargo test` 在根上仍然只跑 `core`，macOS 不需要 GTK）。只依赖 `pigeon_core::api`
   （`default-features = false`）与 `docs/protocol.md`；不 import `PigeonApp`。
@@ -86,7 +88,7 @@ pigeon/
 │   ├── Cargo.toml
 │   ├── cbindgen.toml             # 头文件生成配置（名字/前缀/文档注释）
 │   ├── src/
-│   │   ├── lib.rs                # 模块声明；unsafe 只允许出现在 ffi.rs
+│   │   ├── lib.rs                # 模块声明；unsafe 只允许出现在 ffi/
 │   │   ├── api/                  # 安全的 Rust 客户端 API（Rust 客户端唯一入口）
 │   │   ├── ffi/                  # extern "C" 导出（头文件的唯一来源；api 的薄包装）
 │   │   │   ├── mod.rs            # 生命周期 / pane / 快照 / 状态 / 布局
@@ -94,7 +96,7 @@ pigeon/
 │   │   ├── term/                 # VT：alacritty_terminal 包装 + 快照/脏行/滚动
 │   │   ├── layout/               # 布局树：嵌套 vsplit/hsplit、比例、最小尺寸
 │   │   ├── status/               # OSC 7501 解析与记录生命周期
-│   │   ├── session/              # session/window/pane 模型
+│   │   ├── session/              # 会话/pane、尺寸策略与增量续传
 │   │   └── proto/                # 分帧 + CBOR 编解码（协议的唯一实现）
 │   ├── src/bin/pigeon-server/      # 会话宿主：main / cli / transport + 四个组（3–8MB 硬指标）
 │   │   ├── host/                 # 共享状态：sessions、pane 元数据、事件总线
@@ -124,7 +126,7 @@ pigeon/
     │   │       │   ├── CoreTextRenderer.swift  # 唯一 import CoreText 的文件：字体度量 + 字形光栅化
     │   │       │   ├── PaneView+Metal.swift    # 把格子交给渲染线程（唯一的网格渲染路径）
     │   │       │   ├── Render/                 # GPU 渲染：图集、脏行、实例构建、Metal 线程与 shader
-    │   │       │   └── KeyEncoder.swift        # 按键 → 字节（kitty protocol / legacy）
+    │   │       │   └── KeyEncoder.swift        # 按键 → 字节（xterm legacy；kitty protocol 待做）
     │   │       ├── Layout/           # 分屏：把 PgRect 画成 AppKit 视图、焦点与选择
     │   │       └── Update/           # 软件更新：检查 latest.json、验签、替换 Pigeon.app 并重启
     │   └── Tests/PigeonAppTests/     # SidebarModel / Grouping / KeyEncoder 等纯逻辑单测
@@ -150,7 +152,7 @@ pigeon/
 
 - `core/` 里**不许**出现：平台专属 crate（`core-foundation`、`objc2`…）、`cfg(target_os = …)` 分支
  （PTY 与信号可以有一处，且必须两边都有实现）、直接操作窗口/字体/图形 API。
-- `core/src/` 里**不许**出现 `unsafe`（唯一例外：`ffi.rs` 的 `extern "C"` 边界）。
+- `core/src/` 里**不许**出现 `unsafe`（唯一例外：`ffi/` 的 `extern "C"` 边界）。
 - Swift 侧：`PigeonCore` 不许 `import AppKit`；`PigeonApp` 可以，但 `import CoreText` 只允许在
  `CoreTextRenderer.swift`。
 - PTY 用 `portable-pty`（内部就是 `forkpty`/`openpty` 的封装）。因为 `core/src` 除 `ffi/` 外不许 `unsafe`，
@@ -192,7 +194,7 @@ pigeon/
 - 新增解析规则（OSC 7501、按键编码、协议消息）→ **必须**带一个正例 + 一个畸形输入的反例（Rust 放 `core/tests/`，
   Swift 放 `Tests/`）。
 - 修 bug → 先写能复现的测试，再修。
-- VT 兼容性改动 → M1 起跑 `tools/vt-parity/run.sh`；现在靠 `core/tests` 的确定性用例（快照/宽字符/备用屏/真彩色）。
+- VT 兼容性改动 → 跑 `tools/vt-parity/run.sh`（已提交的 8 条文本 golden）与相关 `core/tests` 确定性用例；文本对账不能替代属性、输入及渲染验收。
 - 提交前必须全绿：`cargo test`（macOS + Ubuntu）+ `swift build && swift test`（macOS）。
 - 测试不要依赖网络、不要依赖用户自己的 tmux/shell 配置；需要环境时自己在 `TMPDIR` 里造。
 
@@ -221,7 +223,7 @@ pigeon/
 ## 8. 安全
 
 - 一切来自 pane 的字节都是不可信的：`msg`/`title` 只当纯文本；拒绝控制字符；不解析成链接之外的标记。
-- OSC 52（剪贴板）默认只写不读；读需要用户显式许可。
+- OSC 52 的实现必须默认只写不读；读需要用户显式许可。当前读写事件均未接通，不要把安全要求写成已支持能力。
 - 后台进程 socket 权限 0700，只允许当前用户；不接受网络监听。
 - 不要为了“方便调试”打开任意命令执行入口（例如调试端口跑 shell）。
 
@@ -240,11 +242,25 @@ pigeon/
 - PR 描述包含：动机、改动面（哪些模块）、验证方式（命令 + 结果）、已知缺口。
 - 合并前：`cargo test && swift build && swift test` 全绿；涉及 VT 的改动附对账结果。
 
+### 文档同步（强制）
+
+**文档必须持续反映当前实现；更新相关文档是完成任务的一部分。**
+
+- 改功能、行为、协议、配置、命令、目录结构或支持平台时，必须在同一项任务中更新对应文档；不要留到以后补。
+- 交付前核对 `README.md`、本文件的当前状态、`docs/plan.md` 的已知缺口，以及受影响的专题文档；已完成项从待办/缺口移除，新增限制如实记录。
+- 明确区分**当前已实现、已验证、计划中、未验证**；以代码和实际验证为依据，不把规划、代码存在或旧测试通过写成当前端到端已通过。
+- 当前能力与缺口集中维护在 `docs/plan.md` §11，平台细节放专题文档；其它页面优先链接，避免多份状态清单漂移。核对现状时注明日期。
+- `docs/m*-checklist.md`、旧方案与上游对照属于历史证据：保留当时的测试数字、日志、截图和提交信息，标注适用阶段/日期并链接当前文档；不要改写成今天重新验收过。
+- 发现与本次任务相关的过时或互相矛盾的描述，顺手修正并检查相对链接。生成物仍由生成工具更新，不能手改。
+- 纯文档改动至少运行文档链接检查与 `git diff --check`；涉及功能的改动仍须执行该功能要求的测试。交付时说明更新了哪些文档及未验证的部分。
+
 ## 11. 设计文档在哪
 
 - `GLOSSARY.md` —— 领域词汇表：一个概念只有一个名字，含「禁用的说法」（**写代码前先读**）
 - `docs/adr/` —— 架构决策记录（ADR）：已定完、别再重新讨论的事，以及否掉过的选项（**改设计前先读**）
 - `docs/plan.md` —— 架构、选型、里程碑、验收、风险、已知缺口（**先读这个**）
+- `docs/terminal-gap-analysis.md` —— 2026-11-04 与代表性终端的能力对照、证据与建议优先级（日期性评估，不替代当前缺口表）
+- `docs/optimization-plan.md` —— 当前优化执行计划：阶段依赖、主力/前沿版本门槛、首批任务；实施后同步勾选，现状仍更新到 `docs/plan.md` §11
 - `docs/core.md` —— 内核边界、C ABI 说明、快照/增量、语言选型、测试策略
 - `docs/protocol.md` —— 客户端 ⇄ 宿主的字段级契约（消息表、错误码、能力、尺寸策略）
 - `include/pigeon_core.h` —— C ABI 的生成产物（唯一对外的 C ABI 面；Rust 客户端对应 `pigeon_core::api`）

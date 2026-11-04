@@ -4,6 +4,11 @@
 - 日期：2026-10-27
 - 依据：[gui.md](../gui.md)、[ui.md](../ui.md)
 
+> **2026-11-04 实现说明**：保留本 ADR 的原始决策背景。Linux 的 `GtkDrawingArea` 方案已由
+> [ADR-0011](0011-linux-rendering.md) 的 `GtkGLArea` + OpenGL 取代；macOS 侧栏实际用 `NSTableView`。
+> 下文“分组、排序、快捷键都在核心”是原文中的错误归属：按 `AGENTS.md`，这些 UI 派生逻辑在客户端，
+> 核心只负责 VT、布局、状态记录与协议。当前分工见 [gui.md §4](../gui.md#4-核心与客户端的实际分工)。
+
 ## 决定
 
 客户端按平台写原生：macOS 用 AppKit（侧栏 `NSOutlineView` + diffable data source），

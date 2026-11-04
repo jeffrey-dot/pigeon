@@ -14,10 +14,10 @@
 | **分隔线** divider | 两个 pane 之间的可拖动边界，由布局树的 `split` 节点 id 标识（`split_id`） | border、gutter |
 | **放大** zoom | 一个 pane 临时占满会话区域，兄弟 pane 隐藏但继续运行。`unzoom` 还原原有嵌套比例 | maximize、fullscreen |
 | **附加** attach | 客户端向宿主索取某个 pane 的当前状态：先快照，之后增量 | connect、open、join |
-| **needs you** | 侧栏组头对 `blocked` 的计数文案，英文原样 | 待处理、pending |
+| **needs you** | 侧栏组头对 blocked、error、未读 done 会话的计数文案，英文原样 | 待处理、pending |
 | **未读** unread | 会话有用户没看过的 `done`/`error`。与 `needs you` 是两个独立计数 | unread messages |
-| **相对时间** age | 行尾 `Working · 1m` 里的时长，来自 `status.age_ms`（时长，不是时间戳）。没有状态记录时留空 | timestamp、last active |
-| **跳转** jump | ⌘J：把焦点移到下一个 `blocked` 的 pane | next、cycle |
+| **相对时间** age | 行尾 `1m` / 头部 `Working · 1m` 里的时长，来自 `status.age_ms`（时长，不是时间戳）。没有状态记录时留空 | timestamp、last active |
+| **跳转** jump | ⌘J：循环选中下一个 needs-you 会话并聚焦其 pane | next、cycle |
 | **输入法** IME | `NSTextInputClient` 的 preedit / marked text。preedit 只在客户端画，提交后才发字节给宿主 | composition |
 | **退化模式** degraded | 远端三档对接的 C 档：只有普通 ssh，状态能显示但不持久 | fallback、plain mode |
 
@@ -29,10 +29,10 @@
 | **`Term`** | 包住 VT 引擎的 trait（`feed` / `resize` / `snapshot` / `scroll`） | Terminal、VT 层 |
 | **屏幕** screen | 当前可见的 `cols × rows` 网格，协议里是 `snapshot.screen` | grid、buffer、viewport |
 | **备用屏** alt screen | DECSET 1049/1047/47 的全屏模式，`vim`/`less` 用它。备用屏下禁用回看 | alternate buffer |
-| **滚动缓冲** scrollback | 屏幕之外的历史行，默认 10000 行（上限 100000），超出按行淘汰最旧的 | history buffer |
+| **滚动缓冲** scrollback | 屏幕之外的历史行，宿主固定 10000 行；嵌入配置上限 100000，超出按行淘汰最旧的 | history buffer |
 | **回看** scroll | 把视口移到滚动缓冲某处：请求 `scroll{pane_id, offset}`，回答一屏 `snapshot` | paging |
-| **历史** history | `snapshot.history` 这个字段，只在 `attach` 时下发。与回看是两件事 | scrollback |
-| **offset** | 回看位置。0 = 实时屏，负数 = 往历史看，被夹在 `[0, history_len]` | position、line |
+| **历史** history | `snapshot.history` 这个字段，可在 `attach` 时下发；macOS 当前请求 `history:false`。与回看是两件事 | scrollback |
+| **offset** | 请求中负数 = 往历史看、正数 = 往下、0 = 回实时屏；答复中为 `[0, history_len]` 的绝对回看行数 | position、line |
 | **快照** snapshot | 某一刻的完整屏幕 + 光标 + 滚动区（+ 可选历史）。不可变，可跨线程持有 | frame、render、screen dump |
 | **增量** delta | 快照之后只带脏行的帧，`seq` 单调递增 | diff、patch、update |
 | **脏行** dirty row | 自上次发出后内容变过的行号，`pg_pane_dirty_rows` 的值 | changed row |
@@ -40,7 +40,7 @@
 | **时钟基准** seq 基准 | 某客户端在某 pane 上已收到的最大 `seq`。`snapshot` 重置它；`hello_ack.instance` 变了就丢弃全部 | — |
 | **格子** cell | 屏幕上一个字符位：`codepoint` + `attrs` + `fg` + `bg` + 可选 `link` + 推导出的 `width` | char、glyph |
 | **宽字符** wide char | 占两格的码位（CJK、emoji）。第二格是续格，客户端按宽度跳过绘制 | fullwidth |
-| **`attrs`** | 单元格样式位（粗体/斜体/下划线/反色/删除线/暗色）。只加位、不改语义 | style、flags |
+| **`attrs`** | 单元格样式位（粗体/斜体/下划线/反色/删除线/暗色/软换行）。软换行只在行末格标记；只加位、不改语义 | style、flags |
 | **`modes`** | 终端模式位（`?1`/`?2004`/`?1000`…），告诉客户端方向键、鼠标、滚轮该发什么 | attr、flags |
 | **滚动区** scroll region | DECSTBM 设的行区间。当前 VT 引擎不暴露它，恒等于整屏 | margin、viewport |
 
@@ -56,7 +56,7 @@
 | **确认** ack | 用户已看过该记录，可以被淘汰（`ack_status`）。对 `working`/`blocked` 无效 | read、clear |
 | **清除** clear | OSC 7501 的 `clear` 指令：删除一棵子树。与 ack 是两条路 | ack、reset |
 | **未监控** unmonitored | 没有任何 OSC 7501 记录时的显示：侧栏该 pane 不给状态 | unknown、idle |
-| **聚合** aggregate | 侧栏把 pane 级记录合成 window / 项目级徽标，优先级 `blocked > error > done > working > idle` | rollup、summarize |
+| **聚合** aggregate | 按 `blocked > error > done > working > idle` 合并各 pane 最新状态并保留来源 pane，再派生项目计数；同 pane 多记录同步待补 | rollup、summarize |
 
 ## 4. 宿主与协议
 
@@ -69,9 +69,9 @@
 | **帧** frame | `u32` 小端长度 + 恰好那么多字节的 payload，上限 8 MiB | packet |
 | **payload** | 一帧里的单个 CBOR map，其中 `t` 是消息名 | body、content |
 | **能力** feature | 握手协商的功能名（`delta` / `scrollback` / `zstd` / `osc7501` / `status_all`） | capability flag |
-| **尺寸策略** size policy | pane 级：`latest`（默认）/ `smallest` / `locked`，由第一个 `attach` 决定 | resize mode |
+| **尺寸策略** size policy | 契约为 pane 级：`latest`（默认）/ `smallest` / `locked`；当前实现按会话投票，首次 attach 决定，差异见协议 §0 | resize mode |
 | **尺寸来源** source | `size_state.source`：当前谁在决定尺寸，必须显示在侧栏 | owner |
-| **背压** backpressure | 客户端读得太慢时宿主丢 `delta`、队列超限就断开。客户端收到后重新 attach | throttling |
+| **背压** backpressure | 慢连接中同 pane 的待发 delta 合并为最新快照；出站字节超过 64 MiB 断开，客户端重连 attach | throttling |
 | **续传** resume | 重连带 `attach.since = seq`：宿主补发还在缓冲里的增量，不发快照 | reconnect |
 | **代理** proxy | `pigeon-server --proxy`：stdio ↔ socket 的帧桥 | tunnel、bridge |
 | **a/b/c 三档对接** | 远端三个探测档位：A `--proxy`（推荐）→ B socket 直转 → C 普通 ssh（退化模式） | modes |

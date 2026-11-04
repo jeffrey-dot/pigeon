@@ -2,11 +2,11 @@
 
 > 结论先行：**内核只写一次，用可移植语言实现并暴露客户端接口（C ABI + 与之一一对应的 Rust API）；各平台只写薄客户端。**
 > 客户端可以每个平台各写一份（AppKit / GTK / 未来的 Windows），内核与后台会话进程共用同一份代码。
-> 语言推荐 **Rust**（理由见 §6），VT 引擎从 `alacritty_terminal` 起步，用我们自己的 `Term` trait 包住。
+> 语言已选 **Rust**（理由见 §6），VT 引擎从 `alacritty_terminal` 起步，用我们自己的 `Term` trait 包住。
 
 ## 1. 为什么要单独设计内核
 
-- 终端的行为正确性（VT 解析、光标、备用屏、宽字符、鼠标、IME）是长期资产，**重复实现 = 重复踩坑**。
+- 终端的行为正确性（VT 解析、光标、备用屏、宽字符、终端模式）是长期资产，**重复实现 = 重复踩坑**。
 - 跨平台意味着客户端至少两份；如果内核也跟着平台走，就是两套语义、两套 bug。
 - “任务活过窗口”需要一个后台进程；它与嵌入模式必须跑**同一份**内核，否则重连后的屏幕会漂移。
 
@@ -14,7 +14,7 @@
 
 | 层 | 内容 | 平台相关？ |
 |---|---|---|
-| **core** | VT 状态机（parser + screen）、滚动缓冲、pane 的字节进出、快照/增量编码、OSC 7501 记录与生命周期、布局模型（树 + 比例 + 最小尺寸）、会话模型（session/window/pane 关系） | ❌ 纯逻辑，无 IO、无平台 API |
+| **core** | VT 状态机（parser + screen）、滚动缓冲、pane 的字节进出、快照/增量编码、OSC 7501 记录与生命周期、布局模型（树 + 比例 + 最小尺寸）、会话模型（会话/pane 关系；窗口属于客户端） | ❌ 纯逻辑，无 IO、无平台 API |
 | **core 之外（后台进程侧）** | PTY（`portable-pty` 的 forkpty 封装）、信号、socket 服务、进程生命周期 | 只用 POSIX（macOS/Linux 都有） |
 | **客户端** | 窗口、侧栏控件、终端绘制（字形/颜色/光标）、IME、剪贴板、鼠标光标、快捷键 | ✅ 每平台一份 |
 
@@ -22,13 +22,13 @@
 
 ## 3. 两种消费方式，同一份内核
 
-1. **嵌入（首选，低延迟）**：客户端把 core 编进进程（Swift/C 走静态库或 dylib + C ABI；Rust 客户端直接依赖 crate 并只用 `pigeon_core::api`，见 §4.1），
-   自己驱动渲染循环；PTY 可以由客户端进程持有，也可以接后台进程。
+1. **嵌入（复用方式）**：客户端把 core 编进进程（Swift/C 走静态库或 dylib + C ABI；Rust 客户端直接依赖 crate 并只用 `pigeon_core::api`，见 §4.1），
+   由调用方驱动字节输入与快照消费。pigeon 自身的客户端不持有 PTY；macOS 的 C 档通过 `LocalSession` 调用嵌入内核解析普通 SSH 输出。
 2. **会话宿主（持久化，默认）**：`pigeon-server` 用同一份 core 持有 PTY 与会话状态，窗口通过 socket 消费
    **快照 + 增量**。远端场景（ssh）也走这条。
 
 两条路径共享：同一套 parser/screen、同一份快照格式、同一套 OSC 7501 记录规则。
-**不允许**出现“客户端自己实现一份简化渲染逻辑”。
+**不允许**客户端自己实现第二份 VT 解析、布局计算或 OSC 7501 语义；字形光栅化和绘制本来就属于客户端。
 
 ## 4. C ABI（`include/pigeon_core.h`）
 
@@ -61,11 +61,11 @@
 
 C ABI 是给非 Rust 客户端的。Rust 客户端（例如 M5 的 GTK4 客户端用 `gtk4-rs`）如果也走 C 头，
 就要用 `unsafe` 裸指针调同一门语言的代码，手动释放 `PgSnapshot`，丢掉 Rust 选型的主要收益；
-而 `lib.rs` 的模块又都是 `pub`，规则拦不住它直接 `use` 内部类型。所以客户端接口定成**一份语义、两种外形**：
+模块私有性则通过 `internals` feature 控制。因此客户端接口定成**一份语义、两种外形**：
 
 - `core/src/api/`：安全的 Rust API，分组与 §4 的表一一对应（pane / 快照 / 状态 / 布局 / 消息），
   用所有权表达生命周期，错误是 `Result<T, PgError>`。
-- `core/src/ffi/`：`api` 的薄包装，只做指针/长度转换、错误码、panic 捕获，不再直接碰内部模块。
+- `core/src/ffi/` 的强制规则是只通过 `api` 做薄包装，负责指针/长度转换、错误码和 panic 捕获。`api::delta_of` 与 `pg_msg_delta` 已共用转换/校验，FFI 不再直接 import 内部模块；`tools/checks/ffi-imports.sh` 约束依赖方向。
 - `term` / `layout` / `status` / `session` / `proto` 只在 `internals` feature 下是 `pub`（默认开，给 `pigeon-server`
   与 `core/tests/` 用）；客户端以 `default-features = false` 依赖时它们是私有模块，`api` 只重导出客户端需要的类型
   （快照/格子、状态记录、布局矩形、协议 `Message` 与编解码），“客户端不认识内部类型”在编译期成立。
@@ -84,10 +84,12 @@ PgSnapshot {            // 字段以 include/pigeon_core.h 为准，此处只写
   history: [ PgRow ], history_count   // 只在 attach 时需要（可选，控制内存）
 }
 ```
-- **attach 时**：全量快照（这是“重连后屏幕一致”的唯一保证，等价于 tmux 的 `capture-pane`）。
-- **之后**：只发脏行（`pg_pane_dirty_rows`），脏行号由内核维护；光标/滚动区变化单独发。
+- **attach 时**：通常回全量快照；同一宿主 `instance` 内带 `since` 且增量仍在 backlog 时，只补缺少的增量（见 [protocol.md §3.3](protocol.md#33-屏幕)）。
+- **之后**：已协商 `delta` 的客户端接收脏行、光标与模式；未协商者接收快照。macOS 已消费 `pg_msg_delta` / `pg_delta_free`，Linux 已通过 `api::delta_of` 消费增量，缺序重新 attach。resize 时推全量快照。
 - 快照是**不可变**的，宿主可以跨线程持有；内核不回收已被快照引用的内存，直到 `pg_snapshot_free`。
-- **滚动缓冲默认 10000 行**（`PgConfig.scrollback_lines = 0` 即取此值），可配上限 100000；超过后按行淘汰最旧的。
+- **滚动缓冲**：嵌入接口 `PgConfig.scrollback_lines = 0` 取默认 10,000 行，上限 100,000；宿主当前固定 10,000 行，未暴露配置。macOS attach 使用 `history:false`，回看由宿主按 `scroll` 请求切出一屏。
+- 软换行由 `ATTR_WRAP` / `PG_ATTR_WRAP`（64）标在行末格，快照/增量/历史保留；macOS 复制自动折行时不插入换行。
+- **当前数据限制**：每 cell 只有一个码点，组合字符未完整保留；OSC 8 链接未下发，DECSTBM 的导出范围为整屏。详见 [plan.md §11](plan.md#11-当前能力与已知缺口)。
 
 ## 6. 语言选型
 
@@ -101,7 +103,7 @@ PgSnapshot {            // 字段以 include/pigeon_core.h 为准，此处只写
 **决定**：内核用 **Rust**，`alacritty_terminal` / `vte` 包在我们自己的 `Term` trait 后面
 （`feed/resize/snapshot/scroll`），C ABI 头文件由 `cbindgen` 从 `core/src/ffi/mod.rs` 生成（见 §4）。
 换成 Swift（SwiftTerm headless）或 libghostty-vt 时，只替换 `Term` 的实现，头文件、客户端、协议都不动。
-SwiftTerm 同时保留为**对账参考**（M1 起的 `tools/vt-parity`），因为它跟 AppKit 的 IME/渲染集成得最好，是最省事的对照物。
+当前 `tools/vt-parity` 对照已提交的 tmux 文本 golden；SwiftTerm 可作实现参考，尚未接入自动对账。换引擎只有在保留现有语义时才能不改接口；新增字素、图片等数据仍需扩展快照和协议。
 
 ## 7. 参考（读什么、偷什么）
 
@@ -114,14 +116,13 @@ SwiftTerm 同时保留为**对账参考**（M1 起的 `tools/vt-parity`），因
 | kitty `screen.c` / `parser.c` | 性能技巧与边缘 case 清单（宽字符、组合字符、备用屏） |
 | tmux `input.c` | 控制序列的分类学（哪些要应答、哪些要吞掉）——注意：**我们要转发的比它多** |
 
-## 8. 测试（内核是纯逻辑，所以能测得很硬）
+## 8. 测试策略与实施状态
 
-1. **对账测试**：同一段字节流分别喂我们的内核与参考实现（`libvterm`/`pyte`/`tmux capture-pane`），
-   逐行 + 逐属性比较；不一致就是 bug。语料：vim/htop/less/fzf/Pi TUI 的录制输出 + `vttest`。
-2. **模糊测试**：随机/畸形字节流不得 panic、不得越界（Rust + `cargo fuzz`）。
+1. **已接入文本对账**：`tools/vt-parity/run.sh` 的 8 条语料与 tmux golden 逐行比较；属性由确定性单测部分覆盖。完整属性对账、其它引擎与 `vttest` 语料仍待补。
+2. **模糊测试目标**：随机/畸形字节流不得 panic、不得越界；当前尚无 `cargo fuzz` 工程或 CI 任务，畸形输入主要靠确定性测试。
 3. **快照一致性**：`feed 全量 → snapshot` 与 `feed 全量 → 断开 → 重放快照` 输出必须逐 cell 相同。
 4. **OSC 7501 规范表**：规范里的每条丢弃规则一个用例（超长、解不出 base64、含控制字符、`clear` 子树、256 条上限）。
-5. **性能基准**：单 pane 1MB/s 输出时的 CPU 与帧时间；16 pane 场景。
+5. **性能基准**：已有回看切片测试与 macOS `tools/bench/render-bench.sh`；16 pane、弱网、端到端输入延迟与功耗基线尚未完整建立。
 
 ## 9. 与里程碑的对应
 

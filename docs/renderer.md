@@ -11,7 +11,7 @@
 Ghostty **共享绘制逻辑，不共享渲染器**：一份 `GenericRenderer`，在**编译期**参数化成 Metal 或
 OpenGL 两个后端，每个平台的产物里只有一个后端、只链接那一个后端的系统库。
 
-pigeon 不把这个共享层放进 `core/`（理由见 §4），而是放进**客户端层**：核心只给"这一帧该画什么"的数据，
+pigeon 不把这个共享层放进 `core/`（理由见 §4），而是放进**客户端层**：核心只给“这一帧该画什么”的数据，
 每个平台各自把数据变成 GPU 指令。
 
 ## 2. Ghostty 的分层（实测）
@@ -108,7 +108,7 @@ GraphicsAPI → Target → Frame → RenderPass → Step → Pipeline
 | 编译期选后端，一个产物一个后端 | **抄**。客户端层同样按平台编译，macOS 只编 Metal 路径 |
 | 泛型 `Renderer(GraphicsAPI)` 把绘制逻辑与资源原语分开 | **抄**（Linux 版先按最小实现，接口留出第二个后端的形状） |
 | 渲染线程 + 邮箱交帧，主线程只转发尺寸/事件 | **抄**。macOS 已这样（`PaneView+Metal.swift` + `FrameMailbox`） |
-| 灰度图集 + 彩色图集分开 | **抄**。macOS 已是两张；Linux 第一版只有灰度 |
+| 灰度图集 + 彩色图集分开 | **抄**。macOS 与 Linux 当前都已有灰度和彩色两张图集 |
 | 脏行增量重建 | macOS 已做；Linux 第一版先整屏重建（见 §5.4） |
 | DMABUF 导出 + 自定义 widget | **暂不**。iOSurface/DMABUF 是性能上限，不是第一版的门槛 |
 | 运行时编译 MSL / GLSL 字符串 | macOS 已这样（SwiftPM 编不了 `.metal`）；Linux 同理用 GLSL 字符串 |
@@ -121,11 +121,9 @@ GraphicsAPI → Target → Frame → RenderPass → Step → Pipeline
 
 一句话：`pigeon-server` 要走 ssh 落到别的机器上，产物是 **3–8 MB 静态单文件**（[remote.md](remote.md) §27）。
 
-- GTK/EGL/fontconfig/harfbuzz 没有可静态链接的干净版本，塞进去就不是 8 MB 了，远端自动安装直接废掉；
-- `core/` 的规则是"两个 OS 编同一份字节码"，不是"同一份源码编出两个产物"，所以不能靠 `cfg(target_os)`
-  把 GUI 依赖关掉；
-- `docs/plan.md` §87 允许 Linux 客户端**换语言重写**——共享渲染层一旦在核心里，就要求跨语言的
-  GUI 类型 ABI；
+- GUI、字体与图形依赖会扩大宿主依赖面和部署要求，违背无头、体积受控的目标；
+- `core/` 要让同一份源码分别在 macOS/Linux 构建，不是共用同一份二进制；平台专属渲染留在客户端，避免把 GUI 的 `cfg(target_os)` 分支引入核心；
+- 客户端接口服务于 Swift/C 与 Rust 两种调用方，传递屏幕数据即可，不需要跨语言暴露 GPU 资源；
 - 无头环境要能跑 `core/tests/host.rs`、`tools/vt-parity/`，GUI 依赖会把它们变成需要显示器的测试。
 
 结论：共享到**模型**为止。核心给 `Snapshot`/`Delta`/`layout`/颜色语义/`MODE_*` 位；渲染是客户端的事。
@@ -156,7 +154,7 @@ GL context`），shader 版本头在运行期按 `glGetString(GL_VERSION)` 选�
 clients/linux/src/
 ├── main.rs        装配：GtkApplication → 窗口 → 消息泵
 ├── host.rs        默认 socket 路径（问 `pigeon-server --socket-path`）、拉起、连接、hello/attach、收发线程
-├── screen.rs      一个 pane 的屏幕模型：只有 `snapshot` 能建它；`delta` 到达即重新 attach
+├── screen.rs      一个 pane 的屏幕模型：snapshot 建立 seq，delta 校验后更新；缺序/尺寸不符重新 attach
 ├── view.rs        Workspace：**一个 GLArea 画所有 pane**、焦点、快捷键、每 pane 的 cols/rows
 ├── input.rs       按键 → 字节（xterm legacy 编码，含 DECCKM）
 └── render/
@@ -185,9 +183,9 @@ clients/linux/src/
 调度，而这一侧的布局本来就由宿主给、命中测试只是矩形包含。上下文少一个，帧里就少一次 clear 与
 一次上下文切换；代价是 `PaneFrame` 这层抽象与 CPU 侧的索引。
 
-### 5.3 一帧的四组四边形
+### 5.3 一帧的三组四边形
 
-和 macOS/Ghostty 一样是**实例化四边形**，每帧三次 draw：
+和 macOS/Ghostty 一样是**实例化四边形**，按内容分为三组 draw：
 
 1. **矩形批**：格背景（改成"同行同色合并"是后续优化）、下划线/删除线、光标
    （方块/下划线/竖线按 `cursor.shape`），以及**制表符与方块元素**——
@@ -200,12 +198,12 @@ clients/linux/src/
 shader 用 `gl_VertexID` 生成单位四边形（6 顶点，`draw_arrays_instanced`）；矩形实例 32 字节、字形实例 48 字节。
 
 宽字符占两格：字形比两格窄时**居中**而不是拉伸（fallback 面的全角字形常常偏窄）。
-emoji 的 ZWJ 序列、肤色/旗帜组合不做整形——协议按单元格给码点，`👍🏽`/`🇨🇳` 是两个码点，
-和 macOS 客户端一样画成两个字形。
+emoji 的 ZWJ 序列、肤色/旗帜组合不做整形——协议按单元格给一个码点，缺少完整字素。
+当前 `convert_row` 还会丢掉附加组合字符，分解重音 `e + U+0301` 会变成 `e`；单个预组码点 `é` 能显示，不能据此宣称组合字符已支持。
 
 ### 5.4 第一版明确不做（与代码现状同步）
 
-- 脏行增量（每帧整屏重建；`FrameStats` 先量出真实数字再决定是否值得做）；
+- 渲染脏行增量（传输层已接 delta；渲染每帧整屏重建；`FrameStats` 先量出真实数字再决定是否值得做）；
 - 滚动回看（`scroll` 消息）与选择/复制；
 - 侧栏；
 - 拖动分割线改比例（只画线，`resize_split` 还没接）；
@@ -222,12 +220,14 @@ emoji 的 ZWJ 序列、肤色/旗帜组合不做整形——协议按单元格�
 
 ### 5.5 验收（第一片已过）
 
+以下是第一片当时的实跑记录，保留原始数量与环境；不代表 2026-11-04 对当前版本的重新验收。
+
 在 Asahi + NVIDIA eGPU、niri/Wayland、GTK 4.24 上实跑：
 
 1. ✅ `cargo build -p pigeon-linux`、`cargo clippy -p pigeon-linux -- -D warnings`、`cargo test -p pigeon-linux`（14 个单测）；
 2. ✅ 自动拉起本机 `pigeon-server`（`--detach`）→ 握手 → `attach` → 画网格；用 `wtype` 打字验证
    输入 → 宿主 → 回显全链路（`echo hello from pigeon` 正常执行并显示）；
-3. ✅ fish 的语法高亮（绿 `~`、青分支、粗体 `help`）与 CJK（`中文`）、全角（`ＡＢＣ`）、组合字符（`é ñ`）都能显示
+3. ✅ fish 的语法高亮（绿 `~`、青分支、粗体 `help`）与 CJK（`中文`）、全角（`ＡＢＣ`）、预组重音字符（`é ñ`）都能显示
    —— 靠 `fontdb` 的静态 fallback 链（`Noto Sans Mono CJK SC` 等）；
 4. ✅ 缩放窗口：`stty size` 打印 `58 140`，与窗口像素 / 单元格尺寸一致（PTY 收到了新尺寸）；
 5. ✅ 制表符：`printf "┌───┐\n│abc│\n└───┘"` 连成一体的方框（横线不接缝）、`█▓▒░` 四档亮度正确；
@@ -245,7 +245,7 @@ emoji 的 ZWJ 序列、肤色/旗帜组合不做整形——协议按单元格�
 
 1. 脏行增量 + 行复用（对齐 macOS 的 `DirtyRows`）；
 2. 侧栏（`GtkListBox`/`GtkTreeListModel`）+ 分组 + 未读/`needs you`；
-3. 分屏与焦点（`layout` 消息已有，只差画 rect 与命中测试）；
+3. 拖动分隔线与多会话选择（分屏、zoom、布局绘制和焦点命中已接）；
 4. 滚动回看、选择、剪贴板（`OSC 52` 只写）；
 5. IME（`GtkIMContext`）与 kitty keyboard protocol；
 6. 若 CPU 帧时间成为瓶颈：后台渲染线程 + DMABUF 导出（Ghostty 的 `render_surface.zig` 是蓝本）。

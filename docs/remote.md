@@ -3,18 +3,20 @@
 > 目标：本地窗口可以接管**服务器上**的终端；服务器上跑同一个 `pigeon-server`，
 > 关掉本地窗口任务继续跑，重连原样恢复。全部走系统 `ssh`，不开端口、不管密码。
 
+> **2026-11-04 核对**：以下客户端流程已在 macOS 接入；Linux 当前仅连接本地宿主。历史实跑证据见 [m4-checklist.md](m4-checklist.md)。
+
 ## 1. 三种对接方式（按可用性从高到低）
 
 | 方式 | 做法 | 需要远端装 pigeon | 能持久化 | 备注 |
 |---|---|---|---|---|
 | **A. `--proxy` 桥接（推荐）** | `ssh host pigeon-server --proxy`：把 stdin/stdout 上的协议帧转给远端宿主的 unix socket | ✅ | ✅ | 不依赖 sshd 的 stream-local 转发开关（很多机器默认关闭） |
-| B. unix socket 直转 | `ssh -L /tmp/p.sock:$XDG_RUNTIME_DIR/pigeon.sock host` | ✅ | ✅ | 简洁，但需要远端 `AllowStreamLocalForwarding yes` |
+| B. unix socket 直转 | `ssh -N -L /tmp/p.sock:<远端 --socket-path 返回值> host` | ✅ | ✅ | 简洁，但需要远端 `AllowStreamLocalForwarding yes` |
 | C. 退化模式 | 普通 `ssh host` 开一个 pty | ❌ | ❌（会话随 ssh 断开） | **仍然有状态显示**：我们就是终端，OSC 7501 会直接到达；只是没有远端持久化与远端分屏 |
 
 三种都能同时支持：连接时先探测（A → B → C），并明确告诉用户当前用的是哪一种。
 
 `--stdio` 是同一条传输的另一种用法：不桥接已有 socket，而是让本次启动的 `pigeon-server` 直接作为宿主在
-stdin/stdout 上说话（首次安装后的第一次启动用它）；之后它常驻，后续连接用 `--proxy` 桥接到它的 unix socket。
+stdin/stdout 上说话。当前客户端优先使用 `--proxy`；它可在没有宿主时自动拉起独立宿主，再桥接 socket。
 两种模式的帧格式与 `docs/protocol.md` 完全一致。
 
 ## 2. 只往远端推一个很小的宿主（不是整个 pigeon）
@@ -26,17 +28,16 @@ stdin/stdout 上说话（首次安装后的第一次启动用它）；之后它�
 | `Pigeon.app`（客户端） | GUI、渲染、字体、输入法、侧栏 | 30–50 MB（本机） |
 | **`pigeon-server`**（会话宿主） | PTY + 内核（VT / 布局 / OSC 7501）+ socket 协议；**无 UI、无字体、无渲染** | **静态单文件 3–8 MB** |
 
-`pigeon-server` 就是“最小 tmux”：它只负责“让进程活着 + 记住屏幕 + 说话”。本机和远端跑的是**同一个二进制**，
+`pigeon-server` 就是“最小 tmux”：它只负责“让进程活着 + 记住屏幕 + 说话”。本机和远端跑的是**同一份源码按目标平台构建的宿主**，
 所以本机与远端行为一致，内核也只有一个实现。
 
 ### 自动安装（VSCode Remote 的做法，但不用包管理器）
 
 首次连接某个主机时，客户端自己在 ssh 上完成安装，不需要 root、不需要 PATH、不改 rc：
 
-1. `ssh host 'uname -sm'` → 选对应架构的内嵌产物（Linux x86_64/aarch64、macOS arm64/x86_64）；
+1. `ssh host 'uname -sm'` → 确定目标平台（完整架构矩阵见下表）；兼容宿主探测失败后才从本机缓存或 Release 取产物；
 2. 对 `~/.pigeon/server/` 下每个已装的 `pigeon-server` 跑 `--version`（输出 `pigeon-server <版本> proto <大>.<小>`），
-   取最新的、**协议大版本与客户端相同**的那个直接用。发行版本号不同、协议小版本不同都不重装（小版本差异由握手按较小者协商，
-   见 `docs/protocol.md` §3.1）；**不算哈希，也不需要本机有这个文件**，所以已经装好的机器连接时不下载；
+   取最新的、**协议大版本与客户端相同**的那个直接用。发行版本号不同、协议小版本不同都不重装（小版本协商目标与当前差异见 `docs/protocol.md` §0/§3.1）；**不算哈希，也不需要本机有这个文件**，所以已经装好的机器连接时不下载；
 3. 一个都没有、都跑不起来，或协议大版本都不同（不兼容），才去取本机的产物，把二进制**从同一条 ssh 连接流过去**（不依赖 scp/ftp）：
 
    ```sh
@@ -98,13 +99,12 @@ cargo build --release --manifest-path core/Cargo.toml --bin pigeon-server \
   绝不写 `/usr/local`、不用 sudo、不改 PATH 与 rc。
 - **只在不兼容时升级**：App 升级但协议大版本没变，远端继续用已装的 server；大版本变了才推新目录（`server/0.2.0/`），
   老会话继续跑老版本直到重启；保留最近 2 个版本并 GC。
-- **先问一次**：首次连接弹确认（“将在 host 上安装 pigeon-server 4.1 MB 到 `~/.pigeon/`”），可勾选“以后不再问”；
-  `--no-remote-install` 全局关闭。
+- **安装控制的现状**：安装层提供 `allowInstall` 参数，当前 GUI 连接默认允许按需安装；首次安装确认、“以后不再问”和 `--no-remote-install` 用户入口尚未实现。
 - **卸载**：`rm -rf ~/.pigeon` 就是卸载，远端不留任何其它痕迹。
 - **静态链接**（musl / 自带依赖）：不依赖远端 glibc、openssl、字体；只依赖内核 + PTY。
 - **体积是硬指标**：CI 里卡 8 MB，超了就把可选能力拆成编译 feature。
 - **跑不了就退化**：架构不支持、家目录是 `noexec` 挂载、磁盘满、无写权限 → 自动落到方式 C（普通 ssh），并说明原因；
-  `--remote-dir <path>` 可以换安装位置（例如 `$XDG_RUNTIME_DIR/pigeon` 或 `/tmp/$USER/pigeon`）。
+  `--remote-dir <path>` 用户入口尚未实现，当前不能用该参数更换安装位置。
 
 ## 3. 连接与协议
 
@@ -120,10 +120,10 @@ cargo build --release --manifest-path core/Cargo.toml --bin pigeon-server \
   版本不匹配 → `hello_error{reason:"version"}` 并给升级命令；`features` 取交集用于优雅降级
   （例如不支持 `scrollback` 时侧栏隐藏滚动条）。
 - **attach**：`attach{id, pane_id}` → 全量快照（含备用屏、光标、滚动区）→ 之后只收脏行增量（`delta`）。
-- **反向**（字段以 `docs/protocol.md` §3 为准）：`keys{pane_id, bytes}`、`mouse{pane_id, kind, x, y, button, mods}`、
+- **反向**（字段以 `docs/protocol.md` §3 为准）：`keys{pane_id, bytes}`（macOS 鼠标事件也编码后走这里）、
   `resize_pane{pane_id, cols, rows}`、`new_session{id, cwd?}`、`close_pane{id, pane_id}`、`focus{pane_id}`。
 - **保活**：帧级心跳（15s）；ssh 断开即视为可重连，重连走一次新的 `hello + attach`。
-- **压缩**：大输出时按帧 zstd（可选能力，握手协商）；默认关，先测延迟。
+- **压缩**：zstd 只有协议预留，宿主当前不提供此能力；尚无压缩路径。
 
 ### ssh 连接复用
 
@@ -142,11 +142,10 @@ cargo build --release --manifest-path core/Cargo.toml --bin pigeon-server \
 列表与“上次看的是谁”存在 `~/.config/pigeon/hosts.json`（`HostsStore`）。终端区同一时刻只显示一台主机，
 点另一台的会话即切换（连接早已建立，不需要重新探测）。
 
-- 侧栏是**一台机器一层组头**：本机组沿用组名，远端是 `host / 组名`；机器离线时整组收起，连接状态见
-  `Hosts` 菜单的勾选与窗口提示（不在组头上加临时标记）。
+- 侧栏按机器、项目分层；项目只显示组名，`host / 组名` 是内部持久化标识。Machines 行显示 connected/connecting/offline。
 - 每个主机的会话归到其用户分组：组名在会话**第一次出现时**定下（git 根优先，否则当时 cwd 的末级；
   远端 cwd 取宿主上报），之后 `cd` 不会把会话换组；重命名只改组名。
-- 断线：该主机整组变灰并标注 `reconnect`，点一下重连；重连成功即复原快照。
+- 断线：客户端显示连接失败/恢复提示并重试，离线主机不产生在线会话行；同一宿主重连可通过 `attach.since` 续传，缓冲不足时复原快照。
 - 一个主机一条 `ssh` 连接（ControlMaster 复用，见 §6），N 个会话共用。
 
 ## 5. 安全
@@ -155,16 +154,16 @@ cargo build --release --manifest-path core/Cargo.toml --bin pigeon-server \
   `~/.pigeon/state/pigeon.sock`（`$XDG_RUNTIME_DIR` 会在用户最后一个登录会话结束时被 systemd 删掉，宿主就成了孤儿）；
   其它情况（本机、开发构建）用 `$XDG_RUNTIME_DIR/pigeon.sock`，回退 `/tmp/pigeon-<uid>.sock`。
 - `--proxy` 只转发协议帧：不接受任意命令、不做 shell 展开。
-- `--remote-install` / `--no-remote-install` 永不静默安装；打印完整命令与版本；不修改远端 shell 配置。
+- 不修改远端 shell 配置；安装层的 `allowInstall` 可阻止安装，但 GUI 确认与命令行安装控制尚未接入，不能承诺当前会先弹确认。
 - 认证/密钥/known_hosts 全部交给系统 `ssh`；pigeon 不读、不缓存任何凭据。
 - 远端进程以普通用户身份运行，与用户手敲命令同权限。
 
 ## 6. ssh 连接细节
 
-- 复用：优先 `ControlMaster auto` + `ControlPath ~/.ssh/cm-%r@%h:%p`（用户已有配置则沿用）；没有则用一个临时 master。
+- 复用：实现使用 §3 所列 `/tmp/pigeon-<uid>-ssh/%C` 与 `ControlPersist=120`；不改用户的 SSH 配置文件。
 - 不做交互式密码：认证失败的提示里给出"先在终端里 ssh 一次"的指引。
 - 跳板机：完全交给 `~/.ssh/config`（`ProxyJump`），pigeon 不解析。
-- 远端 `pigeon-server` 的日志写 `~/.local/state/pigeon/log`（滚动），便于远程排障；`--log` 可覆盖。
+- `--detach --log PATH` 可指定宿主追加日志；当前 `--proxy` 自动拉起宿主时未传日志路径，输出丢弃，尚无默认远端日志轮转。
 
 ## 7. 里程碑对应
 

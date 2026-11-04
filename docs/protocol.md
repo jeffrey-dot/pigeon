@@ -4,15 +4,35 @@
 > 另一条同源的边界是 C ABI（`include/pigeon_core.h`，由 `core/src/ffi/mod.rs` 生成），
 > 用于“把内核编进客户端”的嵌入模式；两者共用同一份内核，字段语义必须一致（见 §9）。
 
+## 0. 实现覆盖（2026-11-04 核对）
+
+本文保留字段契约；定义了字段不等于所有路径已实现。当前差异如下：
+
+- 宿主提供 `delta`、`scrollback`、`osc7501`、`status_all`；macOS 请求 `delta`、`scrollback`、`status_all`，Linux 请求 `delta`，首帧快照之后应用连续增量。
+- `zstd` 是预留能力，宿主不提供，当前 payload 为裸 CBOR，无压缩 tag。
+- `snapshot`/`delta` 的 `links` 已有类型，但 VT 转换未保留 OSC 8，实际不下发链接；每格仍只有一个码点。
+- `new_session.env` 能编解码，但宿主尚未应用；结构化 `mouse` 能编解码但宿主返回 `unsupported`。
+  macOS 将鼠标按当前 VT 模式编码成 `keys.bytes`，不是发送 `mouse`。
+- `status_all` 已通过独立 `status` 帧补发状态；`sessions` 本身不包含状态记录。未协商 `status_all` 的连接仍接收已 attach pane 的状态，不能靠未请求 `osc7501` 推断不会收到 `status`。
+- 心跳当前由 macOS 客户端实现：15s 未收到宿主消息后 ping，45s 无消息重连；宿主响应 pong。
+  Linux 未接相同心跳与恢复流程。
+- 握手当前拒绝不同 major 并返回自身 `PROTO_VERSION`；“minor 取较小值”的目标尚未实现。
+- `scroll` 及历史发送的宿主处理尚未完整按 `scrollback` 握手能力门控；官方客户端通过 `history:false` 避免 attach 传整段历史。
+- 尺寸投票当前存在 `SessionState.vote`，同会话 pane 共用；尚未达到 §6 的 pane 级策略契约。首次投票者决定策略，仍有投票者时重新 attach 不会修改它。
+- 宿主尚未实现 hello 的 5s 超时；不同 major 会回 `hello_error`，但服务端没有在发送后主动关闭连接。
+- `close_pane` 目前调用 PTY child 的 `kill()`；尚无显式的 SIGHUP 等待后 SIGKILL 的两阶段策略。
+
+这些差异是待完成项，不改变协议的兼容性规则；新增能力仍需同时补实现和测试。
+
 ## 1. 传输与分帧
 
 | 项 | 规定 |
 |---|---|
-| 传输 | 本机 unix socket（`/tmp/pigeon-<uid>.sock`，`0700`）；远端为同一协议的 stdio（`ssh host pigeon-server --proxy`） |
+| 传输 | 本机 unix socket（`$XDG_RUNTIME_DIR/pigeon.sock`，回退 `/tmp/pigeon-<uid>.sock`，`0700`）；客户端安装的远端宿主用 `~/.pigeon/state/pigeon.sock`，经 stdio/SSH 承载。路径由 `pigeon-server --socket-path` 查询 |
 | 帧 | `u32` 小端长度 `L` + 恰好 `L` 字节 payload。`L` **不含自身**；payload 为单个 CBOR map。不用换行分隔 |
 | 上限 | 单帧 ≤ 8 MiB（8388608）。超限即断开并回 `error{code:"frame_too_large"}`，payload 不进解析器 |
 | 半包 | 读端必须能处理“长度够但 payload 不足”的中间态，累积到 `L` 字节再解 |
-| 心跳 | 任一方 15s 无出站帧则发 `ping`；45s 无任何入站帧视为断线 |
+| 心跳 | macOS 客户端 15s 无入站帧时发 `ping`，45s 无入站帧视为断线；宿主回 `pong`；Linux 待接 |
 | 版本 | 握手期协商；**大版本不同即拒绝**，小版本向下兼容 |
 | 压缩 | 只有双方 `features` 都含 `zstd` 时启用。启用后 payload 首字节是 tag：`0x00` = 原文，`0x01` = 其后为 zstd 帧。tag 计入 `L` |
 
@@ -81,7 +101,7 @@
   `delta`（最多 4096 帧且合计 512 Ki 格），`since` 之后的帧都还在就按顺序只补这些帧（之后接实时流），**不发快照**；
   帧已被淘汰、中间 resize 过（缓冲清空）、`since` 比当前还大（另一个宿主进程给的号）或连接没协商 `delta` 时，按没带 `since` 处理，回一帧快照。
   客户端断线后保留屏幕不清空，重连后对已画过的 pane 带 `since`；`hello_ack.instance` 变了就丢掉所有 `seq`，改要快照。
-- 宿主每 pane 每 16 ms 最多发一帧 `delta`（大量输出时合并脏行）；pane 尺寸变化后不发 `delta`，而是给每个观看者推一帧 `snapshot`（脏行装不下新的列数）。
+- 宿主大量输出时按 16 ms 合并脏行发 `delta`；按键之后的首次输出优先立即 flush，不受该间隔限制；pane 尺寸变化后不发 `delta`，而是给每个观看者推一帧 `snapshot`（脏行装不下新的列数）。
 - **慢客户端**：宿主给每个连接一条出站队列。某 pane 已有一帧 `delta` 在队里没发出去时又来一帧，两帧都换成该 pane 的一帧
   `snapshot`（发出时现取，即最新屏幕；`seq` 照常是它包含的最新 `delta`），所以读得慢的客户端看到的是 `delta … snapshot`
   而不是一长串 `delta`，`seq` 不会跳号。这帧 `snapshot` 不带 `history`。`layout`/`size_state`/`status`/`pane_exited`/`sessions`
@@ -90,13 +110,13 @@
 - `cursor.shape`：`0` 方块、`1` 下划线、`2` 竖线。
 - `cell = [codepoint: u32, attrs: u8, fg: u32, bg: u32, link?: u32]`。
   - 宽字符由 `codepoint` 的 `wcwidth` 推导；宽字符占两格，第二格是空 continuation，客户端按宽度跳过绘制。
-  - `attrs` 位：`1` 粗体、`2` 斜体、`4` 下划线、`8` 反色、`16` 删除线、`32` 暗色。一旦发布只加位、不改语义。
+  - `attrs` 位：`1` 粗体、`2` 斜体、`4` 下划线、`8` 反色、`16` 删除线、`32` 暗色、`64` 软换行（行末格后接下一行，不插入文本换行）。一旦发布只加位、不改语义。
   - 颜色：`0x01000000 | idx` 表示调色板索引；否则按 `0xRRGGBB`。
   - `link` 缺省 = 无超链接；非 0 时指向同一帧 `links` 表里的 `id`（`links` 随该帧的 `snapshot`/`delta` 下发）。
 - 同一 `pane_id` 的 `snapshot` 会把该客户端的 `seq` 基准重置。
 - `scroll` 的答复是一个 `snapshot`，额外带两个只有它才有的字段：`history_len`（滚回缓冲一共多少行）与 `offset`（这一屏回看的行数，0 = 实时屏）。客户端据此画滚动条位置；别的 `snapshot` 不带这两个字段。
 - `scroll` 的 offset 是**相对当前位置的增量**（除了 `0` 表示“回到底部”），宿主把它夹在 `[0, history_len]`，所以多按几次 PageUp 不会越界；窗口各自回看，互不影响。
-- `history` 只在 `snapshot` 里出现（即时序上跟 `attach` 走）；增量帧不带历史。客户端要回看时重新 `attach` 拿最新历史——快照里的 `history` 与同一帧的 `screen` 是连续的，拼起来没有缝。
+- `history` 只在 `snapshot` 里出现（即时序上跟 `attach` 走）；增量帧不带历史。macOS 回看走 `scroll` 获取一屏，不靠重复 attach 拉历史。自行请求 `history` 的消费者可将它与同一帧 `screen` 拼接，但不得把旧历史与后来的实时屏幕当成连续内容。
 - 宿主按单帧上限（8 MB）裁剪历史：超宽 pane 上只发最新的若干行，旧的丢掉而不是让 `attach` 失败。客户端不能假定「`history` 一定包含全部历史」。
 - `layout.tree` 用 `{leaf: 0}` 表示「这个 session 已经没有 pane 了」（pane id 从 1 开始）。
 
@@ -105,7 +125,7 @@
 | 方向 | 消息 | 必选字段 | 可选字段 | 说明 |
 |---|---|---|---|---|
 | c→s | `appearance` | — | `fg: u32`, `bg: u32`, `ansi: [u32]`（16 个 `0xRRGGBB`） | 客户端当前主题，供宿主回答程序发出的 `OSC 4/10/11` 颜色查询。**缺省值**：客户端还没发过时，宿主用内置的深色板（底 `#0E0F11` / 字 `#E6E6E6` + harp 的 `DARK_MODE_*` 十六色）作答；`fg`/`bg` 缺失或 `ansi` 不是 16 个时，保留上一次的答复（不 panic、不猜） |
-| c→s | `keys` | `pane_id: u32`, `bytes: bstr` | — | 已编码好的终端字节（kitty protocol 或 legacy 由客户端决定） |
+| c→s | `keys` | `pane_id: u32`, `bytes: bstr` | — | 已编码好的终端字节（当前两端为 xterm legacy；Kitty keyboard protocol 待完整接入） |
 | c→s | `mouse` | `pane_id: u32`, `kind: "down"\|"up"\|"move"\|"wheel"`, `x: u16`, `y: u16`, `button: u8`, `mods: u8` | — | `mods` 位：`1` shift、`2` alt、`4` ctrl |
 | c→s | `paste` | `pane_id: u32`, `text: str` | — | 宿主负责括号粘贴包装：程序开了 `?2004` 才包 `ESC[200~ … ESC[201~`，并去掉正文里的起止标记（防止剪贴板内容提前结束粘贴、把后面当命令执行）；`\n`/`\r\n` 换成 `\r` |
 | s→c | `status` | `pane_id: u32`, `state: "idle"\|"working"\|"blocked"\|"done"\|"error"`, `seq: u32` | `kind: "permission"\|"question"\|"auth"`, `msg: str`, `app: str`, `id: str`, `age_ms: u64` | 来自 OSC 7501；`msg`/`app` 只当纯文本；`app` 是上报的 agent 名（`app=`），`id` 是记录 id；`age_ms` = 进入当前 `state` 已多少毫秒（宿主时钟上的时长，不是时间戳，两端时钟不必一致；同一状态重复上报不重置） |
@@ -138,7 +158,7 @@
 | `shutdown` | 宿主正常退出 | 是 |
 | `no_such_pane` | `pane_id` 不存在 | 否 |
 | `bad_request` | 字段组合非法（如 `ratio` 越界且无法夹取） | 否 |
-| `backpressure` | 客户端读得太慢，宿主丢弃了 `delta` | 否（客户端应重新 `attach`） |
+| `backpressure` | 预留错误码；当前慢连接合并屏幕帧，超限直接断开（§3.3） | 若收到，客户端应重新 `attach` |
 | `internal` | 宿主内部错误，已写日志 | 否 |
 
 ## 5. 能力（`features`）
@@ -149,14 +169,14 @@
 | `scrollback` | s→c | `snapshot.history` 与 `scroll` 可用 | 不下发历史，客户端隐藏滚动条 |
 | `zstd` | 双向 | 帧 payload 带 1 字节 tag，`0x01` 为 zstd | payload 必须是不带 tag 的裸 CBOR |
 | `osc7501` | s→c | 发 `status` | 不发 `status`，侧栏不显示 agent 状态 |
-| `status_all` | s→c | 不 `attach` 也收到**所有** pane 的 `status`：握手后紧跟 `sessions` 补发每个 pane 当前未确认的状态，之后实时推送；这类连接不进任何会话的尺寸投票 | 只收已 `attach` 的 pane 的 `status`（侧栏要靠逐个 `attach` 才能看到后台会话） |
+| `status_all` | s→c | 不 `attach` 也收到**所有** pane 的 `status`：握手后紧跟 `sessions` 补发每个 pane 当前未确认的状态，之后实时推送；未 attach 的状态观察者不进尺寸投票；同一连接之后 attach 会参与对应 pane 的投票 | 只收已 `attach` 的 pane 的 `status`（侧栏要靠逐个 `attach` 才能看到后台会话） |
 
 新增能力只是往表里加一行；客户端必须忽略不认识的名称。
 
 ## 6. 多客户端尺寸策略
 
 - 策略是**pane 级**的，由第一个 `attach` 的客户端决定，后续 `attach` 只做确认；改策略要重新 `attach`。
-- `latest`（默认）：最近一次发 `focus`/`keys`/`mouse` 的客户端说了算。
+- `latest`（默认）：最近一次发 `focus`/`keys`/`paste` 的客户端说了算；当前 macOS 鼠标字节走 `keys`。
 - `smallest`：取所有已 attach 客户端中 `cols`/`rows` 的最小值（tmux 的保守做法）。
 - `locked`：只有 `size_policy` 首次设定时的客户端能改，其它客户端的 `resize_pane` 被忽略。
 - 每次尺寸变化都广播 `size_state`，`source` 告诉客户端“现在是谁说了算”，`clients` 是观察者数量。

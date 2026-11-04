@@ -5,6 +5,9 @@
 | 脚本 | 做什么 |
 |---|---|
 | `build/bundle-app.sh` | 打 Pigeon.app；`UNIVERSAL=1` 出双架构（发行用） |
+| `bench/environment.py` | 输出 JSON 环境基线：版本、OS/CPU/工具链、GTK、指定环境变量；字体/刷新率等必须手工补充 |
+| `checks/swift-logic.sh` | 在临时 SwiftPM 包运行真实的 Foundation-only 侧栏/选择测试（可用 `SWIFT` 指定编译器）；不替代 AppKit 验收 |
+| `checks/ffi-imports.sh` | 禁止 FFI 直接引用核心内部模块 |
 | `bench/render-bench.sh` | 渲染基准：大文件 `cat` + 5 秒持续输出，读 `PIGEON_FRAME_STATS` |
 | `checks/m0-gui-check.sh` | M0：单 pane、关窗重开（对应 [m0-checklist](../docs/m0-checklist.md)） |
 | `checks/m1-gui-check.sh` | M1：分屏、拖动分隔线、焦点（[m1-checklist](../docs/m1-checklist.md)） |

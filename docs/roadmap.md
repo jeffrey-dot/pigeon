@@ -1,4 +1,8 @@
-# 优化方案（2026-10-31）
+# 优化方案（2026-10-31 历史计划）
+
+> 本文保留当时的问题与阶段推进记录；2026-11-04 核对时 P1–P6 的主体已实现，开头的“看不到状态/缺复制粘贴”等不再描述当前版本。
+> 当前能力与缺口统一见 [plan.md §11](plan.md#11-当前能力与已知缺口)，不要以本页的旧“现状”重新排期。
+> 当前执行计划已移到 [前沿终端优化计划](optimization-plan.md)；本文保留上一轮历史方案。
 
 目标：一个前沿的终端，能连远端服务器并像 tmux 一样保住远端会话；侧栏列出所有会话和里面每个 AI agent 的状态；
 美观、流畅、好用。本方案来自三份通读审查（Swift 客户端、Rust 内核/宿主、UI/渲染），结论按“用户先感受到什么”排序。
@@ -16,7 +20,7 @@
 | 问题 | 现状 | 改法 |
 |---|---|---|
 | `blocked` 在正在看的会话上一闪就没 | 客户端对选中会话的每条 status 都 ack，宿主随即回 `idle` | 只 ack `done`/`error`；`working`/`blocked` 由进程退出或 133A 清 |
-| status 的 `kind`/`msg`/`app` 没用上 | 宿主不发 `app`/`id`，客户端只读 `state`/`seq` | 协议 `status` 加可选 `app`、`id`、`since_ms`；客户端存下来给侧栏和头部用 |
+| status 的 `kind`/`msg`/`app` 没用上 | 宿主不发 `app`/`id`，客户端只读 `state`/`seq` | 协议 `status` 加可选 `app`、`id`、状态时长（最终落地为 `age_ms`）；客户端存下来给侧栏和头部用 |
 | 分屏里一个 shell 退出，整个会话被关 | `pane_exited` → `closeSession` 给所有 pane 发 `close_pane` | 只关退出的那个 pane；会话没 pane 了才算关闭 |
 | 后台主机的事件改写窗口 | `activeHost` 被临时换掉时调 `refreshSidebar`/`updateHeader` | 刷新侧栏一律在恢复 `activeHost` 之后做；ack 只对可见主机的选中会话 |
 | `markRead` / 未读键 / 改名 | 写错键、`activeHost` 没恢复、`renamed` 没人读 | 统一用 `(host, session)` 键；改名接到侧栏标题 |
@@ -36,16 +40,16 @@
 
 ### P2 agent 面板（核心卖点）✅
 
-- 侧栏行变成两行：上行 = agent 名 + 状态 + 计时；下行 = 当前任务或 blocked 原因（`msg`），只在 working/blocked 时出现。
-- working 用转动的环，blocked 一次柔和脉冲 + 琥珀色；计时从状态开始的时刻算（宿主给 `since_ms`）。
+- 侧栏行变成两行：上行 = agent 名 + 状态 + 计时；下行 = 当前任务或 blocked 原因（`msg`），working/error 有 msg 时出现，blocked 缺 msg 时显示等待原因。
+- working 用转动的环，blocked 一次柔和脉冲 + 琥珀色；计时从状态开始的时刻算（宿主给 `age_ms`，客户端换算本地开始时间）。
 - 右栏头部显示 `Working · 3m · Refactoring the renderer` / `Needs you · permission · Run cargo test?`。
-- 宿主侧：不 attach 也能收到所有会话的 status（`sessions` 里带每会话的最新状态），status-only 的客户端不参与尺寸投票。
+- 宿主侧：不 attach 也能收到所有 pane 的 status，未 attach 的状态观察者不参与尺寸投票。状态通过 `sessions` 之后的独立 `status` 消息补发，并非嵌在 `sessions` 字段内。
 
 ### P3 流畅 ✅
 
 - 宿主 `scroll` 只切出一屏，不再每步转换 1 万行历史（实测 14.5ms/步；现在 1 万行历史上每步 0.08ms，`scroll_step_cost`）。
 - 输入后立即 flush 一帧（打字回显不再等 16ms 节拍）。
-- 客户端主线程缓存字体度量和色板（现在每帧查 `NSFont(name:)` 和 16 次 `bestMatch`）。
+- 客户端主线程缓存字体度量和色板（改动前每帧查 `NSFont(name:)` 和 16 次 `bestMatch`）。
 - 写 socket 移出主线程（串行队列 + 有界发件箱），慢 ssh 不再卡界面。
 
 ### P4 结构重写 ✅
