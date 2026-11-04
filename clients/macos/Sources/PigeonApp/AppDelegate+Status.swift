@@ -7,6 +7,7 @@ extension AppDelegate {
         guard swappedFrom == nil, let container else { return [] }
         let presented = Set(container.model.panes.compactMap { pane -> UInt32? in
             guard haveSnapshot.contains(pane.id),
+                  connection.receivedScreen.contains(pane.id),
                   let view = container.paneView(pane.id), !view.cells.isEmpty,
                   view.metal != nil, view.bounds.width > 0, view.bounds.height > 0,
                   view.scrollOffset == 0, !view.isHiddenOrHasHiddenAncestor,
@@ -76,6 +77,14 @@ extension AppDelegate {
             selected: selectedSession, visiblePanes: [])
         applyStatusEffects(effects)
         refreshSidebar()
+        // A status-only replay can precede any new screen, even when since is current
+        // and the host has no delta to send. Ask for one picture before auto-ack.
+        if swappedFrom == nil, let session = selectedSession,
+           rows[session]?.panes.contains(report.pane) == true,
+           !connection.receivedScreen.contains(report.pane),
+           !requested.contains(report.pane) {
+            sendAttach(report.pane, force: true, resume: false)
+        }
         markVisibleStatusesSeen()
     }
 

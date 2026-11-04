@@ -76,3 +76,10 @@ fetch 后发现本地分支与 `origin/main` 分叉（本地既有 Linux 4 个�
 平台范围与复跑方法见 [Linux 输入记录](linux-input-progress.md)。拖选/历史复制、真实 Wayland/IBus/日文/混合 DPI 尚未完成。
 
 文本批次 `c7c1ec0` 的 [CI 41843748579](https://github.com/jeffrey-dot/pigeon/actions/runs/41843748579) 全部通过。Linux 输入批次需在推送后核对对应 SHA 的 CI。
+
+## 2026-11-04：状态持久化 worktree 审查与整合
+
+状态 worktree 的纯逻辑和 AppDelegate 接线经主线程检查后合入。新增的跨重启事件身份、ack 来源/连接 generation、保守保留旧未读、首次原子写盘及格式迁移见 [状态持久化说明](status-persistence-progress.md)。
+主线程补上重连时旧屏幕不能确认新报告的边界，并复跑 Foundation-only 84 tests（全部通过）和 AppDelegate 语法检查。
+身份集合增长、多进程写盘、宿主多记录同步/修订号和真实 AppKit 呈现仍为明确缺口。
+Linux 输入提交 `7a4a71e` 的 [CI 41845716261](https://github.com/jeffrey-dot/pigeon/actions/runs/41845716261) 已全部通过。

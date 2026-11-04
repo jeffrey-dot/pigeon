@@ -87,15 +87,18 @@ extension AppDelegate {
     /// attaches every session (for the sidebar's status), so selecting a session has to force
     /// a re-attach — otherwise the host keeps following whichever session it attached last and
     /// the window never receives the selected session's layout.
-    func sendAttach(_ pane: UInt32, force: Bool = false) {
+    func sendAttach(_ pane: UInt32, force: Bool = false, resume: Bool = true) {
         guard pane != 0 else { return }
         let stale = connection.stale?.contains(pane) ?? false
         if !force, (haveSnapshot.contains(pane) && !stale) || !requested.insert(pane).inserted {
             return
         }
         connection.stale?.remove(pane)
-        let since = HostRecovery.resumeSeq(
-            drawn: frameSeq[pane], stale: stale, onScreen: haveSnapshot.contains(pane))
+        let since = resume ? HostRecovery.resumeSeq(
+            drawn: frameSeq[pane], stale: stale, onScreen: haveSnapshot.contains(pane)) : nil
+        // A caught-up since request can legitimately return no screen. Only a full
+        // attach promises the picture that status confirmation waits for.
+        if since == nil { requested.insert(pane) } else { requested.remove(pane) }
         send({ message in
             Wire.set(message, u32: "id", requestID())
             Wire.set(message, u32: "pane_id", pane)

@@ -139,8 +139,8 @@
 ## 7. 本轮行为补充（2026-11-04）
 
 - 保留以上单行 Harp 视觉；会话状态按各 pane 最新状态紧急程度聚合，并保存来源 pane。⌘J 定位该 pane，解除隐藏它的 zoom。
-- 自动确认要求前台 key window、非遮挡、对应 host/session 布局已显示且 pane 有快照；隐藏 pane 保留未读。显式“标记已读”可确认整会话。
-- 同运行期重连重播终态不重复累加未读；同 pane 多记录与跨应用重启事件身份仍待补。
+- 自动确认要求前台 key window、非遮挡、对应 host/session 布局已显示且 pane 有快照；隐藏 pane 保留未读。“标记已读”仅确认当前可见 pane 正在显示的终态。
+- 未读/已查看身份按 host、instance、pane、seq、record 持久化，跨重启重播去重；已查看记录重播可重发原来源 ack。更高 seq 和新 live 状态不会清掉旧未读；宿主未下发的记录仍无法枚举。
 - 复制利用核心软换行标志合并自动折行、保留真实换行；搜索、OSC 8、OSC 52、跨历史选择仍未实现。
 - macOS 已接 Kitty keyboard protocol、应用小键盘与编程连字；Linux 完整操作对齐见 [Linux README](../clients/linux/README.md)。
 

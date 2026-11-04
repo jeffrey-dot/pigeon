@@ -64,6 +64,8 @@ extension AppDelegate {
             guard visible else { break }
             if container.applySnapshot(snapshot) {
                 haveSnapshot.insert(pane)
+                connection.receivedScreen.insert(pane)
+                requested.remove(pane)
                 frameSeq[pane] = Wire.u32(message, "seq")
                 // `scroll` answers carry where the view is; plain snapshots do not, and then
                 // the indicator stays hidden (both fields are 0).
@@ -138,10 +140,13 @@ extension AppDelegate {
         let expected = drawn + 1
         if delta.pointee.seq == expected, view.apply(delta: delta) {
             frameSeq[pane] = delta.pointee.seq
+            connection.receivedScreen.insert(pane)
+            requested.remove(pane)
             // Every delta carries the modes; a host too old to send them leaves them alone.
             let unreported = UInt32.max
             let modes = Wire.u32(message, "modes", fallback: unreported)
             if modes != unreported { view.modes = modes }
+            markVisibleStatusesSeen()
             return
         }
         debugLog("delta pane=\(pane) seq=\(delta.pointee.seq) expected=\(expected): re-attach")
@@ -235,6 +240,8 @@ extension AppDelegate {
             defer { pg_snapshot_free(snapshot) }
             if container.applySnapshot(snapshot) {
                 haveSnapshot.insert(pane)
+                connection.receivedScreen.insert(pane)
+                requested.remove(pane)
                 frameSeq[pane] = Wire.u32(decoded, "seq")
                 // `scroll` answers carry where the view is; plain snapshots do not, and then
                 // the indicator stays hidden (both fields are 0).

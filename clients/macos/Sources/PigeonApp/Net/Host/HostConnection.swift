@@ -9,6 +9,8 @@ struct HostConnection<Row> {
     var selectedSession: Int?
     /// Panes that have a screen on display.
     var seen: Set<UInt32> = []
+    /// Panes whose picture was applied from this transport, not only cached before reconnect.
+    var receivedScreen: Set<UInt32> = []
     /// Panes an `attach` was sent for and not yet answered.
     var requested: Set<UInt32> = []
     /// Snapshots that arrived before their pane view existed.
@@ -33,6 +35,7 @@ struct HostConnection<Row> {
     mutating func reconnected(now: Date) {
         generation = UUID()
         ready = false
+        receivedScreen = []
         stale = seen
         requested = []
         heartbeat = Heartbeat(now: now)
@@ -48,6 +51,7 @@ struct HostConnection<Row> {
             seq = [:]
             rows = [:]
             seen = []
+            receivedScreen = []
             requested = []
             pending = [:]
             focusedPane = nil
@@ -63,5 +67,8 @@ struct HostConnection<Row> {
         ready && acknowledgement.matches(host: host, instance: instance)
     }
 
-    mutating func disconnected() { ready = false }
+    mutating func disconnected() {
+        ready = false
+        receivedScreen = []
+    }
 }

@@ -291,7 +291,7 @@ M0–M1 可以直接复用现有代码：内核的对账语料（来自 tmux 阶
 | 搜索与完整文本选择 | 未实现终端搜索；macOS 选择和“Select All”只覆盖当前屏幕。已新增 `ATTR_WRAP` 并在 macOS 复制时保留逻辑换行；旧宿主无标志时仍按网格行处理 |
 | OSC 8 / OSC 52 | `convert_row` 的 `link` 恒为 0，`links` 不下发；OSC 52 事件被忽略。点击超链接、远端程序复制到本地剪贴板尚不可用；本地菜单复制粘贴已实现 |
 | 现代终端协议 | macOS 已接 Kitty keyboard protocol 与应用小键盘，Linux 仍为 legacy；DEC 2026 同步输出与超时已接；图片协议、OSC 9;4 进度、完整 OSC 133 命令边界/命令输出导航未实现。不能把底层 VT 库的能力当成产品端到端能力 |
-| agent 记录同步 | 多 pane 最新状态聚合、来源 pane ack、隐藏 pane 未读和同连接重播去重已补，纯逻辑通过；同 pane 多记录、跨应用重启的未读事件身份仍待补，AppKit 交互待 macOS 验收 |
+| agent 记录同步 | 多 pane 状态聚合、来源 ack、跨应用重启事件身份持久化和重播去重已实现；按 host/instance/pane/seq/record 隔离，缓存报告/旧屏幕不作查看依据。同 pane 未下发记录的枚举、状态修订号、身份集合有界存储与多进程写入一致性仍待补；AppKit 交互待验收 |
 | agent 接入与通知 | 目前注入 `PI_PROGRAM_STATUS=1`，其它程序必须自行上报 OSC 7501；没有通用的上报工具/接入指南、完整适配矩阵或桌面通知投递。不能把“能运行 agent”写成“能自动显示其状态” |
 | Linux 功能对齐 | 缺侧栏/会话选择、SSH 连接管理、回看、选择复制、鼠标/焦点上报、拖动分隔线、渲染脏行复用与自动断线恢复；delta、IME、复制当前屏幕与宿主括号粘贴已接。Xvfb/fcitx5 输入验收通过，Wayland/IBus/日文/混合 DPI 未验；GTK CI 已运行，GUI 发布产物未做 |
 | DECSTBM 元数据 | VT 引擎处理滚动区，但 `Snapshot.scroll` 导出为整屏；不是 VT 不支持滚动区。真正边界未暴露给客户端 |

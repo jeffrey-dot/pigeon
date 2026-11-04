@@ -51,6 +51,21 @@ final class HostConnectionTests: XCTestCase {
         XCTAssertTrue(connection.accepts(generation: connection.generation))
     }
 
+    func testReconnectNeedsANewScreenBeforeItCanConfirmANewReport() {
+        var connection = HostConnection<Int>()
+        connection.instanceChanged(to: "a")
+        connection.seen = [10]
+        connection.receivedScreen.insert(10)
+        connection.reconnected(now: now)
+        connection.instanceChanged(to: "a")
+        XCTAssertEqual(connection.seen, [10], "cached screen remains available for resume")
+        XCTAssertTrue(connection.receivedScreen.isEmpty, "cached pixels cannot confirm a fresh report")
+        connection.receivedScreen.insert(10)
+        XCTAssertTrue(connection.receivedScreen.contains(10))
+        connection.disconnected()
+        XCTAssertTrue(connection.receivedScreen.isEmpty)
+    }
+
     func testHostsWithoutAnInstanceCannotReuseIdentityAcrossConnections() {
         var connection = HostConnection<Int>()
         connection.instanceChanged(to: "")
