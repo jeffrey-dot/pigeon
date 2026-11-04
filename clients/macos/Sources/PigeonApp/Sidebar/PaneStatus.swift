@@ -10,8 +10,6 @@ struct PaneStatus: Equatable {
     var receipt = Receipt()
     /// Suppresses repeat acks while snapshots/layouts keep arriving for the same report.
     var acknowledged: StatusRecord?
-    /// Orders current reports only. It must never be used to discard unseen terminal records.
-    var newestSeq: UInt32 = 0
     var current = true
 
     var identity: StatusRecord { StatusRecord(seq: seq, record: record) }

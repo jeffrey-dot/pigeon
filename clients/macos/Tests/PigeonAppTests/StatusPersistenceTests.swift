@@ -77,23 +77,24 @@ final class StatusPersistenceTests: XCTestCase {
         XCTAssertEqual(rows[1]?.unread, 0)
     }
 
-    func testAnAlreadySeenReplayCannotHideAnOlderPendingRecord() {
+    func testAnAlreadySeenReportRetriesAckWithoutCreatingUnread() {
         var rows = restored(SidebarState())
         apply(.done, seq: 8, record: "finished", to: &rows, visible: [10])
         apply(.blocked, seq: 3, record: "pending", to: &rows)
         XCTAssertEqual(rows[1]?.status, .blocked)
         let replay = apply(.done, seq: 8, record: "finished", to: &rows)
         XCTAssertEqual(acks(replay).map(\.record.seq), [8])
-        XCTAssertEqual(rows[1]?.status, .blocked, "retrying an ack is not a new current report")
-        XCTAssertEqual(rows[1]?.seq, 3)
+        XCTAssertEqual(rows[1]?.status, .done, "current state follows the host's ordered report")
+        XCTAssertEqual(rows[1]?.seq, 8)
+        XCTAssertEqual(rows[1]?.unread, 0)
     }
 
-    func testOutOfOrderTerminalIsRetainedWithoutReplacingOrAcknowledgingIt() {
+    func testLowerSequenceTerminalIsRetainedAndBecomesCurrentWithoutImplicitAck() {
         var rows = restored(SidebarState())
         apply(.blocked, seq: 9, to: &rows)
-        let older = apply(.error, seq: 2, record: "older", to: &rows, visible: [10])
+        let older = apply(.error, seq: 2, record: "older", to: &rows)
         XCTAssertTrue(acks(older).isEmpty)
-        XCTAssertEqual(rows[1]?.status, .blocked)
+        XCTAssertEqual(rows[1]?.status, .error)
         XCTAssertEqual(rows[1]?.unread, 1)
         apply(.error, seq: 2, record: "older", to: &rows)
         XCTAssertEqual(rows[1]?.unread, 1)
@@ -112,6 +113,18 @@ final class StatusPersistenceTests: XCTestCase {
                                                   host: ref.host, instance: "a")).isEmpty)
         XCTAssertEqual(rows[1]?.unread, 1)
         XCTAssertEqual(rows[1]?.status, .working)
+    }
+
+    func testPromptClearingBlockedRevealsTheHostsOlderUnreadDone() {
+        var rows = restored(SidebarState())
+        apply(.done, seq: 1, record: "finished", to: &rows)
+        apply(.blocked, seq: 2, record: "running", to: &rows)
+        // OSC 133A removes the transient record; the host's current report becomes done/1.
+        let revealed = apply(.done, seq: 1, record: "finished", to: &rows)
+        XCTAssertEqual(rows[1]?.status, .done)
+        XCTAssertEqual(rows[1]?.seq, 1)
+        XCTAssertEqual(rows[1]?.unread, 1)
+        XCTAssertTrue(acks(revealed).isEmpty, "receiving the report does not mean it was viewed")
     }
 
     func testReconnectKeepsUnreadButRequiresAFreshReportBeforeAcknowledgement() {

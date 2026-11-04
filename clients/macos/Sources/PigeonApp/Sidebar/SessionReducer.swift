@@ -46,21 +46,16 @@ enum SessionReducer {
         if finished, report.seq > 0, !pane.receipt.seen.contains(identity) {
             pane.receipt.unread.insert(identity)
         }
-        // The host may expose a lower seq after the displayed record is acked/cleared.
-        // While a newer report remains current, old arrivals cannot roll it back, but
-        // every unseen terminal identity above is retained independently of this choice.
+        // Status seq identifies a record, not the stream revision. The ordered transport
+        // may legitimately reveal an older record after a prompt/clear removes a newer one.
+        // Transport generations reject obsolete callbacks; the host owns current state.
         let alreadySeen = pane.receipt.seen.contains(identity)
-        let replace = !alreadySeen && (!pane.current || report.seq == 0 || report.seq >= pane.newestSeq
-            || pane.seq == 0 || pane.acknowledged != nil)
-        if replace {
-            pane.status = status
-            pane.seq = report.seq
-            pane.record = report.record
-            pane.agent = report.agent
-            pane.acknowledged = nil
-            pane.current = true
-        }
-        pane.newestSeq = max(pane.newestSeq, report.seq)
+        pane.status = status
+        pane.seq = report.seq
+        pane.record = report.record
+        pane.agent = report.agent
+        pane.acknowledged = alreadySeen ? identity : nil
+        pane.current = true
         row.paneStatuses[report.pane] = pane
         aggregate(&row)
         var effects: [Effect] = []
@@ -68,7 +63,7 @@ enum SessionReducer {
             // This exact record was already viewed, even if the current pane is hidden.
             effects = [.ack(StatusAcknowledgement(host: host, instance: instance,
                                                   pane: report.pane, record: identity))]
-        } else if replace, selected == id, visiblePanes.contains(report.pane) {
+        } else if selected == id, visiblePanes.contains(report.pane) {
             effects = acknowledge(panes: [report.pane], row: &row)
         }
         updateUnread(&row)
@@ -124,7 +119,6 @@ enum SessionReducer {
             row.paneStatuses = row.paneStatuses.mapValues { pane in
                 var pane = pane
                 pane.current = false
-                pane.newestSeq = 0
                 pane.acknowledged = nil
                 return pane
             }

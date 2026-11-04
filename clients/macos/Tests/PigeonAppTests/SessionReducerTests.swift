@@ -121,7 +121,7 @@ final class SessionReducerTests: XCTestCase {
                               record: StatusRecord(seq: 5, record: ""))
     }
 
-    func testOlderReplayDoesNotReplaceThePanesNewerState() {
+    func testHostMayRevealAnOlderLiveRecordAfterClearingTheNewest() {
         var rows = [1: row(1, panes: [10])]
         _ = SessionReducer.apply(report(10, .working, seq: 4), to: &rows, host: "local", instance: "a",
                                  selected: nil, visiblePanes: [])
@@ -129,8 +129,8 @@ final class SessionReducerTests: XCTestCase {
                                  selected: nil, visiblePanes: [])
         _ = SessionReducer.apply(report(10, .working, seq: 4), to: &rows, host: "local", instance: "a",
                                  selected: nil, visiblePanes: [])
-        XCTAssertEqual(rows[1]?.status, .blocked)
-        XCTAssertEqual(rows[1]?.seq, 6)
+        XCTAssertEqual(rows[1]?.status, .working)
+        XCTAssertEqual(rows[1]?.seq, 4)
     }
 
     func testMergeKeepsWindowStateAndPinsTheGroup() {
