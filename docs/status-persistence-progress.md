@@ -17,9 +17,9 @@
   无 instance 的宿主每次握手使用不同的本地身份，不能跨重连安全去重，优先避免误确认。
 - 仅持久化事件身份，不把磁盘缓存当作新连接已经呈现的状态。重连保留屏幕和未读，但缓存报告不能触发 ack；
   等新连接实际收到对应状态后再判断。会话列表删除 pane/session 时同步清理对应身份。
-- 当前 pane 状态与未读集合独立。较低 seq 不覆盖仍然有效的较新报告，但其未读 done/error 仍会被保存；
-  当前报告已确认、明确 idle/清除或重新连接后，可接受宿主露出的较低 seq 记录。
-  已查看记录重播只重发 ack，不遮住当前 blocked/working 等记录。
+- 当前 pane 状态与未读集合独立。status seq 是记录身份，不是流修订号；收到的当前状态按宿主有序连接报告更新。
+  提示符/clear 删除较新 live 记录后，较低 seq 的未读终态或 live 记录可以重新成为当前状态。过期连接回调由 generation 过滤。
+  已查看身份重播仍可重发 ack，但不会再次计入未读。
 - 自动确认只确认可见 pane 的**当前**终态，不批量确认该 pane 所有历史未读；新 working/blocked、idle、较高 seq
   都不会静默消除旧的 done/error。聚合仍是各 pane 当前最新状态的 `blocked > error > done > working > idle`。
 - 确认要求连接握手完成、host/session 与实际布局匹配、应用和窗口获得关注、窗口可见、pane 已有快照、
@@ -51,7 +51,7 @@ git diff --check
 
 - `swift-logic.sh`：83 tests、0 failures，编译真实源文件与 XCTest，未使用 stub。覆盖 SessionReducer、身份存储、HostConnection、
   StatusVisibility、现有侧栏/选择逻辑；应用重启加载再重播用例先验证失败（未读 2，预期 1），修复后通过。
-  较旧 working 覆盖较新 blocked、已读高 seq 重播遮住低 seq blocked 也先复现失败再修复。
+  记录 seq 不作为消息时序；另有回归确认提示符清除 blocked 后，宿主合法下发较低 seq 的 done 会成为当前状态。
   新增接口的重连/实例验证先验证缺失接口的编译失败，再实现并通过。
 - 真实临时目录验证首次保存、覆盖保存、重新创建 store 加载；覆盖确认重发、低 seq 终态保留、同 pane 多记录、
   host/instance/pane/record 隔离、旧格式迁移、异常字段、pane 删除清理、后台和隐藏视图。
@@ -64,9 +64,8 @@ git diff --check
 - 当前宿主只发送最新未确认记录，且 ack 本身不立即推送下一条记录。客户端只能保存**收到过**的终态身份；
   未收到的历史记录、同 pane 多条 blocked 的枚举和展开仍需要核心多记录协议，未在本项实现。
   更高 seq 不代表低 seq 已确认；保存的旧未读可以在 pane/session 删除或 instance 变化前持续存在。
-- status 缺少独立修订号/清除代次。不能完全区分乱序旧帧与合法低 seq 回退；此实现保守保留未读，
-  仅在上述明确条件下改变当前报告。宿主清除新 live 记录直接露出旧 live 记录的情况仍可能维持较新显示，
-  需要重连重新取当前值或协议修订号才能消除歧义。
+- status 没有独立修订号/清除代次；客户端依赖同一连接的有序报告，不推测 seq 大小对应状态的新旧。
+  跨连接的旧事件通过 generation 拒绝，完整多记录同步仍需协议扩展。
 - 未读是收到过的未查看终态数量，当前状态仍是 pane 最新值；若旧终态被 working/idle 遮住，未读保留，
   但现有 needs-you/跳转规则未扩展为历史记录收件箱。Harp 单行 UI 保持原样。
 - 已查看身份在当前实例内保留，pane/session 删除或 instance 切换时清理；长寿命 pane 持续上报会使身份集合与 JSON 增长。
@@ -81,4 +80,5 @@ git diff --check
 
 主线程审查后加入连接级 `receivedScreen`：重连握手完成与新状态到达仍不能让旧屏幕授权自动确认，必须应用当前连接的快照/有效增量。
 `attach.since` 无缺帧时可以不回屏幕，状态路径会补取无 since 的快照。已读身份的重发 ack 不受此新记录可见性要求影响。
-增加重连清空屏幕确认凭据的测试，合并后 Foundation-only 84 tests 通过；完整 macOS 构建/测试以最终 CI 为准。
+重连同时清空待布局到达后才展示的 pending 快照，避免旧缓存被标成当前连接屏幕。
+增加重连确认凭据、pending 快照和合法低 seq 回退测试，合并后 Foundation-only 86 tests 通过；完整 macOS 构建/测试以最终 CI 为准。

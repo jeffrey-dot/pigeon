@@ -1,85 +1,45 @@
-# 优化执行记录
+# 优化实现与验收
 
-> 对应 [优化计划](optimization-plan.md)。本页记录实际完成切片和验证，不代表 S0–S7 已整体通过。
+核对日期：2026-11-04。对应 [优化计划](optimization-plan.md)；当前缺口统一维护在 [plan.md §11](plan.md#11-当前能力与已知缺口)。
+本页列当前已整合切片与可追溯验证，不表示 S0–S7 整体验收完成。
 
-## 2026-11-04：第一批实现
+## 已整合能力
 
-### 已落地切片
+| 范围 | 实现 |
+|---|---|
+| 基线/CI | GTK 构建、clippy、逻辑测试；独立 HOME/配置的宿主测试；环境记录、FFI import 与生成头文件检查 |
+| 宿主 TERM | pane 固定 xterm-256color/truecolor；linux/dumb/xterm-kitty/未设置四种外部环境回归 |
+| 客户端接口 | `api::delta_of` 与 C ABI 共用校验，FFI 只经 api；Linux 消费连续 delta，缺序/非法行重新 attach |
+| 文本 | 附加码点跨快照/delta/历史/接口保留，软换行复制；FFI 在全部校验后转移所有权；Linux 有界整形缓存 |
+| Linux 输入 | GtkIMMulticontext、候选窗定位、中文 commit；异步粘贴经宿主括号包装；复制焦点 pane 当前屏幕 |
+| 侧栏状态 | pane 最新状态聚合；事件身份按 host/instance/pane/seq/record 持久化；重播去重，ack 核验来源；新报告自动确认要求当前连接的新屏幕与前台可见性 |
+| 连接恢复 | generation 隔离旧回调；重连清空 pending 快照，缓存报告/旧屏幕不能确认新记录；status seq 不充当流修订号，接受宿主合法低 seq 回退 |
 
-- S0：加入 Ubuntu GTK 构建、clippy、纯逻辑测试作业；提供 `tools/bench/environment.py` 环境记录。
-  宿主测试通过独立 HOME/配置目录、显式 shell/TERM 隔离用户 rc；格式化 Linux 已有代码，最低 Rust 版本对齐 gtk4-rs 的 1.92。
-- S1：修复宿主继承外部 TERM。先用真实 PTY 回归复现 `TERM=linux` 误传，再固定 pane 为 xterm-256color/truecolor；
-  linux/dumb/xterm-kitty/未设置四种启动环境都覆盖。
-- S1：macOS 会话按各 pane 最新状态聚合，idle 不覆盖兄弟 blocked；ack 指向来源 pane；同运行期重播终态不增加未读。
-  前台可见的 pane 才自动确认，zoom 隐藏兄弟保留未读；⌘J 定位来源 pane 并解除 zoom；宿主 instance 改变时清除旧连接状态。
-- S1/S5：新增安全 `api::delta_of`，与 `pg_msg_delta` 共用验证；FFI 消息编解码也经 api。
-  非法行宽、重复/乱序行拒绝；Linux 已协商 delta，验证 seq/网格后原子应用，失败重新 attach，重复帧无害。
-  渲染仍整屏重建，尚未实现 GTK 脏行复用。
-- S2 首片：`ATTR_WRAP` / `PG_ATTR_WRAP`（64）贯通核心、快照、delta、历史和 C ABI；
-  macOS 复制合并自动折行、保留真实换行及折行处空格。旧宿主不发此位时保持原行为。
-  `TerminalCell` 抽出为纯数据，选择逻辑能脱离 AppKit 验证。完整字素/组合码点仍未解决。
+专题实现与测试见 [文本资源说明](text-followup.md)、[Linux 输入记录](linux-input-progress.md)、[状态持久化说明](status-persistence-progress.md)。
 
-### 验证
+## GitHub 验证记录
 
-环境：本机 Arch Linux x86_64、Rust 1.99.1、GTK 4.24.1。
-Swift 纯逻辑使用临时目录中的官方 Swift 6.1.2 Linux 工具链；没有替换系统工具链或用户配置。
+| 提交 | 运行 | 结果 |
+|---|---|---|
+| `7dd459a` | [41833307041](https://github.com/jeffrey-dot/pigeon/actions/runs/41833307041) | docs、header、Swift、Rust macOS/Ubuntu、GTK 全部通过 |
+| `c7c1ec0` | [41843748579](https://github.com/jeffrey-dot/pigeon/actions/runs/41843748579) | 全部通过，含组合字符与文本资源收尾 |
+| `7a4a71e` | [41845716261](https://github.com/jeffrey-dot/pigeon/actions/runs/41845716261) | 全部通过，含 Linux 输入整合 |
 
-- TERM 回归：修复前实际失败，修复后四种外部环境通过。
-- 状态聚合/错误 pane ack/重复未读：新增 Swift 测试先失败，修复后通过；补了隐藏 pane 和移除 pane 的测试。
-- 软换行：复制测试先失败，修复后通过；核心测试验证明确换行与自动折行、快照、delta、历史、C ABI。
-- `TERM=linux cargo test --locked --offline --quiet`：202 passed、2 ignored（含文档测试）。
-- `cargo test --no-default-features --locked --offline --quiet`：143 passed、1 ignored；证明 Rust 客户端无需 internals/host。
-- `cargo test -p pigeon-linux --locked --offline --quiet`：20 passed；GTK 客户端构建通过。
-- 核心默认/无默认 feature 与 GTK 的 clippy 均以 `-D warnings` 通过，`cargo fmt --all --check` 通过。
-- Linux 本机 release 宿主 1,780,192 bytes（约 1.70 MiB），低于 8 MiB；各 musl 架构仍需 release CI 实测。
-- VT golden 8/8；cbindgen **0.27.0** 重新生成并比对通过；FFI import 检查、文档链接、`git diff --check` 通过。
-- 尚未执行新的 GitHub Actions 作业；本地通过不代表远端 CI 已通过。
-- Swift 纯逻辑通过 `tools/checks/swift-logic.sh`：31 tests、0 failures；修改的 AppKit 文件做语法检查，未进行 macOS 类型检查、链接或真实窗口验收。
+当前状态持久化与复审修复的完整 macOS 构建/测试需核对最终提交 CI；不能以任一先前提交的绿色结果替代。
 
-### 未完成与下一步
+## 主线程本地验证
 
-1. macOS 完整 `swift build && swift test`、窗口焦点/遮挡/跨主机/zoom 的真实交互验收。
-2. 未读事件身份跨应用重启持久化、同 pane 多记录的完整同步；当前仍受宿主只发送最新未确认记录的协议限制。
-3. 完整字素、宽度与软换行占位处理（特别是宽字符被推到下一行时的前导空格）、搜索/跨历史选择。
-4. GTK IME/剪贴板/回看、渲染脏行与真实桌面验收；CI 配置不等于图形验收。
-5. 完整性能基线、16 pane/弱网/功耗测量和 S0 的属性/fuzz 覆盖。
+环境：Arch Linux x86_64、Rust 1.99.1、GTK 4.24.1；Swift Foundation-only 使用官方 Swift 6.1.2 Linux 工具链。
 
-本批未发布、未推送 PR、未改动用户 shell/tmux 配置。
+- 文本整合：Rust 257 passed / 2 ignored，GTK 24 passed / 1 ignored，Swift 32 passed；VT golden 8/8，fmt/clippy/头文件与链接检查通过。
+- Linux 输入整合：GTK 31 passed / 1 ignored；独立 Xvfb、D-Bus、fcitx5 拼音与临时真实宿主实测通过，覆盖中文单次提交、Ctrl/Alt、两种粘贴、复制、分屏、取消待完成粘贴和失焦恢复。
+- 状态复审：新增 pending 快照与合法低 seq 回退测试先失败，再修复；Foundation-only 86 tests 通过。AppDelegate 语法检查不等于 AppKit 类型检查或 GPU 呈现验收。
+- 验证脚本在 `tools/checks/`；本机测试不修改用户 shell/tmux 配置或操作用户已有终端。
 
-## 2026-11-04：推送前合并远端
+## 尚未完成的验收与能力
 
-fetch 后发现本地分支与 `origin/main` 分叉（本地既有 Linux 4 个提交，远端 53 个提交）。保留本地七个优化/文档提交后，合并远端 `edba2ed`。
-保留远端的 Harp 单行 UI、Kitty 键盘协议、编程连字、同步更新、socket 安全和渲染/宿主优化；本地 pane 状态、TERM、软换行、GTK 和 CI 切片叠加其上。
-`api::delta_of` 采用远端已公开的 `Delta` 返回类型，追加 modes，保留本地行验证；Linux 与新增测试同步适配。旧评估对应合并前本地版本，当前文档已纠正范围。
-
-合并后本机 Rust 全量：241 passed、2 ignored；后续 GitHub CI 结果追加于此。合并不是“覆盖远端”的强制推送。
-
-## 2026-11-04：GitHub CI 与组合字符切片
-
-- `main` @ `7dd459a` 已推送，[CI 41833307041](https://github.com/jeffrey-dot/pigeon/actions/runs/41833307041) 六项全部通过：docs、header、Swift、Rust macOS/Ubuntu、GTK。
-  macOS `swift build`、`swift test` 与纯逻辑测试均通过；真实窗口交互仍不等于已验。
-- 后续文本切片按 ADR-0012：保留引擎 cell 的附加码点，协议用可省略 text 表，C ABI 保持 PgCell 步长并扩展快照尾部。
-  两端渲染读取 cell 全文，macOS 复制保留分解码点；覆盖/新 delta 会清除旧附加内容。
-- 新增测试覆盖嵌入 API、快照/delta/历史往返、真实宿主重连、C ABI 所有权、非法坐标/重复项/控制字符/长度与 GTK 缓存替换。
-  这片尚不保证跨格 ZWJ emoji 的完整宽度/整簇形状；极长单格附加文本在导出边界限制为 4096 字节。
-
-## 2026-11-04：文本 worktree 审查与整合
-
-文本子任务的三个提交经主线程逐项检查后合入：制表符附加文本一致性、FFI 错误路径所有权、字体 cache key 与有界整形缓存。
-回归覆盖和资源限制见 [文本资源说明](text-followup.md)。GTK CI 显式安装并选择 DejaVu Sans Mono，避免字体环境影响整形用例。
-整体基线仍需合并后的 CI 验证；其它两个 worktree 的输入与状态任务独立交付，不提前标为完成。
-
-## 2026-11-04：Linux 输入 worktree 审查与整合
-
-主线程审查 `4e7221c` 的 IME 消费/commit 去重、焦点变化和异步粘贴取消、复制范围；合入后将桌面验收脚本放到 `tools/checks/linux-input-check.py`。
-合并文本缓存分支后，GTK 31 passed、1 ignored，fmt/clippy/build 通过。主线程复跑独立 Xvfb/fcitx5 桌面测试，中文单次提交、Ctrl/Alt、两种粘贴、复制、分屏焦点及失焦取消全部通过；没有 GTK critical/Rust panic。
-平台范围与复跑方法见 [Linux 输入记录](linux-input-progress.md)。拖选/历史复制、真实 Wayland/IBus/日文/混合 DPI 尚未完成。
-
-文本批次 `c7c1ec0` 的 [CI 41843748579](https://github.com/jeffrey-dot/pigeon/actions/runs/41843748579) 全部通过。Linux 输入批次需在推送后核对对应 SHA 的 CI。
-
-## 2026-11-04：状态持久化 worktree 审查与整合
-
-状态 worktree 的纯逻辑和 AppDelegate 接线经主线程检查后合入。新增的跨重启事件身份、ack 来源/连接 generation、保守保留旧未读、首次原子写盘及格式迁移见 [状态持久化说明](status-persistence-progress.md)。
-主线程补上重连时旧屏幕不能确认新报告的边界，并复跑 Foundation-only 84 tests（全部通过）和 AppDelegate 语法检查。
-身份集合增长、多进程写盘、宿主多记录同步/修订号和真实 AppKit 呈现仍为明确缺口。
-Linux 输入提交 `7a4a71e` 的 [CI 41845716261](https://github.com/jeffrey-dot/pigeon/actions/runs/41845716261) 已全部通过。
+1. 状态修复的最终 CI；真实 macOS 窗口激活、遮挡、回看、zoom、跨主机与 GPU 呈现/SSH 恢复验收。
+2. 宿主多记录枚举/同步、身份集合有界存储、多进程同时写 JSON 的一致性；当前客户端仅知道已收到的记录。
+3. 密集整屏文本的 8 MiB 上限处理、历史转换临时内存、引擎内部附加码点预算、跨 cell ZWJ 字素宽度及宽字符折行占位。
+4. Linux 回看/拖选/侧栏/SSH 管理与渲染脏行；真实 Wayland、IBus、日文 IME、非美式键盘和混合 DPI 验收。
+5. 性能、弱网、功耗、长时间负载、完整 VT 属性/fuzz 覆盖及签名发布。
