@@ -41,6 +41,7 @@
 - 宿主完整状态接口：整合核心 278 passed / 2 ignored；借用式 wire 校验调整后状态专题 7/7、C ABI 专题 3/3 和默认/无默认 feature clippy 通过。无默认 feature 整合回归 187 passed / 1 ignored，头文件 diff 与 GTK clippy 通过。两轴复审已结束：规范轴的缺口表同步与借用校验建议已落实，行为轴无新增可确认缺陷；macOS 完整集合已接入；主线程复验 Foundation-only 98 tests 和 Swift ↔ C ABI 2 tests，含占位选择清空确认目标的回归。完整 AppKit 构建/GUI 尚需验证。
 - macOS 完整集合客户端复审：规范轴仅发现 UI 文档未区分 legacy/完整集合，已修正；行为轴无可确认新增缺陷。Foundation-only 98 tests、Swift ↔ C ABI 2 tests 通过，真实面板交互未验。
 - CI 默认使用明确的 `macos-15-intel`，手动 workflow_dispatch 可选择 `macos-latest` 运行 Apple Silicon 验证。切换原因是 latest 作业连续没有分配 runner 并被取消，不属于代码测试失败；两个架构的结果分别记录。
+- Intel macOS CI `0f1be1a` 的 Swift 构建通过，测试复现侧栏按钮被空 toolbar 遮挡（既有 hit-test 用例）。窗口使用系统内容区边界安置按钮，修复待新提交 CI 验证；状态集合相关测试未报失败。
 - 验证脚本在 `tools/checks/`；本机测试不修改用户 shell/tmux 配置或操作用户已有终端。
 
 ## 尚未完成的验收与能力

@@ -30,11 +30,6 @@ extension AppDelegate {
         window.isOpaque = false
         window.backgroundColor = .clear
         window.contentMinSize = NSSize(width: 640, height: 400)
-        // Native unified chrome gives the traffic lights a full-height header hit area.
-        let toolbar = NSToolbar(identifier: "pigeon.window")
-        toolbar.showsBaselineSeparator = false
-        window.toolbar = toolbar
-        window.toolbarStyle = .unified
 
         sidebar = SidebarViewController()
         sidebar.onSelect = { [weak self] id in self?.select(id) }
@@ -140,7 +135,7 @@ extension AppDelegate {
         // `NSSplitView` sizes panes by frames, so the default width needs a real position;
         // the low-priority width constraint alone only nudges autolayout.
         splitView.setPosition(SidebarMetrics.width, ofDividerAt: 0)
-        alignSidebarHeaderWithTrafficLights()
+        alignSidebarHeaderControls()
         if ProcessInfo.processInfo.environment["PIGEON_DEBUG"] != nil {
             FileHandle.standardError.write(Data(
                 "pigeon: sidebar width=\(Int(sidebar.view.frame.width)) window=\(Int(window.frame.width))\n".utf8
@@ -149,12 +144,14 @@ extension AppDelegate {
         refreshSidebar()
     }
 
-    /// harp puts the sidebar's chips on the traffic lights' row; the native buttons live in
-    /// the titlebar overlay, so their center is the only reliable reference.
-    private func alignSidebarHeaderWithTrafficLights() {
+    /// The native titlebar owns hit testing above contentLayoutRect on macOS 15.
+    /// Keep our buttons inside the unobstructed content, even with fullSizeContentView.
+    private func alignSidebarHeaderControls() {
         guard let zoom = window.standardWindowButton(.zoomButton) else { return }
         let center = zoom.convert(NSPoint(x: zoom.bounds.midX, y: zoom.bounds.midY), to: nil)
-        sidebar.alignHeaderControls(centerFromTop: window.frame.height - center.y)
+        let topInset = max(0, window.frame.height - window.contentLayoutRect.maxY)
+        sidebar.alignHeaderControls(centerFromTop: max(
+            window.frame.height - center.y, topInset + SidebarMetrics.headerButtonSize / 2))
     }
 
     func buildMenu() {

@@ -14,6 +14,7 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
 
     private let table = NSTableView()
     private var headerControlsCenter: NSLayoutConstraint!
+    private var listTop: NSLayoutConstraint!
     private let scroll = NSScrollView()
     private var rows: [Row] = []
     private var ticker: Timer?
@@ -93,6 +94,7 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
         // them by the app once the window exists (`alignHeaderControls(centerFromTop:)`).
         headerControlsCenter = buttons.centerYAnchor.constraint(
             equalTo: root.topAnchor, constant: SidebarMetrics.headerHeight / 2)
+        listTop = scroll.topAnchor.constraint(equalTo: root.topAnchor, constant: SidebarMetrics.headerHeight)
         NSLayoutConstraint.activate([
             buttons.heightAnchor.constraint(equalToConstant: SidebarMetrics.headerButtonSize),
             headerControlsCenter,
@@ -100,8 +102,7 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
                 equalTo: root.trailingAnchor, constant: -SidebarMetrics.headerPadRight),
             // The header is a fixed 56pt band (harp's HEADER_HEIGHT); the chips sit on the
             // traffic-light row inside it, and the list always starts below the band.
-            scroll.topAnchor.constraint(
-                equalTo: root.topAnchor, constant: SidebarMetrics.headerHeight),
+            listTop,
             scroll.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             scroll.bottomAnchor.constraint(equalTo: root.bottomAnchor),
@@ -133,6 +134,7 @@ final class SidebarViewController: NSViewController, NSTableViewDataSource, NSTa
     /// Lines the header chips up with the traffic lights instead of the 56pt header's middle.
     func alignHeaderControls(centerFromTop: CGFloat) {
         headerControlsCenter?.constant = centerFromTop
+        listTop?.constant = max(SidebarMetrics.headerHeight, centerFromTop + SidebarMetrics.headerButtonSize / 2)
     }
 
     @objc private func toggleSidebarClicked() { onToggleSidebar?() }
