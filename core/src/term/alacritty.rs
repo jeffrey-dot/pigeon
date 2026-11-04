@@ -159,15 +159,12 @@ impl AlacrittyTerm {
             .map(|col| {
                 let cell = &grid[Point::new(line, Column(col))];
                 let (attrs, width) = attributes(cell.flags);
+                let base = if cell.c < ' ' { ' ' } else { cell.c };
                 Cell {
                     // alacritty stores a tab in the first blank cell of a tab stop (its own
                     // renderer reads that as "blank"). A client would try to draw the tab
                     // glyph, so the boundary hands out a plain space instead.
-                    codepoint: if cell.c < ' ' {
-                        ' ' as u32
-                    } else {
-                        cell.c as u32
-                    },
+                    codepoint: base as u32,
                     fg: color_to_u32(cell.fg, colors),
                     bg: color_to_u32(cell.bg, colors),
                     attrs,
@@ -176,9 +173,9 @@ impl AlacrittyTerm {
                     link: 0,
                     width,
                     extra_text: cell.zerowidth().filter(|marks| !marks.is_empty()).map(|marks| {
-                        let mut text = cell.c.to_string();
+                        let mut text = base.to_string();
                         for mark in marks {
-                            if text.len() + mark.len_utf8() > 4096 { break; }
+                            if text.len() + mark.len_utf8() > crate::proto::MAX_CELL_TEXT_BYTES { break; }
                             text.push(*mark);
                         }
                         Arc::from(text)

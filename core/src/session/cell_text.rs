@@ -19,7 +19,8 @@ fn set(cell: &mut Cell, text: &str) -> Option<()> {
         || text.chars().any(char::is_control)
         || text.chars().next().map(u32::from) != Some(cell.codepoint)
     { return None; }
-    cell.extra_text = Some(Arc::from(text));
+    // A redundant wire entry must not turn the single-codepoint fast path into shaping.
+    cell.extra_text = (text.chars().nth(1).is_some()).then(|| Arc::from(text));
     Some(())
 }
 

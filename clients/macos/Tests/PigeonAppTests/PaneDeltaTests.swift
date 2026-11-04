@@ -51,19 +51,53 @@ final class PaneDeltaTests: XCTestCase {
         return view
     }
 
-    private func apply(_ text: String, y: UInt16, to view: PaneView, alt: UInt8 = 2) -> Bool {
+    private func apply(_ text: String, y: UInt16, to view: PaneView, alt: UInt8 = 2,
+                       cellText: String? = nil) -> Bool {
         var cells = text.map(cell)
+        let bytes = Array((cellText ?? "").utf8)
         return cells.withUnsafeMutableBufferPointer { buffer in
             var row = PgDeltaRow(
                 size: UInt32(MemoryLayout<PgDeltaRow>.size), y: y, cols: UInt16(text.count),
                 cells: UnsafePointer(buffer.baseAddress!))
             return withUnsafePointer(to: &row) { rowPointer in
-                var delta = PgDelta(
-                    size: UInt32(MemoryLayout<PgDelta>.size), pane_id: 1, seq: 1, row_count: 1,
-                    rows: rowPointer, has_cursor: 1, cursor: cursor(x: 2, y: y), alt_screen: alt, text_count: 0, text: nil)
-                return view.apply(delta: &delta)
+                bytes.withUnsafeBufferPointer { textBuffer in
+                    var entry = PgCellText(size: UInt32(MemoryLayout<PgCellText>.size),
+                        row: Int32(y), col: 0, text: PgStr(size: UInt32(MemoryLayout<PgStr>.size),
+                        ptr: textBuffer.baseAddress, len: textBuffer.count))
+                    return withUnsafePointer(to: &entry) { entryPointer in
+                        var delta = PgDelta(
+                            size: UInt32(MemoryLayout<PgDelta>.size), pane_id: 1, seq: 1, row_count: 1,
+                            rows: rowPointer, has_cursor: 1, cursor: cursor(x: 2, y: y), alt_screen: alt,
+                            text_count: cellText == nil ? 0 : 1, text: cellText == nil ? nil : entryPointer)
+                        return view.apply(delta: &delta)
+                    }
+                }
             }
         }
+    }
+
+    func testDeltaCopiesTextAndRowReplacementClearsOnlyTheReplacedRow() {
+        let view = pane()
+        XCTAssertTrue(apply("abc", y: 0, to: view, cellText: "a\u{301}"))
+        // The helper's borrowed text storage is already gone.
+        XCTAssertEqual(Array(view.cells[0].text.unicodeScalars).map(\.value), [0x61, 0x301])
+        XCTAssertTrue(apply("def", y: 1, to: view, cellText: "d\u{300}"))
+        XCTAssertTrue(apply("xyz", y: 0, to: view))
+        XCTAssertNil(view.cells[0].extraText)
+        XCTAssertEqual(view.cells[0].text, "x")
+        XCTAssertEqual(Array(view.cells[3].text.unicodeScalars).map(\.value), [0x64, 0x300])
+    }
+
+    func testOldSnapshotWithoutTextClearsCombiningContent() {
+        let view = pane()
+        XCTAssertTrue(apply("abc", y: 0, to: view, cellText: "a\u{301}"))
+        let core = pg_core_new(nil)!
+        defer { pg_core_free(core) }
+        let id = pg_pane_new(core, nil)
+        let snapshot = pg_pane_snapshot(core, id)!
+        view.apply(snapshot: snapshot)
+        pg_snapshot_free(snapshot)
+        XCTAssertTrue(view.cells.allSatisfy { $0.extraText == nil })
     }
 
     private func text(_ view: PaneView) -> String {
