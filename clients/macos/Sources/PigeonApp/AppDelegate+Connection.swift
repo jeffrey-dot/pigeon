@@ -107,25 +107,34 @@ extension AppDelegate {
     /// Points the window at a live client: the local socket and a remote bridge look the same
     /// from here on (that is the point of mode A/B).
     private func wire(_ client: HostClient, host: String) {
+        clients[host]?.close()
+        connections[host, default: HostConnection()].reconnected(now: Date())
+        if var rows = connections[host]?.rows {
+            SessionReducer.awaitReports(in: &rows)
+            connections[host]?.rows = rows
+        }
+        let generation = connections[host]?.generation
         // Batch delivery keeps a burst of deltas in one run-loop turn.
-        client.onMessages = { [weak self] messages in
+        client.onMessages = { [weak self, weak client] messages in
             DispatchQueue.main.async {
                 defer { messages.forEach(Wire.free) }
-                guard let self else { return }
+                guard let self, let client, let generation,
+                      self.connections[host]?.accepts(generation: generation) == true,
+                      self.clients[host] === client else { return }
                 for message in messages { self.handle(message, host: host) }
             }
         }
-        client.onClose = { [weak self] in
+        client.onClose = { [weak self, weak client] in
             DispatchQueue.main.async {
-                self?.hostLost(host: host, "The connection was closed.")
+                guard let self, let client, let generation,
+                      self.connections[host]?.accepts(generation: generation) == true,
+                      self.clients[host] === client else { return }
+                self.hostLost(host: host, "The connection was closed.")
             }
         }
         clients[host] = client
         startHeartbeat()
         recovering[host] = 0
-        // A reconnect keeps the screens on display; every pane drawn so far re-attaches,
-        // asking only for what it missed.
-        connections[host, default: HostConnection()].reconnected(now: Date())
         if host == activeHost {
             hostStatus.hide()
         }
@@ -176,6 +185,7 @@ extension AppDelegate {
     /// One host dropped: retry *that* host on its own budget, without touching the others.
     func hostLost(host: String, _ reason: String) {
         clients[host] = nil
+        connections[host]?.disconnected()
         connections[host]?.heartbeat = nil
         if host == "local", stoppedByUser {
             stoppedByUser = false

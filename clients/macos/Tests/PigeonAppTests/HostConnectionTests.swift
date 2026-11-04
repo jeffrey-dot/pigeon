@@ -28,4 +28,37 @@ final class HostConnectionTests: XCTestCase {
         XCTAssertNil(connection.stale)
         XCTAssertTrue(connection.rows.isEmpty, "pane ids and status seq belong to the old host")
     }
+
+    func testReconnectCannotAcknowledgeAStaleScreenBeforeTheHandshake() {
+        var connection = HostConnection<Int>()
+        connection.instanceChanged(to: "a")
+        let ack = StatusAcknowledgement(host: "devbox", instance: "a", pane: 1,
+                                        record: StatusRecord(seq: 1, record: "task"))
+        XCTAssertTrue(connection.accepts(ack, host: "devbox"))
+        connection.reconnected(now: now)
+        XCTAssertFalse(connection.accepts(ack, host: "devbox"))
+        connection.instanceChanged(to: "b")
+        XCTAssertFalse(connection.accepts(ack, host: "devbox"))
+        XCTAssertFalse(connection.accepts(ack, host: "local"))
+    }
+
+    func testCallbacksFromReplacedConnectionsAreIgnored() {
+        var connection = HostConnection<Int>()
+        connection.reconnected(now: now)
+        let original = connection.generation
+        connection.reconnected(now: now)
+        XCTAssertFalse(connection.accepts(generation: original))
+        XCTAssertTrue(connection.accepts(generation: connection.generation))
+    }
+
+    func testHostsWithoutAnInstanceCannotReuseIdentityAcrossConnections() {
+        var connection = HostConnection<Int>()
+        connection.instanceChanged(to: "")
+        let first = connection.instance
+        connection.rows = [1: 42]
+        connection.reconnected(now: now)
+        connection.instanceChanged(to: "")
+        XCTAssertNotEqual(connection.instance, first)
+        XCTAssertTrue(connection.rows.isEmpty)
+    }
 }

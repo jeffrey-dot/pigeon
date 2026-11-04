@@ -42,6 +42,7 @@ extension AppDelegate {
         for pane in row.panes { sendClosePane(pane) }
         rows.removeValue(forKey: id)
         state.unread.removeValue(forKey: unreadKey(host: host, session: session))
+        if let instance = connection.instance { state.retain(rows, host: host, instance: instance) }
         store.save(state)
         if selectedSession == id { selectedSession = nil }
         refreshSidebar()
@@ -86,11 +87,8 @@ extension AppDelegate {
     }
 
     private func markReadOnActiveHost(_ session: Int) {
-        let host = activeHost
-        guard let row = rows[session] else { return }
-        let effects = SessionReducer.markSeen(Set(row.panes), in: session, rows: &rows, host: host)
-        applyStatusEffects(effects)
-        refreshSidebar()
+        guard session == selectedSession, !visibleStatusPanes.isEmpty else { return }
+        markVisibleStatusesSeen()
     }
 
     func rename(_ id: Int, _ name: String) {

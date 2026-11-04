@@ -8,8 +8,10 @@ struct SidebarState: Codable, Equatable {
     var order: [String] = []
     /// Session id (as text, JSON keys are strings) → user title.
     var renamed: [String: String] = [:]
-    /// Session id → unread count, so a reopen keeps the dots.
+    /// Legacy counts have no instance/pane identity. Retain them for migration recovery,
+    /// but never project them onto a live session or use them to acknowledge a record.
     var unread: [String: Int] = [:]
+    var statusHosts: [String: HostStatusState] = [:]
     /// Project group key → user-visible name.
     var renamedGroups: [String: String] = [:]
 
@@ -18,7 +20,7 @@ struct SidebarState: Codable, Equatable {
     init() {}
 
     private enum CodingKeys: String, CodingKey {
-        case collapsed, order, renamed, unread, renamedGroups
+        case collapsed, order, renamed, unread, renamedGroups, statusHosts
     }
 
     /// Tolerant: a missing key keeps its default, and an `order` older builds wrote (packed
@@ -29,6 +31,7 @@ struct SidebarState: Codable, Equatable {
         collapsed = (try? container.decodeIfPresent([String].self, forKey: .collapsed)) ?? []
         renamed = (try? container.decodeIfPresent([String: String].self, forKey: .renamed)) ?? [:]
         unread = (try? container.decodeIfPresent([String: Int].self, forKey: .unread)) ?? [:]
+        statusHosts = (try? container.decodeIfPresent([String: HostStatusState].self, forKey: .statusHosts)) ?? [:]
         renamedGroups = (try? container.decodeIfPresent([String: String].self, forKey: .renamedGroups)) ?? [:]
         if let keys = try? container.decodeIfPresent([String].self, forKey: .order) {
             order = keys
@@ -37,6 +40,27 @@ struct SidebarState: Codable, Equatable {
                 id / 100_000 == 1 && id % 100_000 > 0 ? String(id % 100_000) : nil
             }
         }
+    }
+
+    mutating func connect(host: String, instance: String) {
+        guard statusHosts[host]?.instance != instance else { return }
+        statusHosts[host] = HostStatusState(instance: instance)
+    }
+
+    func receipts(for ref: SessionRef, instance: String) -> [UInt32: PaneStatus.Receipt] {
+        guard statusHosts[ref.host]?.instance == instance else { return [:] }
+        return statusHosts[ref.host]?.sessions[String(ref.session)] ?? [:]
+    }
+
+    mutating func save(_ receipts: [UInt32: PaneStatus.Receipt], for ref: SessionRef, instance: String) {
+        guard statusHosts[ref.host]?.instance == instance else { return }
+        statusHosts[ref.host]?.sessions[String(ref.session)] = receipts
+    }
+
+    mutating func retain(_ rows: [Int: SessionRow], host: String, instance: String) {
+        guard statusHosts[host]?.instance == instance else { return }
+        statusHosts[host]?.sessions = rows.mapValues { $0.paneStatuses.mapValues(\.receipt) }
+            .reduce(into: [:]) { $0[String($1.key)] = $1.value }
     }
 }
 
@@ -71,8 +95,6 @@ final class SidebarStore {
         guard let data = try? JSONEncoder().encode(state) else { return }
         let directory = url.deletingLastPathComponent()
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let temporary = directory.appendingPathComponent(".sidebar-\(UUID().uuidString).json")
-        guard (try? data.write(to: temporary, options: .atomic)) != nil else { return }
-        _ = try? FileManager.default.replaceItemAt(url, withItemAt: temporary)
+        try? data.write(to: url, options: .atomic)
     }
 }

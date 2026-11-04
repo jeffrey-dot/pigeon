@@ -6,7 +6,7 @@ root=$(CDPATH= cd -- "$here/../.." && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/Sources/PigeonApp" "$work/Tests/PigeonAppTests"
-for file in AgentInfo Grouping SessionRef SessionRow SessionReducer SidebarModel PaneStatus; do
+for file in AgentInfo Grouping GitRoot SessionRef SessionRow SessionReducer SidebarModel PaneStatus SidebarStore StatusRecord StatusAcknowledgement HostStatusState StatusVisibility; do
     cp "$root/clients/macos/Sources/PigeonApp/Sidebar/$file.swift" "$work/Sources/PigeonApp/"
 done
 cp "$root/clients/macos/Sources/PigeonApp/Net/Host/HostConnection.swift" "$work/Sources/PigeonApp/"
@@ -15,7 +15,7 @@ for file in TerminalCell TerminalSelection; do
     cp "$root/clients/macos/Sources/PigeonApp/Terminal/$file.swift" "$work/Sources/PigeonApp/"
 done
 cp "$root/clients/macos/Sources/PigeonApp/Terminal/Render/CellAttrs.swift" "$work/Sources/PigeonApp/"
-for file in SessionReducerTests SessionRefTests AgentRowTests HostConnectionTests SelectionTests; do
+for file in SessionReducerTests SessionRefTests AgentRowTests HostConnectionTests SelectionTests SidebarTests StatusPersistenceTests StatusVisibilityTests; do
     cp "$root/clients/macos/Tests/PigeonAppTests/$file.swift" "$work/Tests/PigeonAppTests/"
 done
 cat > "$work/Package.swift" <<'SWIFT'

@@ -13,14 +13,21 @@ extension AppDelegate {
     }
 
     private func handleActive(_ message: OpaquePointer, visible: Bool) {
-        switch Wire.type(message) {
+        let type = Wire.type(message)
+        guard connection.ready || type == PG_MSG_HELLO_ACK || type == PG_MSG_HELLO_ERROR else { return }
+        switch type {
         case PG_MSG_HELLO_ACK:
-            let instance = Wire.string(message, "instance")
-            if connection.instance != nil, connection.instance != instance {
-                for row in rows.values { state.unread[SessionRef(host: activeHost, session: row.id).key] = nil }
+            let previousInstance = connection.instance
+            connection.instanceChanged(to: Wire.string(message, "instance"))
+            if let instance = connection.instance {
+                state.connect(host: activeHost, instance: instance)
                 store.save(state)
             }
-            connection.instanceChanged(to: instance)
+            if visible, previousInstance != connection.instance {
+                container.apply(.empty)
+                displayedHost = nil
+                displayedSession = nil
+            }
             connection.statusAll = Wire.contains(message, strings: "features", "status_all")
             // Tell the host what we are drawing with, so programs inside the panes can pick
             // their light or dark theme (`OSC 4/10/11`).
@@ -164,12 +171,15 @@ extension AppDelegate {
                 program: program.isEmpty ? Wire.string(info.active_title) : program))
         }
         let host = activeHost
-        let saved = state.unread
+        guard let instance = connection.instance else { return }
+        let saved = state
         let updated = SessionReducer.merge(
-            listed, into: rows, host: host, now: Date(),
-            unread: { saved[$0.key] ?? 0 },
+            listed, into: rows, host: host, instance: instance, now: Date(),
+            receipts: { saved.receipts(for: $0, instance: instance) },
             gitRoot: { GitRoot.find(cwd: $0, onThisMac: host == "local") })
         rows = updated
+        state.retain(rows, host: host, instance: instance)
+        if state != saved { store.save(state) }
         if ProcessInfo.processInfo.environment["PIGEON_DEBUG"] != nil {
             let apps = rows.values.map { "\($0.id):\($0.app)" }.sorted().joined(separator: " ")
             FileHandle.standardError.write(Data("pigeon: sessions apps=\(apps)\n".utf8))
@@ -206,21 +216,6 @@ extension AppDelegate {
         }
         refreshSidebar()
         markVisibleStatusesSeen()
-    }
-
-    private func applyStatus(_ message: OpaquePointer) {
-        let report = SessionReducer.Report(
-            pane: Wire.u32(message, "pane_id"),
-            status: SidebarModel.status(from: Wire.string(message, "state")),
-            seq: Wire.u32(message, "seq"),
-            agent: AgentInfo(message: message))
-        // Only the session on screen counts as seen: a background host's own selection is
-        // not something the user is looking at.
-        let effects = SessionReducer.apply(
-            report, to: &rows, host: activeHost, selected: selectedSession,
-            onScreen: swappedFrom == nil, visiblePanes: visibleStatusPanes)
-        applyStatusEffects(effects)
-        refreshSidebar()
     }
 
     private func flushPendingSnapshots() {

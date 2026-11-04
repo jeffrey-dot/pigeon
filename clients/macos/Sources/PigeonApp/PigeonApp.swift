@@ -108,6 +108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// then points at the background one). Sidebar redraws wait until it is restored.
     var swappedFrom: String?
     var sidebarDirty = false
+    var statusReadScheduled = false
     /// "Jeffrey's MacBook Air"; looked up once because the lookup can touch the resolver.
     lazy var localMachineName: String = Host.current().localizedName ?? ""
 

@@ -21,6 +21,9 @@ struct HostConnection<Row> {
     var stale: Set<UInt32>?
     /// `hello_ack.instance`; `since` is only meaningful to that same process.
     var instance: String?
+    /// Identifies callbacks already queued on the main thread by a replaced transport.
+    private(set) var generation = UUID()
+    private(set) var ready = false
     /// The host sends every pane's `status` without an attach (`status_all`, protocol §5).
     var statusAll = false
     var heartbeat: Heartbeat?
@@ -28,6 +31,8 @@ struct HostConnection<Row> {
     /// A new connection to the same host: screens stay on display and become stale (they
     /// re-attach with `since`), nothing is in flight any more, and the liveness clock restarts.
     mutating func reconnected(now: Date) {
+        generation = UUID()
+        ready = false
         stale = seen
         requested = []
         heartbeat = Heartbeat(now: now)
@@ -36,6 +41,8 @@ struct HostConnection<Row> {
     /// `hello_ack` named a different host process: its `seq` numbers start over, so nothing
     /// drawn so far can be resumed.
     mutating func instanceChanged(to value: String) {
+        // Older hosts without an instance cannot safely reuse durable event identities.
+        let value = value.isEmpty ? UUID().uuidString : value
         if instance != value {
             stale = nil
             seq = [:]
@@ -47,5 +54,14 @@ struct HostConnection<Row> {
             selectedSession = nil
         }
         instance = value
+        ready = true
     }
+
+    func accepts(generation: UUID) -> Bool { self.generation == generation }
+
+    func accepts(_ acknowledgement: StatusAcknowledgement, host: String) -> Bool {
+        ready && acknowledgement.matches(host: host, instance: instance)
+    }
+
+    mutating func disconnected() { ready = false }
 }

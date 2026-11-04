@@ -27,4 +27,6 @@ struct SessionRow: Equatable {
     var paneStatuses: [UInt32: PaneStatus] = [:]
     /// The pane contributing the displayed state, separate from keyboard focus.
     var statusPane: UInt32?
+    /// Session and pane numbers may be reused by a different host process.
+    var instance: String = ""
 }

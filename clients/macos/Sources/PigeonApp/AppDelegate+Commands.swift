@@ -22,7 +22,7 @@ extension AppDelegate {
         sessionRefs.ref(for: id).map { ($0.host, $0.session) }
     }
 
-    /// Unread counts are persisted per host; local keeps the old key so existing state works.
+    /// Legacy keys also identify user-assigned session names.
     func unreadKey(host: String, session: Int) -> String {
         SessionRef(host: host, session: session).key
     }
@@ -149,14 +149,6 @@ extension AppDelegate {
             Wire.set(message, u32: "id", requestID())
             Wire.set(message, u32: "pane_id", pane)
         }, type: PG_MSG_CLOSE_PANE)
-    }
-
-    func sendAck(_ pane: UInt32, _ seq: UInt32) {
-        guard seq > 0 else { return }
-        send({ message in
-            Wire.set(message, u32: "pane_id", pane)
-            Wire.set(message, u32: "seq", seq)
-        }, type: PG_MSG_ACK_STATUS)
     }
 
     func split(_ axis: PgAxis) {

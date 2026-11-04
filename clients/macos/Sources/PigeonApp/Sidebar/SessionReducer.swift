@@ -22,86 +22,114 @@ enum SessionReducer {
         var status: SidebarSession.Status?
         var seq: UInt32
         var agent: AgentInfo
+        var record: String = ""
     }
 
     enum Effect: Equatable {
-        /// Tell the host the user has seen this record (`ack_status`).
-        case ack(pane: UInt32, seq: UInt32)
-        /// The persisted unread count for this session changed.
-        case saveUnread(SessionRef, Int)
+        case ack(StatusAcknowledgement)
+        case saveStatus(SessionRef, instance: String, receipts: [UInt32: PaneStatus.Receipt])
     }
 
-    /// Applies a `status`. `onScreen`: the user is looking at this host's selected session.
-    /// Only `done`/`error` count as unread or get acked (`docs/ui.md` §5); `working` and
-    /// `blocked` are the agent's live state and stay until the host clears them.
+    /// Visibility is explicit: selection alone is not evidence of a displayed pane.
     static func apply(
-        _ report: Report, to rows: inout [Int: SessionRow], host: String, selected: Int?, onScreen: Bool,
-        visiblePanes: Set<UInt32>? = nil
+        _ report: Report, to rows: inout [Int: SessionRow], host: String, instance: String,
+        selected: Int?, visiblePanes: Set<UInt32>
     ) -> [Effect] {
-        guard let id = rows.first(where: { $0.value.panes.contains(report.pane) })?.key,
-              var row = rows[id]
+        guard let status = report.status,
+              let id = rows.first(where: { $0.value.panes.contains(report.pane) })?.key,
+              var row = rows[id], row.host == host, row.instance == instance
         else { return [] }
-        guard report.status != nil else { return [] }
-        var pane = row.paneStatuses[report.pane] ?? PaneStatus(
-            status: row.panes.count == 1 ? row.status : .idle, seq: 0, agent: .none)
-        if pane.seq != report.seq { pane.acknowledgedSeq = nil }
-        if let status = report.status { pane.status = status }
-        pane.seq = report.seq
-        pane.agent = report.agent
-        let finished = report.status == .done || report.status == .error
-        // A replay can mean the last ack never reached the host. Re-ack a displayed
-        // report, but markSeen still suppresses repeats caused only by UI refreshes.
-        if finished { pane.acknowledgedSeq = nil }
-        let seen = onScreen && selected == id && (visiblePanes?.contains(report.pane) ?? true)
-        var effects: [Effect] = []
-        if finished, !seen, report.seq > pane.newestFinished {
-            pane.unread.insert(report.seq)
-            row.unread += 1
-            effects.append(.saveUnread(SessionRef(host: host, session: id), row.unread))
+        var pane = row.paneStatuses[report.pane] ?? PaneStatus(status: .idle, seq: 0, agent: .none)
+        let before = pane.receipt
+        let identity = StatusRecord(seq: report.seq, record: report.record)
+        let finished = status == .done || status == .error
+        if finished, report.seq > 0, !pane.receipt.seen.contains(identity) {
+            pane.receipt.unread.insert(identity)
         }
-        if finished { pane.newestFinished = max(pane.newestFinished, report.seq) }
+        // The host may expose a lower seq after the displayed record is acked/cleared.
+        // While a newer report remains current, old arrivals cannot roll it back, but
+        // every unseen terminal identity above is retained independently of this choice.
+        let alreadySeen = pane.receipt.seen.contains(identity)
+        let replace = !alreadySeen && (!pane.current || report.seq == 0 || report.seq >= pane.newestSeq
+            || pane.seq == 0 || pane.acknowledged != nil)
+        if replace {
+            pane.status = status
+            pane.seq = report.seq
+            pane.record = report.record
+            pane.agent = report.agent
+            pane.acknowledged = nil
+            pane.current = true
+        }
+        pane.newestSeq = max(pane.newestSeq, report.seq)
         row.paneStatuses[report.pane] = pane
         aggregate(&row)
-        if finished, seen {
-            effects += acknowledge(panes: [report.pane], row: &row, host: host)
+        var effects: [Effect] = []
+        if finished, report.seq > 0, alreadySeen {
+            // This exact record was already viewed, even if the current pane is hidden.
+            effects = [.ack(StatusAcknowledgement(host: host, instance: instance,
+                                                  pane: report.pane, record: identity))]
+        } else if replace, selected == id, visiblePanes.contains(report.pane) {
+            effects = acknowledge(panes: [report.pane], row: &row)
         }
+        updateUnread(&row)
+        if before != row.paneStatuses[report.pane]?.receipt { effects.append(saveEffect(row)) }
         rows[id] = row
         return effects
     }
 
-    /// Visible panes are supplied by the view; hidden siblings retain their unread events.
+    /// Only each visible pane's current terminal report has been presented. Older pending
+    /// identities stay unread until the host presents them again; a newer seq is not an ack.
     static func markSeen(
-        _ panes: Set<UInt32>, in session: Int, rows: inout [Int: SessionRow], host: String
+        _ panes: Set<UInt32>, in session: Int, rows: inout [Int: SessionRow], host: String, instance: String
     ) -> [Effect] {
-        guard var row = rows[session] else { return [] }
-        let effects = acknowledge(panes: panes, row: &row, host: host)
+        guard var row = rows[session], row.host == host, row.instance == instance else { return [] }
+        let before = row.paneStatuses.mapValues(\.receipt)
+        var effects = acknowledge(panes: panes, row: &row)
+        updateUnread(&row)
+        if before != row.paneStatuses.mapValues(\.receipt) { effects.append(saveEffect(row)) }
         rows[session] = row
         return effects
     }
 
-    private static func acknowledge(panes: Set<UInt32>, row: inout SessionRow, host: String) -> [Effect] {
+    private static func acknowledge(panes: Set<UInt32>, row: inout SessionRow) -> [Effect] {
         var effects: [Effect] = []
-        let previousUnread = row.unread
-        for id in panes.sorted() {
-            guard var pane = row.paneStatuses[id] else { continue }
-            var sequences = pane.unread
-            if pane.status == .done || pane.status == .error,
-               pane.seq > 0, pane.acknowledgedSeq != pane.seq {
-                sequences.insert(pane.seq)
-            }
-            effects += sequences.sorted().map { .ack(pane: id, seq: $0) }
-            row.unread = max(0, row.unread - pane.unread.count)
-            pane.unread = []
-            if sequences.contains(pane.seq) { pane.acknowledgedSeq = pane.seq }
+        for id in panes.sorted() where row.panes.contains(id) {
+            guard var pane = row.paneStatuses[id], pane.current, pane.status == .done || pane.status == .error,
+                  pane.seq > 0, pane.acknowledged != pane.identity else { continue }
+            let identity = pane.identity
+            effects.append(.ack(StatusAcknowledgement(
+                host: row.host, instance: row.instance, pane: id, record: identity)))
+            pane.receipt.unread.remove(identity)
+            pane.receipt.seen.insert(identity)
+            pane.acknowledged = identity
             row.paneStatuses[id] = pane
         }
-        // Counts written by an older client have no pane identity. Clear that remainder
-        // only after every pane is displayed, never when a zoom hides its siblings.
-        if Set(row.panes).isSubset(of: panes) { row.unread = 0 }
-        if row.unread != previousUnread {
-            effects.append(.saveUnread(SessionRef(host: host, session: row.id), row.unread))
-        }
         return effects
+    }
+
+    private static func updateUnread(_ row: inout SessionRow) {
+        row.unread = row.paneStatuses.values.reduce(0) { $0 + $1.receipt.unread.count }
+    }
+
+    private static func saveEffect(_ row: SessionRow) -> Effect {
+        .saveStatus(SessionRef(host: row.host, session: row.id), instance: row.instance,
+                    receipts: row.paneStatuses.mapValues(\.receipt))
+    }
+
+    /// A reconnect can expose an older pending record or no record at all. Cached reports
+    /// remain display hints until replaced, but cannot authorize acknowledgements.
+    static func awaitReports(in rows: inout [Int: SessionRow]) {
+        for id in rows.keys {
+            guard var row = rows[id] else { continue }
+            row.paneStatuses = row.paneStatuses.mapValues { pane in
+                var pane = pane
+                pane.current = false
+                pane.newestSeq = 0
+                pane.acknowledged = nil
+                return pane
+            }
+            rows[id] = row
+        }
     }
 
     private static func aggregate(_ row: inout SessionRow) {
@@ -125,16 +153,18 @@ enum SessionReducer {
 
     /// Replaces the rows with a fresh `sessions` list, keeping what only the window knows
     /// (status, unread, the pinned group, size owner) for sessions that were already there.
-    /// `unread` reads the persisted count for a session seen for the first time this run;
+    /// `receipts` reads event identities for this host instance on the first list;
     /// `gitRoot` finds a new session's project root (nil: group by the cwd's last component).
     static func merge(
-        _ listed: [Listed], into previous: [Int: SessionRow], host: String, now: Date,
-        unread: (SessionRef) -> Int, gitRoot: (String) -> String?
+        _ listed: [Listed], into previous: [Int: SessionRow], host: String, instance: String, now: Date,
+        receipts: (SessionRef) -> [UInt32: PaneStatus.Receipt], gitRoot: (String) -> String?
     ) -> [Int: SessionRow] {
         var updated: [Int: SessionRow] = [:]
         for item in listed {
             guard let first = item.panes.first else { continue }
-            let old = previous[item.id]
+            let candidate = previous[item.id]
+            let old = candidate?.host == host && candidate?.instance == instance ? candidate : nil
+            let saved = receipts(SessionRef(host: host, session: item.id))
             // No focused pane: the host has nothing to say, keep the last name. Otherwise the
             // program (or the title the host sent in its place), as the host reported it.
             let app = item.activePane == 0 ? (old?.app ?? "shell") : item.program
@@ -147,7 +177,7 @@ enum SessionReducer {
                 title: "session \(item.id)",
                 status: old?.status ?? .idle,
                 seq: old?.seq ?? 0,
-                unread: old?.unread ?? unread(SessionRef(host: host, session: item.id)),
+                unread: 0,
                 lastSeen: old?.lastSeen ?? now,
                 sizeSource: old?.sizeSource ?? "",
                 clients: old?.clients ?? 1,
@@ -156,13 +186,15 @@ enum SessionReducer {
                 group: old.map(\.group).flatMap { $0.isEmpty ? nil : $0 }
                     ?? Grouping.pinnedGroup(existing: nil, cwd: item.cwd, gitRoot: gitRoot(item.cwd)),
                 agent: old?.agent ?? .none,
-                paneStatuses: old?.paneStatuses.filter { item.panes.contains($0.key) } ?? [:],
-                statusPane: old?.statusPane)
-            if var row = updated[item.id], let old, !old.paneStatuses.isEmpty {
-                let removedUnread = old.paneStatuses.filter { !item.panes.contains($0.key) }
-                    .values.reduce(0) { $0 + $1.unread.count }
-                row.unread = max(0, row.unread - removedUnread)
-                aggregate(&row)
+                paneStatuses: old?.paneStatuses.filter { item.panes.contains($0.key) }
+                    ?? saved.filter { item.panes.contains($0.key) }.mapValues {
+                        PaneStatus(status: .idle, seq: 0, agent: .none, receipt: $0, current: false)
+                    },
+                statusPane: old?.statusPane,
+                instance: instance)
+            if var row = updated[item.id] {
+                updateUnread(&row)
+                if !row.paneStatuses.isEmpty || old?.paneStatuses.isEmpty == false { aggregate(&row) }
                 updated[item.id] = row
             }
         }
