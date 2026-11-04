@@ -25,6 +25,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var stoppedByUser = false
     /// The host whose layout is on screen; every host stays connected in the background.
     var activeHost = "local"
+    /// The layout actually on screen can lag behind a session/host selection.
+    var displayedHost: String?
+    var displayedSession: Int?
     /// Stable order for namespaced sidebar ids (`host index * 100_000 + session`).
     var hostOrder: [String] = ["local"]
 

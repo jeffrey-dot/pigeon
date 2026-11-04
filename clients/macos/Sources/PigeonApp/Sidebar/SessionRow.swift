@@ -23,4 +23,8 @@ struct SessionRow: Equatable {
     var group: String = ""
     /// The agent's own report (name, task, since when), from the last `status`.
     var agent: AgentInfo = .none
+    /// Reports are pane-scoped; a quiet sibling cannot overwrite a blocked one.
+    var paneStatuses: [UInt32: PaneStatus] = [:]
+    /// The pane contributing the displayed state, separate from keyboard focus.
+    var statusPane: UInt32?
 }

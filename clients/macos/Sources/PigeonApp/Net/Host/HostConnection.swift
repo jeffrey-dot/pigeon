@@ -39,6 +39,12 @@ struct HostConnection<Row> {
         if instance != value {
             stale = nil
             seq = [:]
+            rows = [:]
+            seen = []
+            requested = []
+            pending = [:]
+            focusedPane = nil
+            selectedSession = nil
         }
         instance = value
     }

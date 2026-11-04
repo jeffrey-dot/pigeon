@@ -127,6 +127,13 @@ extension AppDelegate {
         let current = selectedSession.map { rowId(host: activeHost, session: $0) }
         guard let next = SidebarModel.nextNeedsYou(sessions, after: current) else { return }
         select(next.id)
+        guard let session = selectedSession, let pane = rows[session]?.statusPane else { return }
+        // Unzoom by protocol so a waiting sibling can actually become visible.
+        send({ message in
+            Wire.set(message, u32: "id", requestID())
+            Wire.set(message, u32: "pane_id", pane)
+        }, type: PG_MSG_UNZOOM)
+        focus(pane)
     }
 
     @objc func newSession(_ sender: Any?) {

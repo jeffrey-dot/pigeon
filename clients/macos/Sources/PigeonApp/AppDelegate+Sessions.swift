@@ -21,13 +21,7 @@ extension AppDelegate {
         container.focusPane(row.activePane)
         for pane in row.panes { sendAttach(pane, force: true) }
         send({ message in Wire.set(message, u32: "pane_id", row.activePane) }, type: PG_MSG_FOCUS)
-        if var current = rows[session] {
-            current.unread = 0
-            rows[session] = current
-            state.unread[unreadKey(host: host, session: session)] = 0
-            store.save(state)
-            sendAck(current.activePane, current.seq)
-        }
+        // The layout/snapshot response marks only the panes actually shown as seen.
         refreshSidebar()
     }
 
@@ -93,12 +87,9 @@ extension AppDelegate {
 
     private func markReadOnActiveHost(_ session: Int) {
         let host = activeHost
-        guard var row = rows[session] else { return }
-        row.unread = 0
-        rows[session] = row
-        state.unread[unreadKey(host: host, session: session)] = 0
-        store.save(state)
-        sendAck(row.activePane, row.seq)
+        guard let row = rows[session] else { return }
+        let effects = SessionReducer.markSeen(Set(row.panes), in: session, rows: &rows, host: host)
+        applyStatusEffects(effects)
         refreshSidebar()
     }
 

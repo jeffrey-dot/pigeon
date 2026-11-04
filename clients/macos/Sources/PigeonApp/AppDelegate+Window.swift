@@ -20,6 +20,13 @@ extension AppDelegate {
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.isMovableByWindowBackground = true
+        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didChangeOcclusionStateNotification] {
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(statusWindowBecameVisible(_:)), name: name, object: window)
+        }
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(statusWindowBecameVisible(_:)),
+            name: NSApplication.didBecomeActiveNotification, object: NSApp)
 
         sidebar = SidebarViewController()
         sidebar.onSelect = { [weak self] id in self?.select(id) }

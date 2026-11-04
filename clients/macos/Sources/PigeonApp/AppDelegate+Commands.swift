@@ -178,6 +178,7 @@ extension AppDelegate {
         focusedPane = pane
         container.focusPane(pane)
         send({ message in Wire.set(message, u32: "pane_id", pane) }, type: PG_MSG_FOCUS)
+        markVisibleStatusesSeen()
     }
 
     func resizeSplit(_ split: UInt32, _ ratio: Double) {

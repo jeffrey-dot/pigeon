@@ -22,6 +22,50 @@ final class SessionReducerTests: XCTestCase {
         XCTAssertEqual(rows[1]?.agent.app, "claude")
     }
 
+    func testAnIdleSiblingDoesNotHideABlockedPane() {
+        var rows = [1: row(1, panes: [10, 11])]
+        _ = SessionReducer.apply(report(10, .blocked), to: &rows, host: "local", selected: nil, onScreen: false)
+        _ = SessionReducer.apply(report(11, .idle, seq: 0), to: &rows, host: "local", selected: nil, onScreen: false)
+        XCTAssertEqual(rows[1]?.status, .blocked)
+    }
+
+    func testAVisibleSiblingAcknowledgesItsOwnPane() {
+        var rows = [1: row(1, panes: [10, 11])]
+        let effects = SessionReducer.apply(report(11, .done), to: &rows, host: "local", selected: 1, onScreen: true)
+        XCTAssertEqual(effects, [.ack(pane: 11, seq: 5)])
+    }
+
+    func testReplayingAFinishedReportDoesNotIncreaseUnread() {
+        var rows = [1: row(1, panes: [10])]
+        _ = SessionReducer.apply(report(10, .done), to: &rows, host: "local", selected: nil, onScreen: false)
+        let replay = SessionReducer.apply(report(10, .done), to: &rows, host: "local", selected: nil, onScreen: false)
+        XCTAssertEqual(rows[1]?.unread, 1)
+        XCTAssertEqual(replay, [])
+    }
+
+    func testAZoomHiddenSiblingStaysUnreadUntilItIsShown() {
+        var rows = [1: row(1, panes: [10, 11])]
+        let effects = SessionReducer.apply(
+            report(11, .done), to: &rows, host: "local", selected: 1, onScreen: true, visiblePanes: [10])
+        XCTAssertEqual(effects, [.saveUnread(SessionRef(host: "local", session: 1), 1)])
+        XCTAssertEqual(SessionReducer.markSeen([10], in: 1, rows: &rows, host: "local"), [])
+        XCTAssertEqual(rows[1]?.unread, 1)
+        let shown = SessionReducer.markSeen([11], in: 1, rows: &rows, host: "local")
+        XCTAssertEqual(shown, [.ack(pane: 11, seq: 5), .saveUnread(SessionRef(host: "local", session: 1), 0)])
+        XCTAssertEqual(SessionReducer.markSeen([11], in: 1, rows: &rows, host: "local"), [])
+    }
+
+    func testClosingTheBlockedPaneRevealsItsWorkingSibling() {
+        var rows = [1: row(1, panes: [10, 11])]
+        _ = SessionReducer.apply(report(10, .blocked), to: &rows, host: "local", selected: nil, onScreen: false)
+        _ = SessionReducer.apply(report(11, .working), to: &rows, host: "local", selected: nil, onScreen: false)
+        rows = SessionReducer.merge(
+            [.init(id: 1, panes: [11], cwd: "/w", activePane: 11, program: "zsh")],
+            into: rows, host: "local", now: now, unread: { _ in 0 }, gitRoot: { _ in nil })
+        XCTAssertEqual(rows[1]?.status, .working)
+        XCTAssertEqual(rows[1]?.statusPane, 11)
+    }
+
     func testDoneElsewhereBecomesUnreadAndIsSaved() {
         var rows = [1: row(1, panes: [10]), 2: row(2, panes: [20])]
         let effects = SessionReducer.apply(report(20, .error), to: &rows, host: "devbox", selected: 1, onScreen: true)
@@ -50,7 +94,7 @@ final class SessionReducerTests: XCTestCase {
         XCTAssertEqual(SessionReducer.apply(report(99, .done), to: &rows, host: "local", selected: 1, onScreen: true), [])
         _ = SessionReducer.apply(report(10, nil, seq: 9), to: &rows, host: "local", selected: 1, onScreen: true)
         XCTAssertEqual(rows[1]?.status, .working, "a state this build does not know keeps the old one")
-        XCTAssertEqual(rows[1]?.seq, 9)
+        XCTAssertEqual(rows[1]?.seq, 0, "unknown states cannot replace a known report or its ack identity")
     }
 
     func testMergeKeepsWindowStateAndPinsTheGroup() {

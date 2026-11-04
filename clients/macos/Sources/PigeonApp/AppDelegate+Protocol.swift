@@ -16,6 +16,10 @@ extension AppDelegate {
         switch Wire.type(message) {
         case PG_MSG_HELLO_ACK:
             let instance = Wire.string(message, "instance")
+            if connection.instance != nil, connection.instance != instance {
+                for row in rows.values { state.unread[SessionRef(host: activeHost, session: row.id).key] = nil }
+                store.save(state)
+            }
             connection.instanceChanged(to: instance)
             connection.statusAll = Wire.contains(message, strings: "features", "status_all")
             // Tell the host what we are drawing with, so programs inside the panes can pick
@@ -39,8 +43,11 @@ extension AppDelegate {
             if model.focus != 0 { focusedPane = model.focus }
             guard visible else { break }
             container.apply(model)
+            displayedHost = activeHost
+            displayedSession = sessionID
             flushPendingSnapshots()
             for pane in model.panes.map(\.id) { sendAttach(pane) }
+            markVisibleStatusesSeen()
         case PG_MSG_SNAPSHOT:
             guard let snapshot = pg_msg_snapshot(message) else { break }
             defer { pg_snapshot_free(snapshot) }
@@ -57,6 +64,7 @@ extension AppDelegate {
                     total: Int(Wire.u32(message, "history_len")),
                     offset: Int(Wire.u32(message, "offset")))
                 container.paneView(pane)?.modes = Wire.u32(message, "modes")
+                markVisibleStatusesSeen()
             } else if let frame = Wire.frame(message) {
                 pendingSnapshots[pane] = frame
             }
@@ -197,6 +205,7 @@ extension AppDelegate {
             send({ message in Wire.set(message, u32: "pane_id", row.activePane) }, type: PG_MSG_FOCUS)
         }
         refreshSidebar()
+        markVisibleStatusesSeen()
     }
 
     /// Exercises the three input paths a window has — menu key equivalents, first-responder
@@ -408,16 +417,8 @@ extension AppDelegate {
         // not something the user is looking at.
         let effects = SessionReducer.apply(
             report, to: &rows, host: activeHost, selected: selectedSession,
-            onScreen: swappedFrom == nil)
-        for effect in effects {
-            switch effect {
-            case let .ack(pane, seq):
-                sendAck(pane, seq)
-            case let .saveUnread(ref, count):
-                state.unread[ref.key] = count
-                store.save(state)
-            }
-        }
+            onScreen: swappedFrom == nil, visiblePanes: visibleStatusPanes)
+        applyStatusEffects(effects)
         refreshSidebar()
     }
 
