@@ -28,6 +28,7 @@ struct HostConnection<Row> {
     private(set) var ready = false
     /// The host sends every pane's `status` without an attach (`status_all`, protocol §5).
     var statusAll = false
+    var statusSnapshot = false
     var heartbeat: Heartbeat?
 
     /// A new connection to the same host: screens stay on display and become stale (they
@@ -35,6 +36,8 @@ struct HostConnection<Row> {
     mutating func reconnected(now: Date) {
         generation = UUID()
         ready = false
+        statusAll = false
+        statusSnapshot = false
         receivedScreen = []
         stale = seen
         requested = []
@@ -70,6 +73,8 @@ struct HostConnection<Row> {
 
     mutating func disconnected() {
         ready = false
+        statusAll = false
+        statusSnapshot = false
         receivedScreen = []
     }
 }

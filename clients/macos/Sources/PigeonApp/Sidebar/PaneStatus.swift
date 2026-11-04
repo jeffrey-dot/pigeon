@@ -1,6 +1,6 @@
 import Foundation
 
-/// One pane's latest report and terminal events not yet seen by this client.
+/// One pane's reports and terminal events not yet seen by this client.
 /// Screen seq and status seq have different lifetimes; this only tracks status.
 struct PaneStatus: Equatable {
     var status: SidebarSession.Status
@@ -11,6 +11,10 @@ struct PaneStatus: Equatable {
     /// Suppresses repeat acks while snapshots/layouts keep arriving for the same report.
     var acknowledged: StatusRecord?
     var current = true
+    /// nil keeps the legacy single-report path, including its durable unread history.
+    var records: [StatusSnapshot.Record]?
+    /// Reset on reconnect; a new transport's first complete set establishes its baseline.
+    var revision: UInt64?
 
     var identity: StatusRecord { StatusRecord(seq: seq, record: record) }
 

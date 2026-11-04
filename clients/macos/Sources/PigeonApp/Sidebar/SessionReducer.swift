@@ -56,6 +56,8 @@ enum SessionReducer {
         pane.agent = report.agent
         pane.acknowledged = alreadySeen ? identity : nil
         pane.current = true
+        pane.records = nil
+        pane.revision = nil
         row.paneStatuses[report.pane] = pane
         aggregate(&row)
         var effects: [Effect] = []
@@ -89,7 +91,7 @@ enum SessionReducer {
     private static func acknowledge(panes: Set<UInt32>, row: inout SessionRow) -> [Effect] {
         var effects: [Effect] = []
         for id in panes.sorted() where row.panes.contains(id) {
-            guard var pane = row.paneStatuses[id], pane.current, pane.status == .done || pane.status == .error,
+            guard var pane = row.paneStatuses[id], pane.records == nil, pane.current, pane.status == .done || pane.status == .error,
                   pane.seq > 0, pane.acknowledged != pane.identity else { continue }
             let identity = pane.identity
             effects.append(.ack(StatusAcknowledgement(
@@ -102,11 +104,11 @@ enum SessionReducer {
         return effects
     }
 
-    private static func updateUnread(_ row: inout SessionRow) {
+    static func updateUnread(_ row: inout SessionRow) {
         row.unread = row.paneStatuses.values.reduce(0) { $0 + $1.receipt.unread.count }
     }
 
-    private static func saveEffect(_ row: SessionRow) -> Effect {
+    static func saveEffect(_ row: SessionRow) -> Effect {
         .saveStatus(SessionRef(host: row.host, session: row.id), instance: row.instance,
                     receipts: row.paneStatuses.mapValues(\.receipt))
     }
@@ -119,6 +121,7 @@ enum SessionReducer {
             row.paneStatuses = row.paneStatuses.mapValues { pane in
                 var pane = pane
                 pane.current = false
+                pane.revision = nil
                 pane.acknowledged = nil
                 return pane
             }
@@ -126,19 +129,23 @@ enum SessionReducer {
         }
     }
 
-    private static func aggregate(_ row: inout SessionRow) {
-        let winner = row.paneStatuses.min { left, right in
+    static func aggregate(_ row: inout SessionRow) {
+        let winner = row.paneStatuses.filter { _, pane in
+            pane.records == nil || pane.seq > 0
+        }.min { left, right in
             if left.value.status != right.value.status { return left.value.status < right.value.status }
             return left.key < right.key
         }
         guard let (pane, report) = winner else {
             row.statusPane = nil
+            row.statusRecord = nil
             row.status = .idle
             row.seq = 0
             row.agent = .none
             return
         }
         row.statusPane = pane
+        row.statusRecord = report.seq > 0 ? report.identity : nil
         row.status = report.status
         row.seq = report.seq
         row.agent = report.agent

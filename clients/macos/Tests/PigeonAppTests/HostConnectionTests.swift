@@ -85,4 +85,19 @@ final class HostConnectionTests: XCTestCase {
         XCTAssertNotEqual(connection.instance, first)
         XCTAssertTrue(connection.rows.isEmpty)
     }
+    func testStatusSnapshotRequiresNegotiationAgainAfterReconnect() {
+        var connection = HostConnection<Int>()
+        XCTAssertFalse(connection.statusSnapshot)
+        connection.instanceChanged(to: "a")
+        connection.statusSnapshot = true
+        connection.statusAll = true
+        let old = connection.generation
+        connection.reconnected(now: Date())
+        XCTAssertFalse(connection.statusSnapshot)
+        XCTAssertFalse(connection.statusAll)
+        XCTAssertFalse(connection.accepts(generation: old))
+        connection.instanceChanged(to: "a")
+        XCTAssertFalse(connection.statusSnapshot, "an old host can omit the new feature")
+    }
+
 }
