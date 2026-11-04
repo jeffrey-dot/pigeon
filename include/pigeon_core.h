@@ -65,6 +65,11 @@ typedef struct PgMsg PgMsg;
 
 #define PG_ATTR_DIM (1 << 5)
 
+/**
+ * The last cell of a row continues into the next row without a newline.
+ */
+#define PG_ATTR_WRAP (1 << 6)
+
 typedef enum PgAxis {
     /**
      * Panes side by side, vertical divider ("v" in the protocol).

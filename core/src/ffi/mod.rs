@@ -13,8 +13,7 @@ use std::cell::{Cell, RefCell};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr;
 
-use crate::api::{self, Axis, Core, StatusKind, StatusState};
-use crate::error::{PgError, PgResult};
+use crate::api::{self, Axis, Core, PgError, PgResult, StatusKind, StatusState};
 
 pub mod delta;
 pub mod msg;
@@ -303,6 +302,8 @@ pub const PG_ATTR_UNDERLINE: u32 = 1 << 2;
 pub const PG_ATTR_REVERSE: u32 = 1 << 3;
 pub const PG_ATTR_STRIKETHROUGH: u32 = 1 << 4;
 pub const PG_ATTR_DIM: u32 = 1 << 5;
+/// The last cell of a row continues into the next row without a newline.
+pub const PG_ATTR_WRAP: u32 = 1 << 6;
 
 #[repr(C)]
 #[derive(Clone, Copy)]

@@ -5,12 +5,14 @@
 //! embedded client would drive the same struct through the C ABI.
 
 mod backlog;
+mod delta_rows;
 mod pane_meta;
 mod session_state;
 mod size_policy;
 mod size_vote;
 
 pub use backlog::Backlog;
+pub use delta_rows::DeltaRows;
 // Host-side session bookkeeping: only `pigeon-server` uses these, so without `internals`
 // (a client build) nothing in the library refers to them.
 #[cfg_attr(not(feature = "internals"), allow(unused_imports))]
@@ -409,30 +411,32 @@ fn cells_from_proto(row: &[ProtoCell]) -> Vec<crate::term::Cell> {
     cells
 }
 
-/// The changed rows of a `delta` message, decoded like a snapshot's rows.
-pub struct DeltaRows {
-    pub seq: u32,
-    pub alt: Option<bool>,
-    /// `(y, cells)`; every row is as wide as the pane was when the host sent it.
-    pub rows: Vec<(u16, Vec<crate::term::Cell>)>,
-    pub cursor: Option<crate::term::Cursor>,
-}
-
-/// Rebuilds the dirty rows of a `delta` message; `None` for any other message.
+/// Rebuilds the dirty rows; refuses malformed rows and non-delta messages.
 pub fn delta_from_message(message: &Message) -> Option<DeltaRows> {
     let Message::Delta {
         seq,
         rows,
         cursor,
         alt,
+        modes,
         ..
     } = message
     else {
         return None;
     };
+    if let Some(first) = rows.first() {
+        let cols = first.cells.len();
+        if cols == 0 || cols > usize::from(u16::MAX)
+            || rows.iter().any(|row| row.cells.len() != cols)
+            || rows.windows(2).any(|pair| pair[0].y >= pair[1].y)
+        {
+            return None;
+        }
+    }
     Some(DeltaRows {
         seq: *seq,
         alt: *alt,
+        modes: *modes,
         rows: rows
             .iter()
             .map(|row| (row.y, cells_from_proto(&row.cells)))

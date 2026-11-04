@@ -7,7 +7,7 @@
 //! This is deliberately a dynamic surface: one opaque handle plus getters and
 //! setters, so adding a protocol field never changes the ABI. Schema checks still
 //! happen in Rust — [`pg_msg_encode_frame`] round-trips through
-//! [`proto::decode`], so a message with a wrong or missing field is rejected
+//! [`api::decode`], so a message with a wrong or missing field is rejected
 //! here, not on the wire.
 
 use std::collections::BTreeMap;
@@ -18,9 +18,7 @@ use std::ptr;
 use ciborium::value::Value;
 
 use super::{ffi_call, PgAxis, PgRect, PgSnapshot, PgSplit, PgStr};
-use crate::api::{self, Axis, Message, MAX_FRAME};
-use crate::error::{PgError, PgResult};
-use crate::proto;
+use crate::api::{self, Axis, Message, PgError, PgResult, MAX_FRAME};
 
 /// The M0 subset of `docs/protocol.md` §3.
 #[repr(C)]
@@ -116,7 +114,7 @@ pub struct PgMsg {
 
 impl PgMsg {
     fn from_message(message: &Message) -> PgResult<Self> {
-        let payload = proto::encode(message)?;
+        let payload = api::encode(message)?;
         let Value::Map(entries) =
             ciborium::from_reader::<Value, _>(&payload[..]).map_err(|_| PgError::InvalidArg)?
         else {
@@ -141,11 +139,7 @@ impl PgMsg {
     pub(super) fn to_message(&self) -> PgResult<Message> {
         let mut payload = Vec::new();
         ciborium::into_writer(&self.as_value(), &mut payload).map_err(|_| PgError::InvalidArg)?;
-        proto::decode(&payload)
-    }
-
-    pub(super) fn kind(&self) -> PgMsgType {
-        type_of(&self.t)
+        api::decode(&payload)
     }
 
     fn as_value(&self) -> Value {
@@ -395,7 +389,7 @@ pub extern "C" fn pg_msg_decode_frame(
         }
         let total = 4 + length;
         let payload = &bytes[4..total];
-        let message = match proto::decode(payload) {
+        let message = match api::decode(payload) {
             Ok(message) => message,
             Err(PgError::Unsupported) => {
                 let tag = type_tag(payload).unwrap_or_default();
@@ -457,7 +451,7 @@ pub extern "C" fn pg_msg_decode(payload: *const u8, len: usize) -> *mut PgMsg {
     ffi_call(ptr::null_mut(), || {
         // SAFETY: caller promises `len` readable bytes at `payload`.
         let bytes = unsafe { super::byte_slice(payload, len) }?;
-        match proto::decode(bytes) {
+        match api::decode(bytes) {
             Ok(message) => Ok(Box::into_raw(Box::new(PgMsg::from_message(&message)?))),
             Err(PgError::Unsupported) => {
                 let tag = type_tag(bytes).unwrap_or_default();
@@ -567,7 +561,7 @@ fn layout_message(msg: &PgMsg) -> PgResult<Message> {
 
 fn encode_payload(msg: &PgMsg) -> PgResult<Vec<u8>> {
     let message = msg.to_message()?;
-    proto::encode(&message)
+    api::encode(&message)
 }
 
 // ---------------------------------------------------------------- helpers
@@ -575,7 +569,7 @@ fn encode_payload(msg: &PgMsg) -> PgResult<Vec<u8>> {
 fn encode_frame(msg: &PgMsg) -> PgResult<Vec<u8>> {
     // Validate against the real schema before anything reaches the wire.
     let message = msg.to_message()?;
-    proto::encode_frame(&message)
+    api::encode_frame(&message)
 }
 
 fn type_tag(payload: &[u8]) -> Option<String> {
@@ -927,7 +921,7 @@ mod tests {
         assert!(pg_msg_set_u32(
             msg,
             field("proto").as_ptr(),
-            u32::from(proto::PROTO_VERSION)
+            u32::from(api::PROTO_VERSION)
         ));
         assert!(pg_msg_set_str(
             msg,
@@ -1032,7 +1026,7 @@ mod tests {
 
     #[test]
     fn snapshot_message_becomes_an_owned_pg_snapshot() {
-        let cell = crate::proto::Cell {
+        let cell = api::WireCell {
             codepoint: 'A' as u32,
             attrs: 0,
             fg: 0x00ff_0000,
@@ -1045,13 +1039,13 @@ mod tests {
             cols: 1,
             rows: 1,
             alt: false,
-            cursor: proto::Cursor {
+            cursor: api::WireCursor {
                 x: 0,
                 y: 0,
                 visible: true,
                 shape: 0,
             },
-            scroll: proto::Scroll { top: 0, bottom: 0 },
+            scroll: api::Scroll { top: 0, bottom: 0 },
             screen: vec![vec![cell]],
             history: None,
             history_len: None,
@@ -1059,7 +1053,7 @@ mod tests {
             modes: None,
             links: None,
         };
-        let frame = proto::encode_frame(&snapshot).expect("frame");
+        let frame = api::encode_frame(&snapshot).expect("frame");
         let mut consumed = 0usize;
         let decoded = pg_msg_decode_frame(frame.as_ptr(), frame.len(), &mut consumed);
         assert!(!decoded.is_null());
@@ -1078,20 +1072,20 @@ mod tests {
         pg_msg_free(decoded);
     }
 
-    fn wire_snapshot(cols: u16, rows: u16, screen: Vec<Vec<proto::Cell>>) -> Message {
+    fn wire_snapshot(cols: u16, rows: u16, screen: Vec<Vec<api::WireCell>>) -> Message {
         Message::Snapshot {
             pane_id: 1,
             seq: 1,
             cols,
             rows,
             alt: false,
-            cursor: proto::Cursor {
+            cursor: api::WireCursor {
                 x: 0,
                 y: 0,
                 visible: true,
                 shape: 0,
             },
-            scroll: proto::Scroll {
+            scroll: api::Scroll {
                 top: 0,
                 bottom: rows.saturating_sub(1),
             },
@@ -1104,8 +1098,8 @@ mod tests {
         }
     }
 
-    fn blank_wire_cell() -> proto::Cell {
-        proto::Cell {
+    fn blank_wire_cell() -> api::WireCell {
+        api::WireCell {
             codepoint: ' ' as u32,
             attrs: 0,
             fg: 0,
@@ -1119,7 +1113,7 @@ mod tests {
         // rows=24 but only one row on the wire: C would index 24 rows of a
         // one-row grid and free it with the wrong length.
         let short = wire_snapshot(2, 24, vec![vec![blank_wire_cell(); 2]]);
-        let frame = proto::encode_frame(&short).expect("frame");
+        let frame = api::encode_frame(&short).expect("frame");
         let mut consumed = 0usize;
         let decoded = pg_msg_decode_frame(frame.as_ptr(), frame.len(), &mut consumed);
         assert!(!decoded.is_null());

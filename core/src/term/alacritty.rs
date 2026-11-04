@@ -17,7 +17,7 @@ use alacritty_terminal::vte::ansi::{Color, CursorShape, NamedColor, Processor, R
 
 use super::{
     Cell, Cursor, Snapshot, Term, ATTR_BOLD, ATTR_DIM, ATTR_ITALIC, ATTR_REVERSE,
-    ATTR_STRIKETHROUGH, ATTR_UNDERLINE,
+    ATTR_STRIKETHROUGH, ATTR_UNDERLINE, ATTR_WRAP,
 };
 
 /// Grid geometry handed to alacritty. `history` is the scrollback capacity.
@@ -354,6 +354,9 @@ fn attributes(flags: Flags) -> (u32, u8) {
     }
     if flags.contains(Flags::DIM) {
         attrs |= ATTR_DIM;
+    }
+    if flags.contains(Flags::WRAPLINE) {
+        attrs |= ATTR_WRAP;
     }
     let width = if flags.contains(Flags::WIDE_CHAR) {
         2

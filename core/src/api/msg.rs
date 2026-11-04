@@ -27,6 +27,19 @@ pub fn snapshot_of(message: &Message) -> PgResult<(PaneId, Snapshot)> {
     Ok((*pane_id, snapshot))
 }
 
+/// The pane id and changed rows carried by a `delta` message.
+///
+/// Width derivation matches snapshots. Rows must be ordered, nonempty and equally
+/// wide; the client still checks them against its current grid and sequence.
+/// A cursor-only delta may contain no rows.
+pub fn delta_of(message: &Message) -> PgResult<(PaneId, super::DeltaRows)> {
+    let Message::Delta { pane_id, .. } = message else {
+        return Err(PgError::InvalidArg);
+    };
+    let delta = crate::session::delta_from_message(message).ok_or(PgError::InvalidArg)?;
+    Ok((*pane_id, delta))
+}
+
 /// Whether the host offered `feature` in its `hello_ack` (the Rust side of
 /// `pg_msg_str_array_contains` on `features`). Any other message is refused.
 pub fn offers_feature(message: &Message, feature: &str) -> PgResult<bool> {

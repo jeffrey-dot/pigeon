@@ -6,10 +6,9 @@
 
 use std::ptr;
 
-use super::msg::{msg_ref, PgMsgType};
+use super::msg::msg_ref;
 use super::{ffi_call, to_pg_cell, PgCell, PgCursor};
-use crate::error::PgError;
-use crate::proto::Message;
+use crate::api::{delta_of, Cursor, PgError};
 
 /// One changed row of a `delta`.
 #[repr(C)]
@@ -44,14 +43,8 @@ pub struct PgDelta {
 pub extern "C" fn pg_msg_delta(msg: *const super::msg::PgMsg) -> *mut PgDelta {
     ffi_call(ptr::null_mut(), || {
         let msg = msg_ref(msg)?;
-        if msg.kind() != PgMsgType::PG_MSG_DELTA {
-            return Err(PgError::InvalidArg);
-        }
         let message = msg.to_message()?;
-        let Message::Delta { pane_id, .. } = message else {
-            return Err(PgError::InvalidArg);
-        };
-        let delta = crate::session::delta_from_message(&message).ok_or(PgError::InvalidArg)?;
+        let (pane_id, delta) = delta_of(&message)?;
         let rows = delta
             .rows
             .into_iter()
@@ -68,7 +61,7 @@ pub extern "C" fn pg_msg_delta(msg: *const super::msg::PgMsg) -> *mut PgDelta {
             })
             .collect::<Result<Box<[PgDeltaRow]>, PgError>>()?;
         let row_count = u32::try_from(rows.len()).map_err(|_| PgError::InvalidArg)?;
-        let cursor = delta.cursor.unwrap_or(crate::term::Cursor {
+        let cursor = delta.cursor.unwrap_or(Cursor {
             x: 0,
             y: 0,
             visible: false,

@@ -15,6 +15,8 @@ pub const ATTR_UNDERLINE: u32 = 1 << 2;
 pub const ATTR_REVERSE: u32 = 1 << 3;
 pub const ATTR_STRIKETHROUGH: u32 = 1 << 4;
 pub const ATTR_DIM: u32 = 1 << 5;
+/// The last cell of a row continues into the next row without a newline.
+pub const ATTR_WRAP: u32 = 1 << 6;
 
 /// One grid cell.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

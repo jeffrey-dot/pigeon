@@ -19,7 +19,7 @@ mod msg;
 
 pub use self::core::{Config, Core};
 pub use self::msg::{
-    layout_focus, layout_rects, layout_splits, offers_feature, snapshot_of, Split,
+    delta_of, layout_focus, layout_rects, layout_splits, offers_feature, snapshot_of, Split,
 };
 
 pub use crate::error::{PgError, PgResult};
@@ -32,8 +32,9 @@ pub use crate::proto::{
     decode, decode_frame, encode, encode_frame, Cell as WireCell, Cursor as WireCursor, Link,
     Message, Node, Row, Scroll, SessionInfo, SplitAxis, SplitNode, MAX_FRAME, PROTO_VERSION,
 };
+pub use crate::session::DeltaRows;
 pub use crate::status::{Kind as StatusKind, Record as StatusRecord, State as StatusState};
 pub use crate::term::{
     Cell, Cursor, Snapshot, ATTR_BOLD, ATTR_DIM, ATTR_ITALIC, ATTR_REVERSE, ATTR_STRIKETHROUGH,
-    ATTR_UNDERLINE,
+    ATTR_UNDERLINE, ATTR_WRAP,
 };
