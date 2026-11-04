@@ -43,7 +43,8 @@
 | 生命周期 | `pg_core_new` `pg_core_free` | 会话容器（内含多 pane） |
 | pane | `pg_pane_new` `pg_pane_free` `pg_pane_feed` `pg_pane_resize` `pg_pane_respond` | 字节进出；PTY 归宿主，内核不做 IO |
 | 快照 | `pg_pane_snapshot` `pg_pane_dirty_rows` `pg_snapshot_free` | attach 全量 / 之后只发脏行 |
-| 状态 | `pg_status_count` `pg_status_at` `pg_status_ack` | OSC 7501 记录的读取与“已看过”确认 |
+| 状态 | `pg_status_count` `pg_status_at` `pg_status_ack` | 旧接口：焦点 pane 存储记录（包含已确认项）的读取与终态确认 |
+| 状态快照 | `pg_status_snapshot_new/info/at/free`、`pg_msg_status_snapshot` | 指定 pane / wire 消息的完整未确认集合与 revision；独立所有权、不消费、不自动确认，见 [状态同步](status-sync.md) |
 | 布局 | `pg_layout_split` `pg_layout_split_of` `pg_layout_close` `pg_layout_resize` `pg_layout_rects` `pg_layout_focus` `pg_layout_focused` | 纯数据。`split` 返回**新 pane id**并把焦点移过去；`close` 让兄弟占满父矩形；`resize` 按最小尺寸夹取；`rects` 按树序返回归一化矩形（cap 不够报 `PG_ERR_OVERFLOW`）；`split_of` 给出该 pane 旁边的分隔线 id |
 | 消息 | `pg_msg_new` `pg_msg_free` `pg_msg_type` `pg_msg_set_u32/i32/bool/str/bytes/str_array` `pg_msg_get_u32/i32/bool/str` `pg_msg_encoded_len` `pg_msg_encode` `pg_msg_decode`（payload）`pg_msg_encode_frame` `pg_msg_decode_frame`（带长度前缀）`pg_msg_snapshot` `pg_msg_sessions_count` `pg_msg_session_at` `pg_msg_session_panes` | 协议编解码：Swift 侧零 CBOR，字段名即 `docs/protocol.md` 的字段名 |
 

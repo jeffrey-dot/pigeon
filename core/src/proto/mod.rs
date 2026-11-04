@@ -18,6 +18,10 @@ use crate::error::{PgError, PgResult};
 
 mod message;
 pub use message::Message;
+mod status_snapshot;
+#[cfg(feature = "internals")]
+pub use status_snapshot::message as status_snapshot_message;
+pub use status_snapshot::{snapshot_of as status_snapshot_of, WireStatusRecord};
 mod cell_text;
 pub use cell_text::{CellText, MAX_CELL_TEXT_BYTES};
 
@@ -180,6 +184,7 @@ impl Node {
 
 /// Serializes one message into its CBOR payload (no length prefix).
 pub fn encode(message: &Message) -> PgResult<Vec<u8>> {
+    status_snapshot::validate(message)?;
     let mut payload = Vec::new();
     ciborium::into_writer(message, &mut payload).map_err(|_| PgError::InvalidArg)?;
     Ok(payload)
@@ -203,9 +208,11 @@ pub fn decode(payload: &[u8]) -> PgResult<Message> {
     if !is_known(&tag) {
         return Err(PgError::Unsupported);
     }
-    value
+    let message = value
         .deserialized::<Message>()
-        .map_err(|_| PgError::InvalidArg)
+        .map_err(|_| PgError::InvalidArg)?;
+    status_snapshot::validate(&message)?;
+    Ok(message)
 }
 
 /// Prefixes a payload with its little-endian length.
@@ -272,6 +279,7 @@ fn is_known(tag: &str) -> bool {
             | "size_state"
             | "pane_exited"
             | "status"
+            | "status_snapshot"
             | "ack_status"
             | "ping"
             | "shutdown"

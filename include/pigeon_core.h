@@ -32,6 +32,7 @@
 
 typedef struct PgCore PgCore;
 typedef struct PgMsg PgMsg;
+typedef struct PgStatusSnapshot PgStatusSnapshot;
 
 
 #ifndef PIGEON_CORE_H
@@ -117,7 +118,7 @@ typedef enum PgErrorCode {
 } PgErrorCode;
 
 /**
- * The M0 subset of `docs/protocol.md` §3.
+ * Message kinds from `docs/protocol.md` §3.
  */
 typedef enum PgMsgType {
     PG_MSG_UNKNOWN = 0,
@@ -151,6 +152,7 @@ typedef enum PgMsgType {
     PG_MSG_SCROLL = 28,
     PG_MSG_PASTE = 29,
     PG_MSG_SHUTDOWN = 30,
+    PG_MSG_STATUS_SNAPSHOT = 31,
 } PgMsgType;
 
 typedef enum PgStatusKind {
@@ -289,6 +291,18 @@ typedef struct PgSnapshot {
     const struct PgCellText *text;
 } PgSnapshot;
 
+typedef struct PgRect {
+    uint32_t size;
+    uint32_t pane_id;
+    /**
+     * Normalized 0..1, relative to the session box.
+     */
+    float x;
+    float y;
+    float w;
+    float h;
+} PgRect;
+
 typedef struct PgStatus {
     uint32_t size;
     uint32_t version;
@@ -305,17 +319,37 @@ typedef struct PgStatus {
     struct PgStr msg;
 } PgStatus;
 
-typedef struct PgRect {
+typedef struct PgStatusSnapshotInfo {
     uint32_t size;
+    uint32_t version;
     uint32_t pane_id;
     /**
-     * Normalized 0..1, relative to the session box.
+     * Collection revision, independent of record seq and screen seq.
      */
-    float x;
-    float y;
-    float w;
-    float h;
-} PgRect;
+    uint64_t revision;
+    size_t count;
+} PgStatusSnapshotInfo;
+
+typedef struct PgStatusSnapshotRecord {
+    uint32_t size;
+    uint32_t version;
+    /**
+     * Record identity for ack_status, not a collection revision.
+     */
+    uint32_t seq;
+    enum PgStatusState state;
+    enum PgStatusKind kind;
+    /**
+     * All strings borrow the snapshot handle, not the core or message.
+     */
+    struct PgStr id;
+    struct PgStr msg;
+    struct PgStr app;
+    /**
+     * Frozen at sampling time; reads do not advance this value.
+     */
+    uint64_t age_ms;
+} PgStatusSnapshotRecord;
 
 /**
  * One changed row of a `delta`.
@@ -475,18 +509,6 @@ size_t pg_pane_dirty_rows(PgCore *core, uint32_t pane_id, uint16_t *out, size_t 
 
 void pg_snapshot_free(struct PgSnapshot *snap);
 
-size_t pg_status_count(PgCore *core);
-
-/**
- * Fills `out` with the focused pane's status record at `index`.
- */
-bool pg_status_at(PgCore *core, size_t index, struct PgStatus *out);
-
-/**
- * Marks a done/error record as seen; it may then be evicted.
- */
-bool pg_status_ack(PgCore *core, uint32_t pane_id, uint32_t seq);
-
 /**
  * Splits a pane and returns the **new pane id** (0 on failure).
  */
@@ -516,6 +538,52 @@ uint32_t pg_layout_split_of(PgCore *core, uint32_t pane_id);
 bool pg_layout_focus(PgCore *core, uint32_t pane_id);
 
 uint32_t pg_layout_focused(PgCore *core);
+
+/**
+ * Legacy count of all stored records in the focused pane, including acked records.
+ * Reads do not consume or acknowledge; new consumers should use pg_status_snapshot_new.
+ */
+size_t pg_status_count(PgCore *core);
+
+/**
+ * Legacy read of a stored record (including acked records) in the focused pane.
+ * Does not consume or acknowledge. msg borrows the core until its next mutation.
+ */
+bool pg_status_at(PgCore *core, size_t index, struct PgStatus *out);
+
+/**
+ * Marks a done/error record as seen; it may then be evicted.
+ */
+bool pg_status_ack(PgCore *core, uint32_t pane_id, uint32_t seq);
+
+/**
+ * Copies all pending records for pane_id, independently of focus. Never consumes or
+ * acknowledges. Empty is a valid handle; missing pane is NULL / PG_ERR_NO_SUCH_PANE.
+ */
+PgStatusSnapshot *pg_status_snapshot_new(const PgCore *core, uint32_t pane_id);
+
+/**
+ * Copies a validated status_snapshot message. Wrong type or invalid fields return
+ * NULL / PG_ERR_INVALID_ARG. The handle survives freeing the source message.
+ */
+PgStatusSnapshot *pg_msg_status_snapshot(const PgMsg *msg);
+
+/**
+ * Reads immutable metadata. Caller initializes out.size; smaller structs are rejected,
+ * larger structs have their trailing bytes zeroed. NULL is PG_ERR_INVALID_ARG.
+ */
+bool pg_status_snapshot_info(const PgStatusSnapshot *snapshot, struct PgStatusSnapshotInfo *out);
+
+/**
+ * Reads one record in id order. out.size follows pg_status_snapshot_info. Index >= count
+ * returns false / PG_ERR_INVALID_ARG. Strings remain valid until this handle is freed.
+ */
+bool pg_status_snapshot_at(const PgStatusSnapshot *snapshot, size_t index, struct PgStatusSnapshotRecord *out);
+
+/**
+ * Frees a snapshot and invalidates every string borrowed from it. NULL is a no-op.
+ */
+void pg_status_snapshot_free(PgStatusSnapshot *snapshot);
 
 /**
  * Builds an owned delta from a `delta` message; NULL for any other message type.

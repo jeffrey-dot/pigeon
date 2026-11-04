@@ -5,9 +5,11 @@
 //!   * `done` / `error` stay until the user has seen them (`ack`); acking a live
 //!     `working` / `blocked` record is a no-op;
 //!   * `working` / `blocked` die with the process or at an OSC 133A prompt;
-//!   * at most [`MAX_RECORDS`] records per pane, evicting acked ones first.
+//!   * at most [`MAX_RECORDS`] records per pane, rejecting new ids when no acked slot can be reclaimed.
 
 mod parse;
+mod snapshot;
+pub use snapshot::{StatusSnapshot, StatusSnapshotRecord};
 
 use std::collections::BTreeMap;
 use std::time::Instant;
@@ -110,7 +112,7 @@ pub struct StatusStore {
     /// Last title reported by OSC 0/2.
     title: Option<String>,
     /// Bumped on every mutation, so the host can broadcast only on change.
-    revision: u32,
+    revision: u64,
     next_seq: u32,
 }
 
@@ -161,12 +163,12 @@ impl StatusStore {
     }
 
     /// Changes whenever the record set or any record changes.
-    pub fn revision(&self) -> u32 {
+    pub fn revision(&self) -> u64 {
         self.revision
     }
 
     fn touch(&mut self) {
-        self.revision = self.revision.wrapping_add(1);
+        self.revision = self.revision.saturating_add(1);
     }
 
     /// Marks whichever record carries `seq` as seen. Only `done`/`error` can be seen: a
@@ -175,7 +177,7 @@ impl StatusStore {
     pub fn ack_seq(&mut self, seq: u32) -> bool {
         let mut acked = false;
         for record in self.records.values_mut() {
-            if record.seq == seq && record.state.is_terminal() {
+            if record.seq == seq && record.state.is_terminal() && !record.acked {
                 record.acked = true;
                 acked = true;
             }
@@ -216,8 +218,9 @@ impl StatusStore {
     /// record can be acked (see [`StatusStore::ack_seq`]).
     pub fn ack(&mut self, id: &str, seq: u32) -> bool {
         match self.records.get_mut(id) {
-            Some(record) if record.seq == seq && record.state.is_terminal() => {
+            Some(record) if record.seq == seq && record.state.is_terminal() && !record.acked => {
                 record.acked = true;
+                self.touch();
                 true
             }
             _ => false,
@@ -251,7 +254,23 @@ impl StatusStore {
                 let Some(state) = State::parse(&report.state) else {
                     return;
                 };
-                self.next_seq = self.next_seq.saturating_add(1);
+                // Preserve unread identities when full, and never reuse an exhausted seq.
+                let Some(seq) = self.next_seq.checked_add(1) else {
+                    return;
+                };
+                if !self.records.contains_key(&report.id) && self.records.len() >= MAX_RECORDS {
+                    let victim = self
+                        .records
+                        .values()
+                        .filter(|record| record.acked)
+                        .min_by_key(|record| record.seq)
+                        .map(|record| record.id.clone());
+                    let Some(victim) = victim else {
+                        return;
+                    };
+                    self.records.remove(&victim);
+                }
+                self.next_seq = seq;
                 let since = match self.records.get(&report.id) {
                     Some(previous) if previous.state == state => previous.since,
                     _ => Instant::now(),
@@ -268,7 +287,6 @@ impl StatusStore {
                 };
                 self.records.insert(report.id, record);
                 self.touch();
-                self.evict();
             }
         }
     }
@@ -294,26 +312,6 @@ impl StatusStore {
         }
         for key in doomed {
             self.records.remove(&key);
-        }
-    }
-
-    /// Drops the oldest acked record first, then the oldest overall.
-    fn evict(&mut self) {
-        while self.records.len() > MAX_RECORDS {
-            let victim = self
-                .records
-                .values()
-                .filter(|record| record.acked)
-                .min_by_key(|record| record.seq)
-                .or_else(|| self.records.values().min_by_key(|record| record.seq))
-                .map(|record| record.id.clone());
-            match victim {
-                Some(id) => {
-                    self.records.remove(&id);
-                    self.touch();
-                }
-                None => break,
-            }
         }
     }
 }

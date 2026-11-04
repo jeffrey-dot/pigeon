@@ -148,7 +148,9 @@ impl Core {
         Ok(())
     }
 
-    /// The focused pane and its OSC 7501 records.
+    /// Legacy read of the focused pane and all stored OSC 7501 records, including acked
+    /// ones. Borrows this core; does not consume or acknowledge. For an owned pending
+    /// collection with a revision, use [`Core::status_snapshot`].
     pub fn focused_status(&self) -> PgResult<(PaneId, impl Iterator<Item = &Record>)> {
         let pane = self.focused_pane()?;
         Ok((pane.pane_id, pane.status().records()))
@@ -253,7 +255,7 @@ impl Core {
         pane_id
     }
 
-    fn pane(&self, pane_id: PaneId) -> PgResult<&PaneState> {
+    pub(super) fn pane(&self, pane_id: PaneId) -> PgResult<&PaneState> {
         self.panes.get(&pane_id).ok_or(PgError::NoSuchPane)
     }
 

@@ -28,7 +28,8 @@ pub enum Event {
     },
     Status {
         pane_id: u32,
-        frame: Frame,
+        legacy: Frame,
+        snapshot: Frame,
     },
     /// Titles/cwd changed: clients should refresh `sessions`.
     SessionsChanged,

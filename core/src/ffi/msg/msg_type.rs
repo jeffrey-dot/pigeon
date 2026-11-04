@@ -1,4 +1,4 @@
-/// The M0 subset of `docs/protocol.md` §3.
+/// Message kinds from `docs/protocol.md` §3.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PgMsgType {
@@ -33,6 +33,7 @@ pub enum PgMsgType {
     PG_MSG_SCROLL = 28,
     PG_MSG_PASTE = 29,
     PG_MSG_SHUTDOWN = 30,
+    PG_MSG_STATUS_SNAPSHOT = 31,
 }
 
 /// Wire name ↔ enum. Kept in one place so the two can never drift.
@@ -67,6 +68,7 @@ const NAMES: &[(PgMsgType, &str)] = &[
     (PgMsgType::PG_MSG_SCROLL, "scroll"),
     (PgMsgType::PG_MSG_PASTE, "paste"),
     (PgMsgType::PG_MSG_SHUTDOWN, "shutdown"),
+    (PgMsgType::PG_MSG_STATUS_SNAPSHOT, "status_snapshot"),
 ];
 
 pub(super) fn name_of(msg_type: PgMsgType) -> Option<&'static str> {

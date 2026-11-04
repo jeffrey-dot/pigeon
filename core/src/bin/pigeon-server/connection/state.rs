@@ -20,6 +20,8 @@ pub struct ClientState {
     /// `status_all`: this connection gets every pane's `status`, attached or not, so a
     /// sidebar can follow all agents without joining (and resizing) every session.
     pub status_all: bool,
+    /// Complete multi-record sets replace legacy status when negotiated.
+    pub status_snapshot: bool,
     /// How far each pane is scrolled back for *this* window; 0 is the live screen. Two
     /// windows on one session scroll independently because this lives per connection.
     pub views: HashMap<u32, usize>,

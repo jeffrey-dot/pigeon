@@ -17,6 +17,7 @@ use pigeon_core::term::Palette;
 use crate::host::event::{encode, Event};
 use crate::host::state::{Exits, HostState, Meta};
 use crate::pane::cmd::Cmd;
+use crate::pane::status::StatusBroadcast;
 
 const SCROLLBACK: usize = 10_000;
 /// One PTY read. Big enough that `cat` of a large file takes a few reads per frame, not
@@ -86,7 +87,7 @@ pub fn spawn_pane(
         events: host.events.clone(),
         meta: Arc::clone(&host.meta),
         exits: Arc::clone(&host.exits),
-        last_revision: 0,
+        status: StatusBroadcast::default(),
         last_meta: None,
         last_flush: Instant::now() - FRAME,
         dirty: false,
@@ -147,7 +148,7 @@ struct PaneActor {
     events: broadcast::Sender<Event>,
     meta: Meta,
     exits: Exits,
-    last_revision: u32,
+    status: StatusBroadcast,
     last_meta: Option<(Option<String>, Option<String>)>,
     /// When the last delta left, and whether the screen changed since.
     last_flush: Instant,
@@ -301,10 +302,18 @@ impl PaneActor {
             }
             Cmd::Ack(seq) => {
                 pane.status_mut().ack_seq(seq);
+                self.status.publish(pane, &self.events);
             }
             Cmd::SetPalette(palette) => {
                 pane.set_palette(palette);
                 // No flush: the palette only affects query answers, not the screen.
+            }
+            Cmd::StatusSnapshot { reply } => {
+                let message = pigeon_core::proto::status_snapshot_message(
+                    pane.pane_id,
+                    pane.status().snapshot(),
+                );
+                let _ = reply.send(message);
             }
             Cmd::Status { reply } => {
                 let _ = reply.send(pane.status_message());
@@ -337,13 +346,7 @@ impl PaneActor {
                 let _ = self.events.send(Event::SessionsChanged);
             }
         }
-        let revision = self.pane.status().revision();
-        if revision != self.last_revision {
-            self.last_revision = revision;
-            if let Some(frame) = encode(&self.pane.status_message()) {
-                let _ = self.events.send(Event::Status { pane_id, frame });
-            }
-        }
+        self.status.publish(&self.pane, &self.events);
         let replies = self.pane.take_replies();
         if !replies.is_empty() {
             self.write_input(replies);
@@ -361,6 +364,7 @@ impl PaneActor {
     fn exited(&mut self, code: i32) {
         let pane_id = self.pane.pane_id;
         self.pane.status_mut().on_process_exit();
+        self.status.publish(&self.pane, &self.events);
         if let Ok(mut exits) = self.exits.lock() {
             exits.insert(pane_id, code);
         }

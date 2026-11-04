@@ -59,7 +59,7 @@ pub async fn resync(
     }
     // `idle` included: a lost clear must replace what the window last showed.
     for &pane_id in &panes {
-        if let Some(status) = current_status(&host.sessions, pane_id).await {
+        if let Some(status) = current_status(&host.sessions, pane_id, state.status_snapshot).await {
             outbound.send(&status)?;
         }
     }
@@ -80,3 +80,6 @@ pub async fn resync(
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

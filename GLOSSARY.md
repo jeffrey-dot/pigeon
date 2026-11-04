@@ -59,7 +59,7 @@
 | **确认** ack | 用户已看过该记录，可以被淘汰（`ack_status`）。对 `working`/`blocked` 无效 | read、clear |
 | **清除** clear | OSC 7501 的 `clear` 指令：删除一棵子树。与 ack 是两条路 | ack、reset |
 | **未监控** unmonitored | 没有任何 OSC 7501 记录时的显示：侧栏该 pane 不给状态 | unknown、idle |
-| **聚合** aggregate | 按 `blocked > error > done > working > idle` 合并各 pane 最新状态并保留来源 pane，再派生项目计数；同 pane 多记录同步待补 | rollup、summarize |
+| **聚合** aggregate | 按 `blocked > error > done > working > idle` 合并各 pane 最新状态并保留来源 pane，再派生项目计数；宿主支持同 pane 完整集合，客户端聚合接入待补 | rollup、summarize |
 
 ## 4. 宿主与协议
 
@@ -71,7 +71,7 @@
 | **`instance`** | 宿主进程的一次启动标识（`hello_ack.instance`）。变了意味着 `seq` 与 pane id 从头开始 | pid、epoch |
 | **帧** frame | `u32` 小端长度 + 恰好那么多字节的 payload，上限 8 MiB | packet |
 | **payload** | 一帧里的单个 CBOR map，其中 `t` 是消息名 | body、content |
-| **能力** feature | 握手协商的功能名（`delta` / `scrollback` / `zstd` / `osc7501` / `status_all`） | capability flag |
+| **能力** feature | 握手协商的功能名（`delta` / `scrollback` / `zstd` / `osc7501` / `status_all` / `status_snapshot`） | capability flag |
 | **尺寸策略** size policy | 契约为 pane 级：`latest`（默认）/ `smallest` / `locked`；当前实现按会话投票，首次 attach 决定，差异见协议 §0 | resize mode |
 | **尺寸来源** source | `size_state.source`：当前谁在决定尺寸，必须显示在侧栏 | owner |
 | **背压** backpressure | 慢连接中同 pane 的待发 delta 合并为最新快照；出站字节超过 64 MiB 断开，客户端重连 attach | throttling |

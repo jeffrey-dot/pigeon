@@ -9,7 +9,13 @@ use crate::connection::state::ClientState;
 use crate::host::state::HostState;
 
 /// Capabilities this build offers (protocol §5).
-const SERVER_FEATURES: &[&str] = &["delta", "scrollback", "osc7501", "status_all"];
+const SERVER_FEATURES: &[&str] = &[
+    "delta",
+    "scrollback",
+    "osc7501",
+    "status_all",
+    "status_snapshot",
+];
 
 /// Protocol §3.1: a connection that has not said `hello` by then is dropped.
 const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
@@ -53,6 +59,7 @@ pub fn hello(proto: u16, features: &[String], state: &mut ClientState) -> Messag
         .map(|feature| (*feature).to_owned())
         .collect();
     state.delta_ok = offered.iter().any(|f| f == "delta");
+    state.status_snapshot = offered.iter().any(|f| f == "status_snapshot");
     state.status_all = offered.iter().any(|f| f == "status_all");
     Message::HelloAck {
         proto: PROTO_VERSION,

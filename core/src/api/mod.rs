@@ -17,6 +17,9 @@
 mod core;
 mod msg;
 mod outbox;
+mod status;
+pub use crate::status::{StatusSnapshot, StatusSnapshotRecord};
+pub use status::status_snapshot_of;
 
 pub use self::core::{Config, Core};
 pub use self::msg::{
@@ -32,7 +35,8 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub use crate::layout::{Axis, PaneId, Rect, SplitId};
 pub use crate::proto::{
     decode, decode_frame, encode, encode_frame, Cell as WireCell, CellText, Cursor as WireCursor,
-    Link, Message, Node, Row, Scroll, SessionInfo, SplitAxis, SplitNode, MAX_FRAME, PROTO_VERSION,
+    Link, Message, Node, Row, Scroll, SessionInfo, SplitAxis, SplitNode, WireStatusRecord,
+    MAX_FRAME, PROTO_VERSION,
 };
 pub use crate::session::DeltaRows;
 pub use crate::status::{Kind as StatusKind, Record as StatusRecord, State as StatusState};

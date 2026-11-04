@@ -1,8 +1,10 @@
 //! Message schema and wire names (docs/protocol.md §3).
 
-use std::collections::BTreeMap;
+use super::{
+    Cell, CellText, Cursor, Link, Node, Row, Scroll, SessionInfo, SplitAxis, WireStatusRecord,
+};
 use serde::{Deserialize, Serialize};
-use super::{Cell, CellText, Cursor, Link, Node, Row, Scroll, SessionInfo, SplitAxis};
+use std::collections::BTreeMap;
 
 /// Every message the M1 host and client speak. `t` carries the snake-case name.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -211,6 +213,11 @@ pub enum Message {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         age_ms: Option<u64>,
     },
+    StatusSnapshot {
+        pane_id: u32,
+        revision: u64,
+        records: Vec<WireStatusRecord>,
+    },
     AckStatus {
         pane_id: u32,
         seq: u32,
@@ -262,6 +269,7 @@ impl Message {
             Self::SizeState { .. } => "size_state",
             Self::PaneExited { .. } => "pane_exited",
             Self::Status { .. } => "status",
+            Self::StatusSnapshot { .. } => "status_snapshot",
             Self::AckStatus { .. } => "ack_status",
             Self::Ping { .. } => "ping",
             Self::Shutdown => "shutdown",

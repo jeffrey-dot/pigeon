@@ -1,3 +1,4 @@
+
 use super::parse::MAX_SEQUENCE;
 use super::{Kind, State, StatusStore, MAX_RECORDS};
 
@@ -111,10 +112,16 @@ fn acking_a_live_state_keeps_it_visible() {
     store.feed(&report("id=a:state=blocked:kind=permission"));
     assert!(!store.ack_seq(1), "blocked is not something to acknowledge");
     assert!(!store.ack("a", 1));
-    assert_eq!(store.latest_unacked().map(|r| r.state), Some(State::Blocked));
+    assert_eq!(
+        store.latest_unacked().map(|r| r.state),
+        Some(State::Blocked)
+    );
     store.feed(&report("id=a:state=working"));
     assert!(!store.ack_seq(2));
-    assert_eq!(store.latest_unacked().map(|r| r.state), Some(State::Working));
+    assert_eq!(
+        store.latest_unacked().map(|r| r.state),
+        Some(State::Working)
+    );
     store.feed(&report("id=a:state=done"));
     assert!(store.ack_seq(3), "done is acknowledged once seen");
     assert!(store.latest_unacked().is_none());
@@ -127,9 +134,16 @@ fn a_repeated_state_keeps_its_start_time() {
     let started = store.get("a").expect("record").since;
     std::thread::sleep(std::time::Duration::from_millis(5));
     store.feed(&report("id=a:state=working:msg=dHdv"));
-    assert_eq!(store.get("a").expect("record").since, started, "same state, same clock");
+    assert_eq!(
+        store.get("a").expect("record").since,
+        started,
+        "same state, same clock"
+    );
     store.feed(&report("id=a:state=blocked"));
-    assert!(store.get("a").expect("record").since > started, "a new state restarts it");
+    assert!(
+        store.get("a").expect("record").since > started,
+        "a new state restarts it"
+    );
 }
 
 #[test]
@@ -191,7 +205,10 @@ fn overlong_complete_sequence_never_becomes_a_record() {
     bytes.extend(std::iter::repeat_n(b'x', MAX_SEQUENCE));
     bytes.push(0x07);
     store.feed(&bytes);
-    assert!(store.is_empty(), "a terminated over-limit report is dropped too");
+    assert!(
+        store.is_empty(),
+        "a terminated over-limit report is dropped too"
+    );
 }
 
 #[test]
@@ -262,4 +279,30 @@ fn other_osc133_marks_are_not_prompts() {
     store.feed(&report("id=a:state=working"));
     store.feed(b"\x1b]133;B\x07\x1b]133;C\x07\x1b]133;D;0\x07\x1b]133;AB\x07");
     assert!(store.get("a").is_some(), "only `A` is a prompt");
+}
+
+#[test]
+fn id_ack_and_seq_ack_each_advance_revision_exactly_once() {
+    let mut store = StatusStore::new();
+    store.feed(&report("id=a:state=done"));
+    let revision = store.revision();
+    assert!(store.ack("a", 1));
+    assert_eq!(store.revision(), revision + 1);
+    assert!(!store.ack("a", 1));
+    assert!(!store.ack_seq(1));
+    assert_eq!(store.revision(), revision + 1);
+}
+
+#[test]
+fn sequence_exhaustion_does_not_reuse_an_ack_identity() {
+    let mut store = StatusStore::new();
+    store.next_seq = u32::MAX - 1;
+    store.feed(&report("id=a:state=done"));
+    let revision = store.revision();
+    store.feed(&report("id=b:state=error"));
+    assert_eq!(store.revision(), revision);
+    assert!(store.get("b").is_none());
+    assert!(store.ack_seq(u32::MAX));
+    store.feed(&report("state=clear"));
+    assert!(store.snapshot().records.is_empty());
 }

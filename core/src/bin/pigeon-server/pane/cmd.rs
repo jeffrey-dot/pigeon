@@ -29,6 +29,9 @@ pub enum Cmd {
         offset: usize,
         reply: oneshot::Sender<(Message, usize)>,
     },
+    StatusSnapshot {
+        reply: oneshot::Sender<Message>,
+    },
     LatestStatus {
         reply: oneshot::Sender<Option<Message>>,
     },

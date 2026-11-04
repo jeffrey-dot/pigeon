@@ -122,7 +122,7 @@ pub(super) fn samples() -> Vec<Message> {
             since: None,
         },
         Message::Snapshot {
-    text: Vec::new(),
+            text: Vec::new(),
             pane_id: 1,
             seq: 1,
             cols: 2,
@@ -152,7 +152,7 @@ pub(super) fn samples() -> Vec<Message> {
             modes: Some(0b10),
         },
         Message::Delta {
-    text: Vec::new(),
+            text: Vec::new(),
             pane_id: 1,
             seq: 2,
             rows: vec![Row {

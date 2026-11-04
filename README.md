@@ -28,6 +28,7 @@ Linux GTK4 客户端已能连接本地宿主、渲染、分屏、增量更新、
 - [docs/remote.md](docs/remote.md) —— **SSH 方案**：远端后台进程、三种对接、安装与安全
 - [docs/update.md](docs/update.md) —— **软件更新**：检查与安装、签名、发版步骤
 - [docs/core.md](docs/core.md) —— **内核设计**：C ABI、快照/增量、语言选型（Rust）、测试策略
+- [docs/status-sync.md](docs/status-sync.md) —— **状态同步**：完整记录集合、修订号、双外形读取与客户端接入
 - [docs/protocol.md](docs/protocol.md) —— **协议契约**：客户端 ⇄ 宿主的消息表、错误码、能力与尺寸策略
 - [docs/ui.md](docs/ui.md) —— **UI 规格**：侧栏分组/状态图标/相对时间/交互键位，附参考图
 - [docs/tmux-integration.md](docs/tmux-integration.md) —— 历史资料：上一版（gmux）怎么跟 tmux 交互、哪些 tmux 配置会影响它

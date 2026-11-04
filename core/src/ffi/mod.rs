@@ -17,7 +17,9 @@ use crate::api::{self, Axis, Core, PgError, PgResult, StatusKind, StatusState};
 
 mod cell_text;
 mod status;
+mod status_snapshot;
 pub use status::*;
+pub use status_snapshot::*;
 pub mod delta;
 pub mod msg;
 

@@ -8,12 +8,13 @@
 
 本文保留字段契约；定义了字段不等于所有路径已实现。当前差异如下：
 
-- 宿主提供 `delta`、`scrollback`、`osc7501`、`status_all`；macOS 请求 `delta`、`scrollback`、`status_all`，Linux 请求 `delta`、`scrollback`，首帧快照之后应用连续增量，回看由宿主 `scroll` 切片。
+- 宿主提供 `delta`、`scrollback`、`osc7501`、`status_all`、`status_snapshot`；macOS 请求 `delta`、`scrollback`、`status_all`，Linux 请求 `delta`、`scrollback`，首帧快照之后应用连续增量，回看由宿主 `scroll` 切片。
 - `zstd` 是预留能力，宿主不提供，当前 payload 为裸 CBOR，无压缩 tag。
 - `snapshot`/`delta` 的 `links` 已有类型，但 VT 转换未保留 OSC 8，实际不下发链接；基础 cell 仍为单码点，附加码点通过下面的 `text` 稀疏表传递。
 - `new_session.env` 能编解码，但宿主尚未应用；结构化 `mouse` 能编解码但宿主返回 `unsupported`。
   macOS 将鼠标按当前 VT 模式编码成 `keys.bytes`，不是发送 `mouse`。
-- `status_all` 已通过独立 `status` 帧补发状态；`sessions` 本身不包含状态记录。未协商 `status_all` 的连接仍接收已 attach pane 的状态，不能靠未请求 `osc7501` 推断不会收到 `status`。
+- `status_snapshot` 已实现完整未确认记录集合与独立修订号；macOS/Linux 客户端尚未请求该能力。
+- `status_all` 通过独立 `status` 帧补发状态，协商 `status_snapshot` 后改用完整集合；`sessions` 本身不包含状态记录。未协商 `status_all` 的连接仍接收已 attach pane 的状态，不能靠未请求 `osc7501` 推断不会收到 `status`。
 - 心跳当前由 macOS 客户端实现：15s 未收到宿主消息后 ping，45s 无消息重连；宿主响应 pong。
   Linux 握手后每 15s ping 保活，尚无 pong 超时检测和自动恢复。
 - 握手当前拒绝不同 major 并返回自身 `PROTO_VERSION`；“minor 取较小值”的目标尚未实现。
@@ -105,7 +106,7 @@
 - 宿主大量输出时按 16 ms 合并脏行发 `delta`；按键之后的首次输出优先立即 flush，不受该间隔限制；pane 尺寸变化后不发 `delta`，而是给每个观看者推一帧 `snapshot`（脏行装不下新的列数）。
 - **慢客户端**：宿主给每个连接一条出站队列。某 pane 已有一帧 `delta` 在队里没发出去时又来一帧，两帧都换成该 pane 的一帧
   `snapshot`（发出时现取，即最新屏幕；`seq` 照常是它包含的最新 `delta`），所以读得慢的客户端看到的是 `delta … snapshot`
-  而不是一长串 `delta`，`seq` 不会跳号。这帧 `snapshot` 不带 `history`。`layout`/`size_state`/`status`/`pane_exited`/`sessions`
+  而不是一长串 `delta`，`seq` 不会跳号。这帧 `snapshot` 不带 `history`。`layout`/`size_state`/`status`/`status_snapshot`/`pane_exited`/`sessions`
   与请求的答复从不丢弃、彼此保持顺序。队列里编码后的字节超过 64 MiB 时宿主直接断开该连接（不发 `backpressure`），客户端照
   §7 重连、重新 `attach`。
 - `cursor.shape`：`0` 方块、`1` 下划线、`2` 竖线。
@@ -135,10 +136,30 @@
 | c→s | `mouse` | `pane_id: u32`, `kind: "down"\|"up"\|"move"\|"wheel"`, `x: u16`, `y: u16`, `button: u8`, `mods: u8` | — | `mods` 位：`1` shift、`2` alt、`4` ctrl |
 | c→s | `paste` | `pane_id: u32`, `text: str` | — | 宿主负责括号粘贴包装：程序开了 `?2004` 才包 `ESC[200~ … ESC[201~`，并去掉正文里的起止标记（防止剪贴板内容提前结束粘贴、把后面当命令执行）；`\n`/`\r\n` 换成 `\r` |
 | s→c | `status` | `pane_id: u32`, `state: "idle"\|"working"\|"blocked"\|"done"\|"error"`, `seq: u32` | `kind: "permission"\|"question"\|"auth"`, `msg: str`, `app: str`, `id: str`, `age_ms: u64` | 来自 OSC 7501；`msg`/`app` 只当纯文本；`app` 是上报的 agent 名（`app=`），`id` 是记录 id；`age_ms` = 进入当前 `state` 已多少毫秒（宿主时钟上的时长，不是时间戳，两端时钟不必一致；同一状态重复上报不重置） |
+| s→c | `status_snapshot` | `pane_id: u32`, `revision: u64`, `records: [status_record]` | — | 仅协商同名能力后发送；完整未确认记录集合，原子替换该 pane 旧集合；空数组表示清空 |
+
+`status_record = {id: str, seq: u32, state: str, kind: str, msg: str, app: str, age_ms: u64}`：
+所有字段必选，文本缺省值为 `""`；state 是与旧 status 相同的五个值，kind 是 `""`/`permission`/`question`/`auth`。
+`id: ""` 表示 pane 默认记录。宿主按 id 排列；接收端不得将数组顺序解释成 UI 优先级。
+
+- **记录身份与集合修订号分离**：record seq 仅标识记录更新，用于 `ack_status`；删除或 ack 后，较低 seq
+  仍可重新成为旧路径的当前记录。revision 从 0 开始，记录变更、成功 ack、实际删除均递增；重复/过期/live ack、
+  无效 OSC、纯读取不递增。revision 与屏幕 seq 无关，仅同 host instance、pane 内可比较。
+- 新能力的每一帧都是全量；未出现的记录明确从集合删除，原因可能是 ack、clear、提示符、退出或同 id 更新。
+  **缺失不代表本客户端已查看**。空集合也必须应用。客户端在新连接首次全量建立基准，同连接忽略不大于已应用 revision
+  的后续集合；instance 变化清空旧基准。允许 revision 跳号，不需要状态增量续传。
+- 握手协商 `status_all` 时，在 sessions 后发送所有 pane 全量（包括空集合）；否则 attach 后发送该 pane 全量。
+  attach.since 只影响屏幕，状态始终全量；事件总线丢帧恢复同样重发全量。ack 成功后立即广播，
+  不等待下一次 PTY 输出；多个客户端观察同一个宿主集合，任一客户端确认都会使该记录从新路径删除。
+- 每 pane 最多 256 条存储记录；容量满时只回收已确认记录，无可回收槽位则忽略新 id，上报已有 id 仍可更新。
+  不因容量静默丢弃未确认终态。seq 到 u32 上限后拒绝新记录更新，ack/clear 仍可用，不复用身份。
+- wire 校验拒绝 pane_id/record seq 为 0、非空集合 revision 为 0、重复 id/seq、非法 state/kind、
+  id/msg/app 控制字符、单记录三个文本 UTF-8 长度之和 >4096、记录数 >256，以及必选字段缺失/null/类型错误。
+  单帧仍受 8 MiB 限制。详见 [状态同步与双外形读取](status-sync.md)。
 
 - `status` 的生命周期由内核负责：进程退出或 OSC 133A 提示符 → 丢弃 `working`/`blocked`；
   `done`/`error` 保留到客户端 `ack_status`。`ack_status` 对 `working`/`blocked` 无效：那是 agent 当下的状态，
-  用户正看着也不能被“看过”清掉。
+  用户正看着也不能被“看过”清掉。旧路径在成功 ack 后也立即广播下一条未确认记录；为空时发 idle/seq=0。
 - `msg` 含控制字符或解不出 UTF-8 → 整条丢弃（不带 `msg` 也不改写），见 `AGENTS.md` §7 不变量 3。
 
 ### 3.5 控制
@@ -175,7 +196,8 @@
 | `scrollback` | s→c | `snapshot.history` 与 `scroll` 可用 | 不下发历史，客户端隐藏滚动条 |
 | `zstd` | 双向 | 帧 payload 带 1 字节 tag，`0x01` 为 zstd | payload 必须是不带 tag 的裸 CBOR |
 | `osc7501` | s→c | 发 `status` | 不发 `status`，侧栏不显示 agent 状态 |
-| `status_all` | s→c | 不 `attach` 也收到**所有** pane 的 `status`：握手后紧跟 `sessions` 补发每个 pane 当前未确认的状态，之后实时推送；未 attach 的状态观察者不进尺寸投票；同一连接之后 attach 会参与对应 pane 的投票 | 只收已 `attach` 的 pane 的 `status`（侧栏要靠逐个 `attach` 才能看到后台会话） |
+| `status_snapshot` | s→c | 完整状态集合 + 独立 revision；与 `status_all` 正交，协商后替代旧 `status`，不同时发送两种外形 | 保持旧 `status` 单记录路径 |
+| `status_all` | s→c | 不 `attach` 也收到**所有** pane 的状态（按 `status_snapshot` 协商选外形）：握手后紧跟 `sessions` 补发每个 pane 当前未确认的状态，之后实时推送；未 attach 的状态观察者不进尺寸投票；同一连接之后 attach 会参与对应 pane 的投票 | 只收已 `attach` 的 pane 的 `status`（侧栏要靠逐个 `attach` 才能看到后台会话） |
 
 新增能力只是往表里加一行；客户端必须忽略不认识的名称。
 
@@ -223,7 +245,8 @@
 | `PgCell.codepoint/attrs/fg/bg` | `cell[0..3]`（必定存在） |
 | `PgCell.hyperlink_id` | `cell[4]`（可选；缺省 = 无链接） |
 | `PgCell.width` | 由 `codepoint` 推导，不上线 |
-| `PgStatus.state/kind/msg/seq` | `status.state/kind/msg/seq` |
+| `PgStatus.state/kind/msg/seq` | `status.state/kind/msg/seq`（旧 focused-pane 接口包含已确认存储记录） |
+| `pg_status_snapshot_new` / `pg_msg_status_snapshot` + `pg_status_snapshot_info/at/free` | `status_snapshot` 的完整未确认集合；Rust 为 `Core::status_snapshot` / `api::status_snapshot_of`，独立所有权、读取不消费 |
 | `PgRect` | `layout.tree` 的展开结果，不上线 |
 | `pg_pane_dirty_rows` | `delta.rows[].y` |
 

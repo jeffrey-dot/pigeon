@@ -33,7 +33,10 @@ pub async fn snapshot_of(sessions: &Sessions, pane_id: u32, history: bool) -> Op
 }
 
 /// The pane's current status, so a client that attaches later still sees it.
-pub async fn latest_status(sessions: &Sessions, pane_id: u32) -> Option<Message> {
+pub async fn latest_status(sessions: &Sessions, pane_id: u32, complete: bool) -> Option<Message> {
+    if complete {
+        return current_status(sessions, pane_id, true).await;
+    }
     let sender = sender_of(sessions, pane_id).await?;
     let (tx, rx) = oneshot::channel();
     sender.send(Cmd::LatestStatus { reply: tx }).await.ok()?;
@@ -41,16 +44,21 @@ pub async fn latest_status(sessions: &Sessions, pane_id: u32) -> Option<Message>
 }
 
 /// The pane's status as it stands, `idle` included.
-pub async fn current_status(sessions: &Sessions, pane_id: u32) -> Option<Message> {
+pub async fn current_status(sessions: &Sessions, pane_id: u32, complete: bool) -> Option<Message> {
     let sender = sender_of(sessions, pane_id).await?;
     let (tx, rx) = oneshot::channel();
-    sender.send(Cmd::Status { reply: tx }).await.ok()?;
+    let command = if complete {
+        Cmd::StatusSnapshot { reply: tx }
+    } else {
+        Cmd::Status { reply: tx }
+    };
+    sender.send(command).await.ok()?;
     rx.await.ok()
 }
 
 /// Every pane's pending status, for a `status_all` client that just connected; the session
 /// list goes first so the client can place each pane.
-pub async fn pending_statuses(sessions: &Sessions) -> Vec<Message> {
+pub async fn pending_statuses(sessions: &Sessions, complete: bool) -> Vec<Message> {
     let panes: Vec<u32> = {
         let map = sessions.lock().await;
         let mut panes: Vec<u32> = map.values().flat_map(|s| s.panes.keys().copied()).collect();
@@ -59,7 +67,7 @@ pub async fn pending_statuses(sessions: &Sessions) -> Vec<Message> {
     };
     let mut out = Vec::new();
     for pane_id in panes {
-        if let Some(status) = latest_status(sessions, pane_id).await {
+        if let Some(status) = latest_status(sessions, pane_id, complete).await {
             out.push(status);
         }
     }

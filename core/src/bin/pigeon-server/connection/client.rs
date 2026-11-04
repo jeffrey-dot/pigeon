@@ -177,7 +177,7 @@ async fn reply_to(
     };
     outbound.send(&reply)?;
     if let Some(pane_id) = attached_pane {
-        if let Some(status) = latest_status(&host.sessions, pane_id).await {
+        if let Some(status) = latest_status(&host.sessions, pane_id, state.status_snapshot).await {
             outbound.send(&status)?;
         }
     }
@@ -185,7 +185,7 @@ async fn reply_to(
     if handshake {
         outbound.send(&handshake::sessions(host).await)?;
         if state.status_all {
-            for status in pending_statuses(&host.sessions).await {
+            for status in pending_statuses(&host.sessions, state.status_snapshot).await {
                 outbound.send(&status)?;
             }
         }
@@ -213,9 +213,17 @@ async fn forward(
                 outbound.send(&Message::PaneExited { pane_id, code })?;
             }
         }
-        Event::Status { pane_id, frame } => {
-            if state.status_all || state.watched.contains_key(&pane_id) {
-                outbound.control(frame)?;
+        Event::Status {
+            pane_id,
+            legacy,
+            snapshot,
+        } => {
+            if state.greeted && (state.status_all || state.watched.contains_key(&pane_id)) {
+                outbound.control(if state.status_snapshot {
+                    snapshot
+                } else {
+                    legacy
+                })?;
             }
         }
         Event::SessionsChanged => {

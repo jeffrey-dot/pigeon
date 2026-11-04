@@ -609,3 +609,6 @@ fn sessions_and_zoom_are_read_through_the_api_helpers() {
     pg_msg_free(sessions);
     pg_msg_free(layout);
 }
+
+#[path = "abi/status_sync.rs"]
+mod status_sync;

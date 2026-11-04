@@ -160,7 +160,7 @@ fn encoding_a_payload_over_the_cap_is_rejected() {
         MAX_FRAME + 1
     ];
     let message = Message::Snapshot {
-    text: Vec::new(),
+        text: Vec::new(),
         pane_id: 1,
         seq: 1,
         cols: 1,

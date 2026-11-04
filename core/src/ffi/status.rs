@@ -1,6 +1,9 @@
 //! Legacy focused-pane status ABI; new consumers should use status_snapshot.
 
-use super::{ffi_call, unsafe_ref, unsafe_mut, map_state, map_kind, PgCore, PgStr, PgError, PG_CORE_ABI_VERSION};
+use super::{
+    ffi_call, map_kind, map_state, unsafe_mut, unsafe_ref, PgCore, PgError, PgStr,
+    PG_CORE_ABI_VERSION,
+};
 
 // ---------------------------------------------------------------- status
 
@@ -36,6 +39,8 @@ pub struct PgStatus {
     pub msg: PgStr,
 }
 
+/// Legacy count of all stored records in the focused pane, including acked records.
+/// Reads do not consume or acknowledge; new consumers should use pg_status_snapshot_new.
 #[no_mangle]
 pub extern "C" fn pg_status_count(core: *mut PgCore) -> usize {
     ffi_call(0, || {
@@ -44,7 +49,8 @@ pub extern "C" fn pg_status_count(core: *mut PgCore) -> usize {
     })
 }
 
-/// Fills `out` with the focused pane's status record at `index`.
+/// Legacy read of a stored record (including acked records) in the focused pane.
+/// Does not consume or acknowledge. msg borrows the core until its next mutation.
 #[no_mangle]
 pub extern "C" fn pg_status_at(core: *mut PgCore, index: usize, out: *mut PgStatus) -> bool {
     ffi_call(false, || {

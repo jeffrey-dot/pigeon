@@ -3,3 +3,5 @@
 pub mod actor;
 pub mod cmd;
 pub mod query;
+
+pub mod status;

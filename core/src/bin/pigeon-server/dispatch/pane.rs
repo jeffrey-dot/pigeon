@@ -129,7 +129,7 @@ pub async fn attach(
     drop(map);
     if snapshot.is_none() {
         // The caught-up client still needs the status it may have missed.
-        if let Some(status) = latest_status(sessions, pane_id).await {
+        if let Some(status) = latest_status(sessions, pane_id, state.status_snapshot).await {
             state.outbox.push(status);
         }
     }
