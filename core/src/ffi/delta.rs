@@ -48,40 +48,43 @@ pub extern "C" fn pg_msg_delta(msg: *const super::msg::PgMsg) -> *mut PgDelta {
         let message = msg.to_message()?;
         let delta = delta_of(&message)?;
         let pane_id = delta.pane_id;
-        let (text_count, text) = super::cell_text::export(
+        let text = super::cell_text::OwnedCellText::new(
             delta
                 .rows
                 .iter()
                 .map(|(y, cells)| (i32::from(*y), cells.as_slice())),
-        );
-        let rows = delta
+        )?;
+        let row_count = u32::try_from(delta.rows.len()).map_err(|_| PgError::InvalidArg)?;
+        let cells: Vec<Box<[PgCell]>> = delta
             .rows
-            .into_iter()
-            .map(|(y, cells)| {
-                let cells: Box<[PgCell]> = cells.iter().map(to_pg_cell).collect();
-                let cols = u16::try_from(cells.len()).map_err(|_| PgError::InvalidArg)?;
+            .iter()
+            .map(|(_, cells)| cells.iter().map(to_pg_cell).collect())
+            .collect();
+        let rows: Box<[PgDeltaRow]> = delta
+            .rows
+            .iter()
+            .zip(&cells)
+            .map(|((y, _), cells)| {
                 Ok(PgDeltaRow {
                     size: std::mem::size_of::<PgDeltaRow>() as u32,
-                    y,
-                    cols,
-                    // Reclaimed in pg_delta_free with the same length (`cols`).
-                    cells: Box::into_raw(cells).cast::<PgCell>().cast_const(),
+                    y: *y,
+                    cols: u16::try_from(cells.len()).map_err(|_| PgError::InvalidArg)?,
+                    cells: cells.as_ptr(),
                 })
             })
-            .collect::<Result<Box<[PgDeltaRow]>, PgError>>()?;
-        let row_count = u32::try_from(rows.len()).map_err(|_| PgError::InvalidArg)?;
+            .collect::<Result<_, PgError>>()?;
         let cursor = delta.cursor.unwrap_or(Cursor {
             x: 0,
             y: 0,
             visible: false,
             shape: 0,
         });
-        Ok(Box::into_raw(Box::new(PgDelta {
+        let mut result = Box::new(PgDelta {
             size: std::mem::size_of::<PgDelta>() as u32,
             pane_id,
             seq: delta.seq,
             row_count,
-            rows: Box::into_raw(rows).cast::<PgDeltaRow>().cast_const(),
+            rows: rows.as_ptr(),
             has_cursor: u8::from(delta.cursor.is_some()),
             cursor: PgCursor {
                 size: std::mem::size_of::<PgCursor>() as u32,
@@ -91,9 +94,16 @@ pub extern "C" fn pg_msg_delta(msg: *const super::msg::PgMsg) -> *mut PgDelta {
                 shape: cursor.shape,
             },
             alt_screen: delta.alt.map_or(2, u8::from),
-            text_count,
-            text,
-        })))
+            text_count: 0,
+            text: ptr::null(),
+        });
+        // No fallible work remains once ownership crosses the C boundary.
+        (result.text_count, result.text) = text.into_raw();
+        for row in cells {
+            let _ = Box::into_raw(row);
+        }
+        let _ = Box::into_raw(rows);
+        Ok(Box::into_raw(result))
     })
 }
 

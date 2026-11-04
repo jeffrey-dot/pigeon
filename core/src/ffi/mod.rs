@@ -501,7 +501,7 @@ pub(crate) fn build_snapshot(
         .collect::<Vec<_>>()
         .into_boxed_slice();
 
-    let snapshot = PgSnapshot {
+    let snapshot = Box::new(PgSnapshot {
         size: std::mem::size_of::<PgSnapshot>() as u32,
         version: PG_CORE_ABI_VERSION,
         pane_id,
@@ -515,7 +515,7 @@ pub(crate) fn build_snapshot(
         history_count,
         text_count: 0,
         text: ptr::null(),
-    };
+    });
 
     // The rows borrow the cell grids, so all three allocations leak together and
     // are reclaimed together in pg_snapshot_free.
@@ -524,7 +524,7 @@ pub(crate) fn build_snapshot(
     std::mem::forget(screen_cells);
     std::mem::forget(history_cells);
 
-    Ok(Box::into_raw(Box::new(snapshot)))
+    Ok(Box::into_raw(snapshot))
 }
 
 /// # Safety
@@ -822,6 +822,24 @@ fn snapshot_to_ffi(
     } else {
         Vec::new()
     };
+    let text_history = if with_history {
+        snapshot.history.as_slice()
+    } else {
+        &[]
+    };
+    let text = cell_text::OwnedCellText::new(
+        snapshot
+            .screen
+            .iter()
+            .enumerate()
+            .map(|(y, row)| (y as i32, row.as_slice()))
+            .chain(
+                text_history
+                    .iter()
+                    .enumerate()
+                    .map(|(y, row)| (y as i32 - text_history.len() as i32, row.as_slice())),
+            ),
+    )?;
     let result = build_snapshot(
         pane_id,
         snapshot.cols,
@@ -842,24 +860,7 @@ fn snapshot_to_ffi(
         screen,
         history,
     )?;
-    let history = if with_history {
-        snapshot.history.as_slice()
-    } else {
-        &[]
-    };
-    let (count, text) = cell_text::export(
-        snapshot
-            .screen
-            .iter()
-            .enumerate()
-            .map(|(y, row)| (y as i32, row.as_slice()))
-            .chain(
-                history
-                    .iter()
-                    .enumerate()
-                    .map(|(y, row)| (y as i32 - history.len() as i32, row.as_slice())),
-            ),
-    );
+    let (count, text) = text.into_raw();
     // SAFETY: result was just allocated above and is exclusively owned until returned.
     unsafe {
         (*result).text_count = count;
