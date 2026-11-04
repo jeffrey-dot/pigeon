@@ -8,14 +8,14 @@
 
 本文保留字段契约；定义了字段不等于所有路径已实现。当前差异如下：
 
-- 宿主提供 `delta`、`scrollback`、`osc7501`、`status_all`；macOS 请求 `delta`、`scrollback`、`status_all`，Linux 请求 `delta`，首帧快照之后应用连续增量。
+- 宿主提供 `delta`、`scrollback`、`osc7501`、`status_all`；macOS 请求 `delta`、`scrollback`、`status_all`，Linux 请求 `delta`、`scrollback`，首帧快照之后应用连续增量，回看由宿主 `scroll` 切片。
 - `zstd` 是预留能力，宿主不提供，当前 payload 为裸 CBOR，无压缩 tag。
 - `snapshot`/`delta` 的 `links` 已有类型，但 VT 转换未保留 OSC 8，实际不下发链接；基础 cell 仍为单码点，附加码点通过下面的 `text` 稀疏表传递。
 - `new_session.env` 能编解码，但宿主尚未应用；结构化 `mouse` 能编解码但宿主返回 `unsupported`。
   macOS 将鼠标按当前 VT 模式编码成 `keys.bytes`，不是发送 `mouse`。
 - `status_all` 已通过独立 `status` 帧补发状态；`sessions` 本身不包含状态记录。未协商 `status_all` 的连接仍接收已 attach pane 的状态，不能靠未请求 `osc7501` 推断不会收到 `status`。
 - 心跳当前由 macOS 客户端实现：15s 未收到宿主消息后 ping，45s 无消息重连；宿主响应 pong。
-  Linux 未接相同心跳与恢复流程。
+  Linux 握手后每 15s ping 保活，尚无 pong 超时检测和自动恢复。
 - 握手当前拒绝不同 major 并返回自身 `PROTO_VERSION`；“minor 取较小值”的目标尚未实现。
 - `scroll` 及历史发送的宿主处理尚未完整按 `scrollback` 握手能力门控；官方客户端通过 `history:false` 避免 attach 传整段历史。
 - 尺寸投票当前存在 `SessionState.vote`，同会话 pane 共用；尚未达到 §6 的 pane 级策略契约。首次投票者决定策略，仍有投票者时重新 attach 不会修改它。

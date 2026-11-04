@@ -204,7 +204,7 @@ shader 用 `gl_VertexID` 生成单位四边形（6 顶点，`draw_arrays_instanc
 ### 5.4 第一版明确不做（与代码现状同步）
 
 - 渲染脏行增量（传输层已接 delta；渲染每帧整屏重建；`FrameStats` 先量出真实数字再决定是否值得做）；
-- 滚动回看（`scroll` 消息）与拖选/选择复制（当前屏幕复制已接）；
+- 拖选/选择复制（当前屏幕复制与宿主回看已接）；
 - 侧栏；
 - 拖动分割线改比例（只画线，`resize_split` 还没接）；
 - kitty keyboard protocol（先用 xterm legacy 编码）；
@@ -246,6 +246,6 @@ shader 用 `gl_VertexID` 生成单位四边形（6 顶点，`draw_arrays_instanc
 1. 脏行增量 + 行复用（对齐 macOS 的 `DirtyRows`）；
 2. 侧栏（`GtkListBox`/`GtkTreeListModel`）+ 分组 + 未读/`needs you`；
 3. 拖动分隔线与多会话选择（分屏、zoom、布局绘制和焦点命中已接）；
-4. 滚动回看、选择、剪贴板（`OSC 52` 只写）；
+4. 选择与 OSC 52 剪贴板写入（宿主回看和当前屏幕复制已接）；
 5. IME（`GtkIMContext`）与 kitty keyboard protocol；
 6. 若 CPU 帧时间成为瓶颈：后台渲染线程 + DMABUF 导出（Ghostty 的 `render_surface.zig` 是蓝本）。
