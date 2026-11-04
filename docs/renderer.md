@@ -204,14 +204,14 @@ shader 用 `gl_VertexID` 生成单位四边形（6 顶点，`draw_arrays_instanc
 ### 5.4 第一版明确不做（与代码现状同步）
 
 - 渲染脏行增量（传输层已接 delta；渲染每帧整屏重建；`FrameStats` 先量出真实数字再决定是否值得做）；
-- 滚动回看（`scroll` 消息）与选择/复制；
+- 滚动回看（`scroll` 消息）与拖选/选择复制（当前屏幕复制已接）；
 - 侧栏；
 - 拖动分割线改比例（只画线，`resize_split` 还没接）；
 - kitty keyboard protocol（先用 xterm legacy 编码）；
-- 鼠标上报、焦点事件、括号粘贴；
+- 鼠标上报、焦点事件（GtkIMMulticontext、异步粘贴与宿主括号包装已接）；
 - DMABUF / 后台渲染线程（先主线程 GLArea，等有性能数字再换）。
 
-已补上（原先列在这里的三项）：制表符/方块元素改由矩形画（`boxdraw.rs`，从 macOS 的
+当前支持：制表符/方块元素改由矩形画（`boxdraw.rs`，从 macOS 的
 `BoxDrawing.swift` 移植，同一张权重表）、宽字符字形居中、emoji 彩色图集（COLR + CBDT 位图）。
 
 分屏已接：`Ctrl+Shift+D` 左右分、`Ctrl+Shift+E` 上下分、`Ctrl+Shift+W` 关焦点 pane、

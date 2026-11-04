@@ -68,3 +68,11 @@ fetch 后发现本地分支与 `origin/main` 分叉（本地既有 Linux 4 个�
 文本子任务的三个提交经主线程逐项检查后合入：制表符附加文本一致性、FFI 错误路径所有权、字体 cache key 与有界整形缓存。
 回归覆盖和资源限制见 [文本资源说明](text-followup.md)。GTK CI 显式安装并选择 DejaVu Sans Mono，避免字体环境影响整形用例。
 整体基线仍需合并后的 CI 验证；其它两个 worktree 的输入与状态任务独立交付，不提前标为完成。
+
+## 2026-11-04：Linux 输入 worktree 审查与整合
+
+主线程审查 `4e7221c` 的 IME 消费/commit 去重、焦点变化和异步粘贴取消、复制范围；合入后将桌面验收脚本放到 `tools/checks/linux-input-check.py`。
+合并文本缓存分支后，GTK 31 passed、1 ignored，fmt/clippy/build 通过。主线程复跑独立 Xvfb/fcitx5 桌面测试，中文单次提交、Ctrl/Alt、两种粘贴、复制、分屏焦点及失焦取消全部通过；没有 GTK critical/Rust panic。
+平台范围与复跑方法见 [Linux 输入记录](linux-input-progress.md)。拖选/历史复制、真实 Wayland/IBus/日文/混合 DPI 尚未完成。
+
+文本批次 `c7c1ec0` 的 [CI 41843748579](https://github.com/jeffrey-dot/pigeon/actions/runs/41843748579) 全部通过。Linux 输入批次需在推送后核对对应 SHA 的 CI。

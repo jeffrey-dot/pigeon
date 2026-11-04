@@ -2,8 +2,8 @@
 
 2026-11-04，基于 `491aeb681e4298f7bcd119e02971e07a76d9850d`。
 对应 [优化计划](optimization-plan.md) S5 与首批 Linux 输入任务。
-本记录覆盖本切片实现和验证；共享 [当前缺口](plan.md#11-当前能力与已知缺口)、
-[Linux README](../clients/linux/README.md) 与优化执行记录由父线程在合并切片时统一同步。
+本记录覆盖本切片实现和验证；当前能力集中维护在 [当前缺口](plan.md#11-当前能力与已知缺口) 与
+[Linux README](../clients/linux/README.md)。
 
 ## 用户行为
 
@@ -37,7 +37,7 @@ Xvfb X11，Mesa 26.2.6 的 OpenGL ES 3.2 软件渲染，debug 构建，默认字
   实现后 `cargo test -p pigeon-linux`：**28 passed**（含既有渲染纯逻辑测试）。
 - `cargo fmt -p pigeon-linux --check`、`cargo clippy -p pigeon-linux --all-targets -- -D warnings`、
   `cargo build -p pigeon-linux`：通过。另构建 `pigeon-server` 用于实测。
-- [隔离桌面测试](../clients/linux/tests/input_smoke.py)：**通过，退出码 0**。它自行创建 Xvfb、D-Bus、HOME、XDG 目录、
+- [隔离桌面测试](../tools/checks/linux-input-check.py)：**通过，退出码 0**。它自行创建 Xvfb、D-Bus、HOME、XDG 目录、
   fcitx5 配置和宿主 socket；宿主的测试程序只记录 stdin 字节，用户 shell rc、已有终端、剪贴板和输入法实例均不参与。
   覆盖普通键/Ctrl/Alt/方向键精确字节、拼音 preedit 零字节与“你好”单次提交、括号粘贴和正文标记过滤、
   普通粘贴/CRLF/空剪贴板、组合重音/CJK 复制、分屏/zoom/关闭/焦点恢复、切换 pane 取消 preedit 与待完成粘贴、
@@ -51,9 +51,9 @@ Xvfb X11，Mesa 26.2.6 的 OpenGL ES 3.2 软件渲染，debug 构建，默认字
 ```sh
 cargo build --bin pigeon-server
 cargo build -p pigeon-linux
-python3 clients/linux/tests/input_smoke.py
+python3 tools/checks/linux-input-check.py
 # 可选保存截图，需 ImageMagick import；此脚本只截图独立 Xvfb。
-PIGEON_INPUT_SCREENSHOT=/tmp/pigeon-input-preedit.png python3 clients/linux/tests/input_smoke.py
+PIGEON_INPUT_SCREENSHOT=/tmp/pigeon-input-preedit.png python3 tools/checks/linux-input-check.py
 ```
 
 ## 未验与限制

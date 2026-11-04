@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Isolated X11/GTK/fcitx5 input check; requires Xvfb, xdotool, PyGObject and fcitx5.
 
-Run after building pigeon and pigeon-server: python3 clients/linux/tests/input_smoke.py
+Run after building pigeon and pigeon-server: python3 tools/checks/linux-input-check.py
 All displays, D-Bus services, clipboard contents and host processes belong to this test.
 """
 import os
@@ -12,7 +12,7 @@ import sys
 import tempfile
 import time
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def run(*args):
