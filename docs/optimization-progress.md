@@ -39,6 +39,8 @@
 - Linux 回看整合：GTK 40 passed / 1 ignored，fmt/clippy/build 通过；主线程复跑输入与回看隔离桌面脚本，10,000 行、80ms 延迟、快速翻页、回底部 delta、输入/IME/粘贴、resize/zoom/备用屏/分屏全部通过。47s 阅读/ping 和能力退化另有子任务验收记录。
 - 文本预算/字体回收整合：主线程复验核心 262 passed / 2 ignored、无默认 feature 175 passed / 1 ignored、GTK 42 passed / 1 ignored；fmt、三组 clippy、VT 8/8 通过。合并后的独立回看桌面脚本全通过；256 次双 face 加载/整形/释放的 RSS 样本增长为 0 bytes，仅代表该测试环境。
 - 宿主完整状态接口：整合核心 278 passed / 2 ignored；借用式 wire 校验调整后状态专题 7/7、C ABI 专题 3/3 和默认/无默认 feature clippy 通过。无默认 feature 整合回归 187 passed / 1 ignored，头文件 diff 与 GTK clippy 通过。两轴复审已结束：规范轴的缺口表同步与借用校验建议已落实，行为轴无新增可确认缺陷；macOS 完整集合已接入；主线程复验 Foundation-only 98 tests 和 Swift ↔ C ABI 2 tests，含占位选择清空确认目标的回归。完整 AppKit 构建/GUI 尚需验证。
+- macOS 完整集合客户端复审：规范轴仅发现 UI 文档未区分 legacy/完整集合，已修正；行为轴无可确认新增缺陷。Foundation-only 98 tests、Swift ↔ C ABI 2 tests 通过，真实面板交互未验。
+- CI 默认使用明确的 `macos-15-intel`，手动 workflow_dispatch 可选择 `macos-latest` 运行 Apple Silicon 验证。切换原因是 latest 作业连续没有分配 runner 并被取消，不属于代码测试失败；两个架构的结果分别记录。
 - 验证脚本在 `tools/checks/`；本机测试不修改用户 shell/tmux 配置或操作用户已有终端。
 
 ## 尚未完成的验收与能力

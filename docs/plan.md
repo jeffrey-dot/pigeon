@@ -280,7 +280,7 @@ M0–M1 可以直接复用现有代码：内核的对账语料（来自 tmux 阶
 | macOS 远端 | 系统 SSH，兼容宿主复用、按需下载/安装、A/B/C 三档对接与断线重连；15s 心跳、45s 静默超时。A/B 保持远端会话，C 明示不持久。见 [remote.md](remote.md) |
 | Linux 首片 | Rust + GTK4，`GtkGLArea` + OpenGL ES 3 / 3.3 core；本地自动拉起宿主、多 pane、分屏、zoom、焦点与 resize，灰度和彩色图集。见 [Linux README](../clients/linux/README.md) |
 | 合并远端改进 | 2026-11-04 合并 `origin/main` @ `edba2ed`：握手/空闲超时、私有 socket/对端验证、有界 PTY 输入、增量转换/渲染缓存、现代键盘与编程连字；本次合并重新验证，不能沿用旧测试数字 |
-| 质量与分发基础 | Rust 双平台 CI、Swift CI、无默认 feature 构建、头文件 diff、宿主体积上限；8 条 VT 文本 golden；macOS universal 包、Ed25519 应用更新、多个架构的远端宿主产物 |
+| 质量与分发基础 | Rust 双平台 CI、Swift CI（默认 macos-15-intel，可手动选择 macos-latest 验证 Apple Silicon）、无默认 feature 构建、头文件 diff、宿主体积上限；8 条 VT 文本 golden；macOS universal 包、Ed25519 应用更新、多个架构的远端宿主产物 |
 
 ### 仍未完成或有限制
 
