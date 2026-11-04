@@ -5,7 +5,7 @@
 //! (`docs/renderer.md` §5.1).
 
 use fontdb::{Database, Family, Query, Style, Weight};
-use swash::FontRef;
+use swash::{CacheKey, FontRef};
 
 /// Device-pixel geometry of one cell.
 #[derive(Debug, Clone, Copy)]
@@ -22,12 +22,27 @@ pub struct GridMetrics {
 /// long as the renderer does.
 struct Face {
     data: &'static [u8],
-    index: u32,
+    offset: u32,
+    key: CacheKey,
 }
 
 impl Face {
-    fn font_ref(&self) -> Option<FontRef<'static>> {
-        FontRef::from_index(self.data, self.index as usize)
+    fn load(data: Vec<u8>, index: u32) -> Option<Self> {
+        let face = FontRef::from_index(&data, index as usize)?;
+        let (offset, key) = (face.offset, face.key);
+        Some(Self {
+            data: Box::leak(data.into_boxed_slice()),
+            offset,
+            key,
+        })
+    }
+
+    fn font_ref(&self) -> FontRef<'static> {
+        FontRef {
+            data: self.data,
+            offset: self.offset,
+            key: self.key,
+        }
     }
 }
 
@@ -64,16 +79,15 @@ impl Font {
     }
     pub fn load(size: f32) -> Result<Self, String> {
         let (data, index) = monospace()?;
-        let data: &'static [u8] = Box::leak(data.into_boxed_slice());
-        let primary = Face { data, index };
-        let font_ref = primary
-            .font_ref()
-            .ok_or_else(|| "font face does not parse".to_owned())?;
+        let primary =
+            Face::load(data, index).ok_or_else(|| "font face does not parse".to_owned())?;
+        let font_ref = primary.font_ref();
         let mut faces = vec![primary];
         for name in FALLBACKS {
             if let Some((bytes, index)) = by_name(name) {
-                let data: &'static [u8] = Box::leak(bytes.into_boxed_slice());
-                faces.push(Face { data, index });
+                if let Some(face) = Face::load(bytes, index) {
+                    faces.push(face);
+                }
             }
         }
         Ok(Self {
@@ -83,19 +97,16 @@ impl Font {
         })
     }
 
-    /// `None` only if the face stopped parsing, which `load` already ruled out; callers
-    /// skip drawing rather than panic, because a paint path must not take the window down.
+    /// The validated face with its stable swash cache key; `None` for an unknown index.
     pub fn face(&self, index: u8) -> Option<FontRef<'static>> {
-        self.faces.get(usize::from(index))?.font_ref()
+        Some(self.faces.get(usize::from(index))?.font_ref())
     }
 
     /// Which face draws `codepoint`, and the glyph id in it. `None` means no loaded face
     /// has it, so the cell stays blank instead of showing a wrong glyph.
     pub fn glyph(&self, codepoint: char) -> Option<(u8, u16)> {
         for (index, face) in self.faces.iter().enumerate() {
-            let Some(font) = face.font_ref() else {
-                continue;
-            };
+            let font = face.font_ref();
             let glyph = font.charmap().map(codepoint);
             if glyph != 0 {
                 return u8::try_from(index).ok().map(|index| (index, glyph));

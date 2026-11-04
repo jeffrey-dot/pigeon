@@ -45,6 +45,7 @@ pub struct Renderer {
     glyphs: gl::Pipeline,
     atlas: Atlas,
     font: Font,
+    shaped: shaped_cell::ShapedCell,
     palette: Palette,
     /// Device pixels per logical pixel the font was loaded for.
     scale: f32,
@@ -93,6 +94,7 @@ impl Renderer {
             glyphs,
             atlas,
             font,
+            shaped: shaped_cell::ShapedCell::default(),
             palette: Palette::dark(),
             scale,
             frame: 0,
@@ -161,6 +163,7 @@ impl Renderer {
                 metrics: self.font.metrics,
                 palette: &self.palette,
                 atlas: &mut self.atlas,
+                shaped: &mut self.shaped,
             };
             for pane in panes {
                 let [x, y] = pane.origin;

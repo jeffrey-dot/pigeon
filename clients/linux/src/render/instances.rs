@@ -52,6 +52,7 @@ pub struct Draw<'a> {
     pub metrics: GridMetrics,
     pub palette: &'a Palette,
     pub atlas: &'a mut Atlas,
+    pub shaped: &'a mut super::shaped_cell::ShapedCell,
 }
 
 /// Draws every cell of `screen` at `origin` plus the cursor.
@@ -65,6 +66,7 @@ pub fn build(draw: &mut Draw<'_>, screen: &Screen, origin: [f32; 2], cursor_on: 
         metrics,
         palette,
         atlas,
+        shaped,
     } = draw;
     let metrics = *metrics;
     let [origin_x, origin_y] = origin;
@@ -124,7 +126,7 @@ pub fn build(draw: &mut Draw<'_>, screen: &Screen, origin: [f32; 2], cursor_on: 
             }
 
             if let Some(value) = &cell.extra_text {
-                for shaped in super::shaped_cell::shape(font, value) {
+                for shaped in shaped.get(font, value).iter() {
                     let key = Key {
                         face: shaped.face,
                         glyph: shaped.glyph,
