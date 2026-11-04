@@ -53,6 +53,9 @@
 | **记录** record | 一条 OSC 7501 上报（`core/src/status/` 的 `Record`），有 `id`、`state`、`kind`、`msg`、`app` | entry、event |
 | **`kind`** | `blocked` 的子类型：`permission` / `question` / `auth` | type、category |
 | **`app`** | 上报这条记录的 agent 名（OSC 7501 的 `app=`），只当纯文本 | agent、program |
+| **状态修订号** status revision | 每 pane 状态集合变更序号，`status_snapshot.revision`；ack/clear 也递增，与记录身份和屏幕 seq 独立 | status seq、时间戳 |
+| **记录序号** record seq | OSC 7501 每次有效记录更新的身份；ack 使用它，不能用它比较集合报告新旧 | revision |
+| **状态快照** status snapshot | 一个 pane 的完整未确认记录集合；整份替换，缺失即删除，空集合即清空 | 状态增量 |
 | **确认** ack | 用户已看过该记录，可以被淘汰（`ack_status`）。对 `working`/`blocked` 无效 | read、clear |
 | **清除** clear | OSC 7501 的 `clear` 指令：删除一棵子树。与 ack 是两条路 | ack、reset |
 | **未监控** unmonitored | 没有任何 OSC 7501 记录时的显示：侧栏该 pane 不给状态 | unknown、idle |
