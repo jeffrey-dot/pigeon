@@ -3,7 +3,7 @@
 核对日期：2026-11-05；父线程基线 `3c16b621daa14ea0777689f0f5b377cb2465362b`。
 本片只修改 macOS 客户端、对应测试及检查脚本。宿主与接口见 [状态同步](status-sync.md)
 和 [协议](protocol.md)，既有磁盘格式与 legacy 路径见 [持久化记录](status-persistence-progress.md)。
-本页记录本片实现；共享计划、进度与能力清单由父线程整合更新。
+本页记录当前实现与验收范围；集中能力清单见 [plan.md](plan.md)。
 
 ## 当前实现
 
@@ -66,7 +66,7 @@ cargo test --manifest-path core/Cargo.toml --offline
 
 ## 未验证与风险
 
-完整 `swift build && swift test`、AppKit 面板布局/点击/焦点、真实 Metal 呈现和 SSH 断线需父线程 macOS CI/人工验收。
+完整 `swift build && swift test`、AppKit 面板布局/点击/焦点、真实 Metal 呈现和 SSH 断线需 macOS CI/人工验收。
 非激活面板设计用于保留主窗口焦点；真实 macOS 上仍须确认下拉与按钮交互、长文本滚动及可见性不会误判。
 `receivedScreen` 证明当前连接数据已应用，仍不是 GPU 呈现完成回执。
 
@@ -74,7 +74,7 @@ seen 身份仍随长寿命 pane 增长；磁盘保存沿用主线程 best-effort
 不保证持久化一致性。宿主集合是共享的，另一客户端 ack 会使记录消失；此客户端只撤下活动项，不冒充自己已查看。
 本片未扩展 Linux 客户端、OSC 生命周期、容量上限或宿主磁盘恢复。
 
-## 父线程手动验收
+## macOS 手动验收
 
 1. macOS 执行 `cargo build && swift build && swift test`，使用独立 `PIGEON_CONFIG_DIR` 启动客户端。
 2. 同 pane 上报两个不同 id 的 blocked 和一个 done。侧栏应保持一行、blocked 优先、done 未读为 1；
@@ -86,3 +86,5 @@ seen 身份仍随长寿命 pane 增长；磁盘保存沿用主线程 best-effort
 5. SSH 断线/恢复时旧面板关闭；相同 revision 首帧恢复集合，旧回调不影响新连接。
    当前连接只收到状态但尚未收到屏幕时不能确认；补取快照后恢复。宿主重启复用 pane/seq 不串 seen。
 6. 重启客户端验证未读去重及已 seen 重播 ack；连接不支持 status_snapshot 的旧宿主验证单条状态、自动确认和菜单仍正常。
+
+主线程整合检查：Foundation-only 98 tests、Swift ↔ C ABI 2 tests 通过；选择占位项会清除原确认目标，避免下拉框和按钮目标不一致。AppKit 完整构建与窗口交互仍按对应提交 CI/手动验收记录。

@@ -4,7 +4,7 @@
 **当前状态（2026-11-04 核对）：M0–M4 主体已落地，M5 Linux 客户端进行中**。
 macOS 已有分屏、回看、zoom、agent 侧栏、SSH 三档对接、Metal 渲染、增量更新、选择复制粘贴、鼠标上报与
 `NSTextInputClient` 输入法、Kitty keyboard protocol、编程连字；Linux 已有 GTK4/OpenGL 网格、本地宿主连接、分屏与 zoom、增量更新、IME、滚动回看、复制当前屏幕与异步粘贴，尚未功能对齐。
-2026-11-05 核对：宿主已实现同 pane 完整状态快照与独立修订号，两端 UI 尚未接入，见 `docs/status-sync.md`。
+2026-11-05 核对：宿主已实现同 pane 完整状态快照与独立修订号；macOS 已协商并提供 Status Records 逐条查看/确认，Linux 侧栏仍待接入，见 `docs/status-sync.md`、`docs/status-client.md`。
 当前缺口以 `docs/plan.md` §11 为准；`docs/m*-checklist.md` 是各阶段的历史验收证据，不代表当前全功能已验收。
 
 ## 1. 项目是什么

@@ -13,8 +13,8 @@
 | 文本 | 附加码点跨快照/delta/历史/接口保留，软换行复制；历史按预算先预检再转换，FFI 校验后转移所有权；Linux 有界整形缓存、字体随所有者释放 |
 | Linux 输入 | GtkIMMulticontext、候选窗定位、中文 commit；异步粘贴经宿主括号包装；复制焦点 pane 当前屏幕 |
 | Linux 回看 | scrollback 协商、滚轮与快捷键回看、位置条；输入/IME/粘贴/尺寸变化回实时屏并恢复 delta；15s ping 保活 |
-| 侧栏状态 | pane 最新状态聚合；事件身份按 host/instance/pane/seq/record 持久化；重播去重，ack 核验来源；新报告自动确认要求当前连接的新屏幕与前台可见性 |
-| 宿主完整状态 | `status_snapshot` 能力与独立 revision，原子替换未确认集合；ack/clear/退出立即广播，两种客户端接口提供 owned 读取；两端 UI 待接入 |
+| 侧栏状态 | pane 最新状态聚合；事件身份按 host/instance/pane/seq/record 持久化；重播去重，ack 核验来源；完整集合显式确认要求具体记录选中、当前连接屏幕与前台可见性；旧宿主保留单条自动确认 |
+| 宿主完整状态 | `status_snapshot` 能力与独立 revision，原子替换未确认集合；ack/clear/退出立即广播，两种客户端接口提供 owned 读取；macOS 已接入逐条查看/显式确认，Linux 侧栏待接 |
 | 连接恢复 | generation 隔离旧回调；重连清空 pending 快照，缓存报告/旧屏幕不能确认新记录；status seq 不充当流修订号，接受宿主合法低 seq 回退 |
 
 专题实现与测试见 [文本资源说明](text-followup.md)、[文本预算与字体回收](text-budget-progress.md)、[Linux 输入记录](linux-input-progress.md)、[状态持久化说明](status-persistence-progress.md)、[Linux 回看记录](linux-scroll-progress.md)。
@@ -38,13 +38,13 @@
 - 状态复审：新增 pending 快照与合法低 seq 回退测试先失败，再修复；Foundation-only 86 tests 通过。AppDelegate 语法检查不等于 AppKit 类型检查或 GPU 呈现验收。
 - Linux 回看整合：GTK 40 passed / 1 ignored，fmt/clippy/build 通过；主线程复跑输入与回看隔离桌面脚本，10,000 行、80ms 延迟、快速翻页、回底部 delta、输入/IME/粘贴、resize/zoom/备用屏/分屏全部通过。47s 阅读/ping 和能力退化另有子任务验收记录。
 - 文本预算/字体回收整合：主线程复验核心 262 passed / 2 ignored、无默认 feature 175 passed / 1 ignored、GTK 42 passed / 1 ignored；fmt、三组 clippy、VT 8/8 通过。合并后的独立回看桌面脚本全通过；256 次双 face 加载/整形/释放的 RSS 样本增长为 0 bytes，仅代表该测试环境。
-- 宿主完整状态接口：整合核心 278 passed / 2 ignored；借用式 wire 校验调整后状态专题 7/7、C ABI 专题 3/3 和默认/无默认 feature clippy 通过。无默认 feature 整合回归 187 passed / 1 ignored，头文件 diff 与 GTK clippy 通过。两轴复审已结束：规范轴的缺口表同步与借用校验建议已落实，行为轴无新增可确认缺陷；macOS 完整集合接入仍在进行。
+- 宿主完整状态接口：整合核心 278 passed / 2 ignored；借用式 wire 校验调整后状态专题 7/7、C ABI 专题 3/3 和默认/无默认 feature clippy 通过。无默认 feature 整合回归 187 passed / 1 ignored，头文件 diff 与 GTK clippy 通过。两轴复审已结束：规范轴的缺口表同步与借用校验建议已落实，行为轴无新增可确认缺陷；macOS 完整集合已接入；主线程复验 Foundation-only 98 tests 和 Swift ↔ C ABI 2 tests，含占位选择清空确认目标的回归。完整 AppKit 构建/GUI 尚需验证。
 - 验证脚本在 `tools/checks/`；本机测试不修改用户 shell/tmux 配置或操作用户已有终端。
 
 ## 尚未完成的验收与能力
 
 1. 完整状态集合的最终跨平台 CI；真实 macOS 窗口激活、遮挡、回看、zoom、跨主机与 GPU 呈现/SSH 恢复验收。
-2. 两端 UI 接入宿主完整集合与修订号，身份集合有界存储、多进程同时写 JSON 的一致性；宿主与双外形接口已经实现。
+2. Linux 侧栏接入完整集合与修订号，身份集合有界存储、多进程同时写 JSON 的一致性；宿主与双外形接口已经实现。
 3. 密集整屏文本的 8 MiB 上限处理、整帧编码/引擎内部附加码点预算、跨 cell ZWJ 字素宽度及宽字符折行占位。
 4. Linux 拖选/侧栏/SSH 管理与渲染脏行；真实 Wayland、IBus、日文 IME、非美式键盘和混合 DPI 验收。
 5. 性能、弱网、功耗、长时间负载、完整 VT 属性/fuzz 覆盖及签名发布。

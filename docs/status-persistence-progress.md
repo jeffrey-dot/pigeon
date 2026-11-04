@@ -3,7 +3,7 @@
 核对日期：2026-11-04。基线：`491aeb681e4298f7bcd119e02971e07a76d9850d`。
 本项落实 [优化计划 S1](optimization-plan.md) 的客户端状态身份、确认与重播处理。
 改动限定 macOS `Sidebar/`、`Net/Host/` 与 AppDelegate 接线；未修改核心、协议或 Harp 单行视图。
-[当前缺口](plan.md) 维护集中能力清单，本页记录状态身份与确认语义。
+[当前缺口](plan.md) 维护集中能力清单，本页记录状态身份与兼容路径；完整集合和逐条确认的当前行为见 [status-client.md](status-client.md)。
 
 ## 已实现
 
@@ -20,7 +20,7 @@
 - 当前 pane 状态与未读集合独立。status seq 是记录身份，不是流修订号；收到的当前状态按宿主有序连接报告更新。
   提示符/clear 删除较新 live 记录后，较低 seq 的未读终态或 live 记录可以重新成为当前状态。过期连接回调由 generation 过滤。
   已查看身份重播仍可重发 ack，但不会再次计入未读。
-- 自动确认只确认可见 pane 的**当前**终态，不批量确认该 pane 所有历史未读；新 working/blocked、idle、较高 seq
+- legacy 路径自动确认只确认可见 pane 的**当前**终态，不批量确认该 pane 所有历史未读；新 working/blocked、idle、较高 seq
   都不会静默消除旧的 done/error。聚合仍是各 pane 当前最新状态的 `blocked > error > done > working > idle`。
 - 确认要求连接握手完成、host/session 与实际布局匹配、应用和窗口获得关注、窗口可见、pane 已有快照、
   非 zoom 隐藏、具备非空视图和 Metal renderer、位于实时屏而非回看。不扫描屏幕内容推断状态。
@@ -61,11 +61,11 @@ git diff --check
 
 ## 剩余限制与平台验收
 
-- 当前客户端使用旧 `status` 路径，只接收最新未确认记录；宿主已支持 `status_snapshot` 完整集合，且成功 ack 立即推送剩余状态。客户端只能保存**收到过**的终态身份；
-  未收到记录、同 pane 多条 blocked 的枚举和展开仍需客户端接入完整集合。
+- 未协商完整集合时使用旧 `status` 路径，只接收最新未确认记录；宿主已支持 `status_snapshot` 完整集合，且成功 ack 立即推送剩余状态。客户端只能保存**收到过**的终态身份；
+  macOS 已接入完整集合并提供逐条查看面板，缺失只撤下活动项，不冒充本客户端已查看。
   更高 seq 不代表低 seq 已确认；保存的旧未读可以在 pane/session 删除或 instance 变化前持续存在。
 - status 没有独立修订号/清除代次；客户端依赖同一连接的有序报告，不推测 seq 大小对应状态的新旧。
-  跨连接的旧事件通过 generation 拒绝，完整集合 UI 接入仍在进行。
+  跨连接的旧事件通过 generation 拒绝，完整集合路径改用独立 revision，首帧建立连接基准。
 - 未读是收到过的未查看终态数量，当前状态仍是 pane 最新值；若旧终态被 working/idle 遮住，未读保留，
   但现有 needs-you/跳转规则未扩展为历史记录收件箱。Harp 单行 UI 保持原样。
 - 已查看身份在当前实例内保留，pane/session 删除或 instance 切换时清理；长寿命 pane 持续上报会使身份集合与 JSON 增长。
@@ -74,7 +74,7 @@ git diff --check
   不同客户端各自查看/确认的全局同步也没有新增协议保证。
 - 本机无 AppKit。完整 `swift build && swift test`、窗口激活/遮挡、zoom、回看、同批状态与 GPU 真正呈现顺序、
   SSH 重连和宿主重启的真实交互需父线程 macOS CI/GUI 验收。run loop 延后不是 GPU 呈现完成回执。
-- 客户端跨重启身份持久化已实现；完整多记录协议、AppKit 真正呈现与 SSH 交互验收仍待补。
+- 客户端跨重启身份持久化与 macOS 完整集合已实现；AppKit 真正呈现与 SSH 交互验收仍待补。
 
 ## 主线程整合验收
 
