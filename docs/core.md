@@ -91,6 +91,7 @@ PgSnapshot {            // 字段以 include/pigeon_core.h 为准，此处只写
 - 软换行由 `ATTR_WRAP` / `PG_ATTR_WRAP`（64）标在行末格，快照/增量/历史保留；macOS 复制自动折行时不插入换行。
 - **文本扩展**：Rust `Cell.text()` 返回主码点及附加文本；C ABI 在 PgSnapshot/PgDelta 尾部追加 PgCellText 表，表和字符串由快照持有并随其释放，PgCell 数组步长不变。
 - **当前数据限制**：已保留引擎 cell 中的附加码点，但跨多个宽 cell 的完整字素宽度/整簇重排仍未实现；OSC 8 链接未下发，DECSTBM 的导出范围为整屏。详见 [plan.md §11](plan.md#11-当前能力与已知缺口)。
+- **文本所有权与预算**：FFI 先保留文本/行缓冲的 Rust 所有权，完成所有可失败校验后再转交 C。历史与 backlog 计费包含文本；密集整屏仍可能超过单帧上限，限制与回归见 [text-followup.md](text-followup.md)。
 
 ## 6. 语言选型
 

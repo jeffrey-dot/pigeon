@@ -95,18 +95,20 @@ jobs:
   # GTK stays outside default-members so macOS never needs Linux GUI dependencies.
   linux:
     runs-on: ubuntu-24.04
+    env:
+      PIGEON_FONT: DejaVu Sans Mono
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Install GTK development libraries
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libgtk-4-dev pkg-config
+          sudo apt-get install -y --no-install-recommends libgtk-4-dev pkg-config fonts-dejavu-core
       - name: Record build environment
         run: python3 tools/bench/environment.py
       - run: cargo fmt -p pigeon-linux --check
       - run: cargo clippy -p pigeon-linux --all-targets --locked -- -D warnings
       - run: cargo build -p pigeon-linux --locked
-      # These tests exercise pure input/render/layout logic and need no display server.
+      # Shaping tests use the installed reference font but need no display server.
       - run: cargo test -p pigeon-linux --locked
 
   # The client is AppKit-only, so this job is macOS-only by design.

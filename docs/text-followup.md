@@ -82,10 +82,8 @@ PIGEON_FONT='DejaVu Sans Mono' cargo test --release -p pigeon-linux \
 不据此声称整帧性能或生产延迟已验收。初始失败测试还分别复现了制表符快照拒绝、冗余字符串分配、
 同一 face 的 swash key 每次变化；后续测试全部通过。
 
-## 给父线程的合并说明
+## 验收范围
 
-仅涉及 core 文本转换/FFI、Linux `render/` 的文本整形、macOS 文本测试和本页；没有修改
-Linux view/input/host、Sidebar、共享优化计划/进度、生成头文件，没有推送或开 PR。
-已核对 README、AGENTS 当前状态、plan §11、ADR-0012 和相关协议段落；原有 Unicode/GUI 未验声明仍成立。
-请在合并时把本页链接加入共享进度，并把整屏 text 帧溢出与历史临时转换内存限制纳入集中缺口表。
-macOS `swift build && swift test`（含新增 PaneDeltaTests）、AppKit/CoreText 视觉、GTK 实际绘制和 Ubuntu CI 尚待父线程验收。
+核心文本转换、FFI 和 Linux 整形缓存通过上述自动化检查。macOS 完整构建、新增 AppKit 测试、
+CoreText/GTK 实际绘制与 Ubuntu 运行结果以对应提交的 CI 和平台验收为准，不能用本机纯逻辑结果替代。
+整屏帧预算、引擎内部组合码点预算、跨格字素和字体生命周期回收仍按“协议、所有权与资源审查结论”中的限制处理。
