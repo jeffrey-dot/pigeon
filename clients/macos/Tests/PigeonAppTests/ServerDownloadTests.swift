@@ -64,6 +64,29 @@ final class ServerDownloadTests: XCTestCase {
         }
     }
 
+    /// The checksums come from the same place as the binary, so the transport is the only
+    /// thing vouching for them: plain http (anywhere but this machine) is refused before
+    /// anything is fetched.
+    func testAMirrorMustUseHttps() throws {
+        for mirror in ["http://mirror.example/pigeon", "ftp://mirror.example/pigeon", "file:///tmp/pigeon"] {
+            var fetched = false
+            let download = ServerDownload(
+                version: "9.9.9", base: URL(string: mirror), cache: try temporaryDirectory(),
+                fetch: { _ in
+                    fetched = true
+                    return Data()
+                })
+            XCTAssertThrowsError(try download.binary(for: "Linux x86_64"), mirror) { error in
+                XCTAssertTrue("\(error)".contains("https"), "\(error)")
+            }
+            XCTAssertFalse(fetched, mirror)
+        }
+        for allowed in ["https://mirror.example/p", "http://localhost:8000/p", "http://127.0.0.1/p", "http://[::1]/p"] {
+            XCTAssertTrue(ServerDownload.isTrusted(try XCTUnwrap(URL(string: allowed))), allowed)
+        }
+        XCTAssertFalse(ServerDownload.isTrusted(try XCTUnwrap(URL(string: "http://localhost.evil.example/p"))))
+    }
+
     func testChecksumLinesAreReadWholeOrNotAtAll() {
         let good = String(repeating: "a", count: 64)
         let sums = ServerDownload.parseSums("""

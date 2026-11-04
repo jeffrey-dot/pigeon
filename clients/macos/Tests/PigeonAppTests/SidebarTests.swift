@@ -309,7 +309,7 @@ final class SidebarOrderingTests: XCTestCase {
             SidebarModel.statusSymbol(for: row(1, status))
         }
         XCTAssertEqual(symbols, [
-            "exclamationmark.circle",
+            "record.circle",
             "exclamationmark.triangle.fill",
             "checkmark",
             "circle.dashed",

@@ -17,6 +17,9 @@ const MAX_CELLS: usize = 512 * 1024;
 pub struct Backlog {
     frames: VecDeque<(u32, usize, Message)>,
     cells: usize,
+    /// The seq current at the last resize. A client whose screen ends at or before it drew
+    /// the old grid, so only a snapshot can bring it up to date, even with nothing missed.
+    barrier: Option<u32>,
 }
 
 impl Backlog {
@@ -43,16 +46,25 @@ impl Backlog {
         }
     }
 
-    /// Forgets everything: after a resize old rows no longer fit the grid.
-    pub fn clear(&mut self) {
+    fn clear(&mut self) {
         self.frames.clear();
         self.cells = 0;
+    }
+
+    /// Forgets everything at a resize (`current` = the seq then): old rows no longer fit
+    /// the grid, and no client at `current` or before has the resized screen.
+    pub fn reset_at(&mut self, current: u32) {
+        self.clear();
+        self.barrier = Some(current);
     }
 
     /// The frames after `since` up to `current`, or `None` when some of them are gone
     /// (or `since` is from the future, i.e. another host instance) and only a snapshot
     /// can bring the client up to date.
     pub fn since(&self, since: u32, current: u32) -> Option<Vec<Message>> {
+        if self.barrier.is_some_and(|barrier| since <= barrier) {
+            return None;
+        }
         if since == current {
             return Some(Vec::new());
         }
@@ -148,17 +160,23 @@ mod tests {
     }
 
     #[test]
-    fn a_cleared_backlog_only_answers_an_up_to_date_client() {
+    fn a_resize_forces_a_snapshot_for_every_seq_up_to_it() {
         let mut backlog = Backlog::default();
         for seq in 1..=3 {
             backlog.push(seq, &delta(seq, 80));
         }
-        backlog.clear();
+        backlog.reset_at(3);
         assert!(
             backlog.since(2, 3).is_none(),
             "the rows before a resize do not fit"
         );
-        assert!(backlog.since(3, 3).is_some());
+        // Seq 3 predates the resize: the client has not seen the resized screen.
+        assert!(backlog.since(3, 3).is_none());
+        backlog.push(4, &delta(4, 80));
+        backlog.push(5, &delta(5, 80));
+        assert!(backlog.since(3, 5).is_none());
+        assert_eq!(backlog.since(4, 5).map(|f| seqs(&f)), Some(vec![5]));
+        assert_eq!(backlog.since(5, 5).map(|f| seqs(&f)), Some(vec![]));
     }
 
     #[test]

@@ -6,7 +6,7 @@ extension PaneView {
     /// The cell under a window-space event, clamped to the grid.
     func gridPoint(for event: NSEvent) -> TerminalSelection.Point {
         let local = convert(event.locationInWindow, from: nil)
-        let size = CoreTextRenderer.cellSize()
+        let size = cellSize
         let column = Int((local.x / max(size.width, 1)).rounded(.down))
         // AppKit's origin is bottom-left; row 0 is the top line.
         let row = Int(((bounds.height - local.y) / max(size.height, 1)).rounded(.down))

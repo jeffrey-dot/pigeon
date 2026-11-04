@@ -51,6 +51,8 @@ final class PaneView: NSView {
     var metal: MetalGridRenderer?
     /// Rows changed since the last frame was posted to `metal`.
     var dirty = DirtyRows.everything
+    /// A post is queued for the end of this run-loop turn (`screenChanged`).
+    var postScheduled = false
     /// Last occlusion state logged under `PIGEON_FRAME_STATS`.
     var reportedVisible: Bool?
 
@@ -62,6 +64,8 @@ final class PaneView: NSView {
     var selectionActive = false
     /// What the input method is composing, drawn at the cursor until it commits.
     var preedit: Preedit?
+    /// The row the composing overlay was drawn on in the last posted frame.
+    var preeditRow: Int?
     /// ⌥ as Meta (`TerminalSettings.optionAsMeta`); off lets ⌥ compose characters.
     var optionAsMeta = true
     /// The key being handed to the input method, for `doCommand(by:)` to encode.
@@ -132,7 +136,7 @@ final class PaneView: NSView {
             let (lines, remainder) = Self.wheelLines(
                 deltaY: event.scrollingDeltaY,
                 precise: event.hasPreciseScrollingDeltas,
-                cellHeight: CoreTextRenderer.cellSize().height,
+                cellHeight: cellSize.height,
                 remainder: wheelRemainder)
             wheelRemainder = remainder
             _ = wheelOnAlternateScreen(event, lines: lines)
@@ -142,7 +146,7 @@ final class PaneView: NSView {
             alt: alt,
             deltaY: event.scrollingDeltaY,
             precise: event.hasPreciseScrollingDeltas,
-            cellHeight: CoreTextRenderer.cellSize().height,
+            cellHeight: cellSize.height,
             remainder: wheelRemainder
         )
         wheelRemainder = remainder
@@ -191,7 +195,16 @@ final class PaneView: NSView {
 
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
+        // The cell is snapped to device pixels, so a 1x↔2x move can change cols/rows.
+        syncGrid()
+        dirty = .everything
         screenChanged()
+    }
+
+    /// The cell in points on this view's display, snapped to whole device pixels. Resize,
+    /// mouse mapping, the IME rect and the GPU all use it, so they agree on every column.
+    var cellSize: CGSize {
+        CoreTextRenderer.cellSize(scale: window?.backingScaleFactor ?? 2)
     }
 
     /// Recomputes the grid from the current bounds and tells the host.
@@ -209,7 +222,7 @@ final class PaneView: NSView {
     /// its screen away, and an idle TUI never repaints — the pane would stay blank for good.
     static func gridSize(
         for bounds: CGSize,
-        cellSize: CGSize = CoreTextRenderer.cellSize()
+        cellSize: CGSize
     ) -> (cols: UInt16, rows: UInt16)? {
         guard cellSize.width > 0, cellSize.height > 0 else { return nil }
         let columns = Int(bounds.width / cellSize.width)
@@ -224,7 +237,8 @@ final class PaneView: NSView {
         // Only the *requested* size changes here. `cols`/`rows` describe the
         // cells we hold, and those must keep matching until the host answers
         // with a new snapshot — otherwise the renderer walks off the grid.
-        guard let grid = Self.gridSize(for: bounds.size), grid != reported else { return }
+        guard let grid = Self.gridSize(for: bounds.size, cellSize: cellSize), grid != reported
+        else { return }
         reported = grid
         onResize?(grid.cols, grid.rows)
     }
@@ -331,51 +345,6 @@ final class PaneView: NSView {
         return true
     }
 
-    /// The container still sees every click first (focus, divider drags); the pane then
-    /// starts a selection of its own.
-    override func mouseDown(with event: NSEvent) {
-        nextResponder?.mouseDown(with: event)
-        if reportsMouse(event) {
-            clearSelection()
-            report(.left, .press, event)
-            return
-        }
-        beginSelection(with: event)
-    }
-
-    override func mouseDragged(with event: NSEvent) {
-        if reportsMouse(event) {
-            report(.left, .drag, event)
-            return
-        }
-        extendSelection(with: event)
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        nextResponder?.mouseUp(with: event)
-        if reportsMouse(event) { report(.left, .release, event) }
-    }
-
-    override func rightMouseDown(with event: NSEvent) {
-        guard reportsMouse(event) else { return super.rightMouseDown(with: event) }
-        report(.right, .press, event)
-    }
-
-    override func rightMouseUp(with event: NSEvent) {
-        guard reportsMouse(event) else { return super.rightMouseUp(with: event) }
-        report(.right, .release, event)
-    }
-
-    override func otherMouseDown(with event: NSEvent) {
-        guard reportsMouse(event) else { return super.otherMouseDown(with: event) }
-        report(.middle, .press, event)
-    }
-
-    override func otherMouseUp(with event: NSEvent) {
-        guard reportsMouse(event) else { return super.otherMouseUp(with: event) }
-        report(.middle, .release, event)
-    }
-
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 116, !hasMarkedText(), page(1) { return }
         if event.keyCode == 121, !hasMarkedText(), page(-1) { return }
@@ -389,7 +358,7 @@ final class PaneView: NSView {
             pendingKeyEvent = nil
             return
         }
-        guard let bytes = KeyEncoder.encode(stroke, appCursor: modes & TerminalModes.appCursor != 0)
+        guard let bytes = KeyEncoder.encode(stroke, modes: modes)
         else { return }
         sendBytes(bytes)
     }

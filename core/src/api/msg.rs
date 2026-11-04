@@ -3,8 +3,8 @@
 
 use crate::error::{PgError, PgResult};
 use crate::layout::{Axis, LayoutNode, PaneId, Rect, SplitId};
-use crate::proto::{Message, Node, SplitAxis};
-use crate::term::Snapshot;
+use crate::proto::{Message, Node, SessionInfo, SplitAxis};
+use crate::term::{Cell, Cursor, Snapshot};
 
 /// A divider in a layout message: the box it divides plus its ratio.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -27,17 +27,46 @@ pub fn snapshot_of(message: &Message) -> PgResult<(PaneId, Snapshot)> {
     Ok((*pane_id, snapshot))
 }
 
-/// The pane id and changed rows carried by a `delta` message.
-///
-/// Width derivation matches snapshots. Rows must be ordered, nonempty and equally
-/// wide; the client still checks them against its current grid and sequence.
-/// A cursor-only delta may contain no rows.
-pub fn delta_of(message: &Message) -> PgResult<(PaneId, super::DeltaRows)> {
+/// The changed rows of a `delta` message, decoded like a snapshot's rows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Delta {
+    pub pane_id: PaneId,
+    /// The frame's sequence number; a gap means a missed frame (re-`attach`).
+    pub seq: u32,
+    /// `(y, cells)`; every row is as wide as the pane was when the host sent it.
+    pub rows: Vec<(u16, Vec<Cell>)>,
+    /// `None` when the frame left the cursor out.
+    pub cursor: Option<Cursor>,
+    /// `None`: not reported, keep what you had.
+    pub alt: Option<bool>,
+    /// Missing modes leave the previous client modes unchanged.
+    pub modes: Option<u32>,
+}
+
+/// The rows of a `delta` message (the Rust side of `pg_msg_delta`). Cell widths are
+/// re-derived from the codepoints exactly like a snapshot's.
+pub fn delta_of(message: &Message) -> PgResult<Delta> {
     let Message::Delta { pane_id, .. } = message else {
         return Err(PgError::InvalidArg);
     };
     let delta = crate::session::delta_from_message(message).ok_or(PgError::InvalidArg)?;
-    Ok((*pane_id, delta))
+    Ok(Delta {
+        pane_id: *pane_id,
+        seq: delta.seq,
+        rows: delta.rows,
+        cursor: delta.cursor,
+        alt: delta.alt,
+        modes: delta.modes,
+    })
+}
+
+/// Entries of a `sessions` message (the Rust side of `pg_msg_sessions_count`,
+/// `pg_msg_session_at` and `pg_msg_session_panes`).
+pub fn sessions_of(message: &Message) -> PgResult<&[SessionInfo]> {
+    match message {
+        Message::Sessions { items } => Ok(items),
+        _ => Err(PgError::InvalidArg),
+    }
 }
 
 /// Whether the host offered `feature` in its `hello_ack` (the Rust side of
@@ -72,6 +101,14 @@ pub fn layout_splits(message: &Message) -> PgResult<Vec<Split>> {
 pub fn layout_focus(message: &Message) -> PgResult<Option<PaneId>> {
     match message {
         Message::Layout { focus, .. } => Ok(*focus),
+        _ => Err(PgError::InvalidArg),
+    }
+}
+
+/// The pane zoomed to the whole window by a `layout` message, if any.
+pub fn layout_zoom(message: &Message) -> PgResult<Option<PaneId>> {
+    match message {
+        Message::Layout { zoom, .. } => Ok(*zoom),
         _ => Err(PgError::InvalidArg),
     }
 }

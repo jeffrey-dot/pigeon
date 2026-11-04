@@ -536,10 +536,7 @@ pub extern "C" fn pg_msg_layout_zoom(msg: *const PgMsg) -> u32 {
         if type_of(&msg.t) != PgMsgType::PG_MSG_LAYOUT {
             return Err(PgError::InvalidArg);
         }
-        Ok(match msg.to_message()? {
-            Message::Layout { zoom, .. } => zoom.unwrap_or(0),
-            _ => 0,
-        })
+        Ok(api::layout_zoom(&msg.to_message()?)?.unwrap_or(0))
     })
 }
 
@@ -741,11 +738,8 @@ pub extern "C" fn pg_msg_str_array_contains(
 #[no_mangle]
 pub extern "C" fn pg_msg_sessions_count(msg: *const PgMsg) -> usize {
     ffi_call(0, || {
-        let msg = unsafe_ref(msg)?;
-        match msg.fields.get("items") {
-            Some(Value::Array(items)) => Ok(items.len()),
-            _ => Err(PgError::InvalidArg),
-        }
+        let message = sessions_message(unsafe_ref(msg)?)?;
+        Ok(api::sessions_of(&message)?.len())
     })
 }
 
@@ -808,36 +802,29 @@ pub extern "C" fn pg_msg_session_panes(
     cap: usize,
 ) -> usize {
     ffi_call(0, || {
-        let msg = unsafe_ref(msg)?;
-        let Some(Value::Map(entries)) = session_entry(msg, index)? else {
-            return Err(PgError::InvalidArg);
-        };
-        let Some((_, Value::Array(panes))) = entries
-            .iter()
-            .find(|(key, _)| matches!(key, Value::Text(name) if name == "panes"))
-        else {
-            return Err(PgError::InvalidArg);
-        };
-        if out.is_null() && !panes.is_empty() {
+        let message = sessions_message(unsafe_ref(msg)?)?;
+        let session = api::sessions_of(&message)?
+            .get(index)
+            .ok_or(PgError::InvalidArg)?;
+        if out.is_null() && !session.panes.is_empty() {
             return Err(PgError::InvalidArg);
         }
-        let mut written = 0;
-        for pane in panes {
-            if written == cap {
-                break;
-            }
-            let Value::Integer(number) = pane else {
-                continue;
-            };
-            let Ok(id) = u32::try_from(i128::from(*number)) else {
-                continue;
-            };
+        let written = session.panes.len().min(cap);
+        if written > 0 {
             // SAFETY: caller promised `cap` writable entries.
-            unsafe { *out.add(written) = id };
-            written += 1;
+            unsafe { ptr::copy_nonoverlapping(session.panes.as_ptr(), out, written) };
         }
         Ok(written)
     })
+}
+
+/// A `sessions` message, typed. `pg_msg_session_at` still reads the handle's own
+/// fields, because its strings must borrow from the message the caller holds.
+fn sessions_message(msg: &PgMsg) -> PgResult<Message> {
+    if type_of(&msg.t) != PgMsgType::PG_MSG_SESSIONS {
+        return Err(PgError::InvalidArg);
+    }
+    msg.to_message()
 }
 
 fn session_entry(msg: &PgMsg, index: usize) -> PgResult<Option<&Value>> {
@@ -1064,7 +1051,9 @@ mod tests {
         let view = unsafe { &*snap };
         assert_eq!((view.cols, view.rows), (1, 1));
         assert_eq!(view.pane_id, 1);
+        // SAFETY: a 1×1 snapshot has one screen row with one cell, alive until the free below.
         let row = unsafe { &*view.screen };
+        // SAFETY: as above.
         let cell = unsafe { &*row.cells };
         assert_eq!(cell.codepoint, 'A' as u32);
         assert_eq!(cell.fg, 0x00ff_0000);

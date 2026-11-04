@@ -2,7 +2,7 @@
 //! (`--stdio`), or a bridge to another host (`--proxy`).
 
 use std::fs::Permissions;
-use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::time::Duration;
 
@@ -12,9 +12,19 @@ use tokio::time::Instant;
 use crate::cli::Transport;
 use crate::connection::client::handle_client;
 use crate::host::state::HostState;
+use crate::socket_lock::SocketLock;
+use crate::socket_trust::{
+    check_dir, check_existing_socket, check_peer, check_socket_path, current_uid,
+};
 
 /// Serves the socket forever, plus one stdio client with `Transport::Stdio`.
 pub async fn serve(socket: &Path, transport: Transport, host: HostState) -> Result<(), String> {
+    ensure_private_parent(socket)?;
+    let uid = current_uid();
+    check_dir(socket.parent().unwrap_or_else(|| Path::new(".")), uid)?;
+    // Held until this function returns: probing, binding and the state file are this
+    // process's alone for as long as it serves.
+    let _lock = SocketLock::acquire(socket)?;
     let listener = bind_private(socket).await?;
     eprintln!("pigeon-server listening on {}", socket.display());
 
@@ -46,6 +56,12 @@ pub async fn serve(socket: &Path, transport: Transport, host: HostState) -> Resu
                 continue;
             }
         };
+        // The socket is 0700 in a private directory; this also covers a directory whose
+        // mode was loosened after we bound.
+        if let Err(error) = check_peer(&stream, uid) {
+            eprintln!("pigeon-server: refusing a connection: {error}");
+            continue;
+        }
         let host = host.clone();
         tokio::spawn(async move {
             if let Err(error) = handle_client(stream, host).await {
@@ -81,7 +97,8 @@ async fn shut_down(host: &HostState, socket: &Path) {
 /// Changing the umask needs `unsafe`, so the socket is bound inside a fresh 0700 directory
 /// (unreachable for anyone else), chmodded there, and only then renamed into place.
 async fn bind_private(socket: &Path) -> Result<UnixListener, String> {
-    if std::fs::metadata(socket).is_ok_and(|meta| meta.file_type().is_socket()) {
+    // Someone else's file at our path is never connected to or removed.
+    if check_existing_socket(socket, current_uid())? {
         if UnixStream::connect(socket).await.is_ok() {
             return Err(format!(
                 "another pigeon-server is already serving {socket:?}"
@@ -91,12 +108,6 @@ async fn bind_private(socket: &Path) -> Result<UnixListener, String> {
         let _ = std::fs::remove_file(socket);
     }
     let parent = socket.parent().unwrap_or_else(|| Path::new("."));
-    // `~/.pigeon/state` on a fresh install: create it private, never loosen one that exists.
-    if !parent.exists() {
-        std::fs::create_dir_all(parent).map_err(|error| format!("mkdir {parent:?}: {error}"))?;
-        std::fs::set_permissions(parent, Permissions::from_mode(0o700))
-            .map_err(|error| format!("chmod {parent:?}: {error}"))?;
-    }
     let staging = parent.join(format!(".pigeon-bind-{}", std::process::id()));
     std::fs::create_dir(&staging).map_err(|error| format!("mkdir {staging:?}: {error}"))?;
     std::fs::set_permissions(&staging, Permissions::from_mode(0o700))
@@ -116,6 +127,17 @@ async fn bind_private(socket: &Path) -> Result<UnixListener, String> {
     bound
 }
 
+/// `~/.pigeon/state` on a fresh install: create it private, never loosen one that exists.
+fn ensure_private_parent(socket: &Path) -> Result<(), String> {
+    let parent = socket.parent().unwrap_or_else(|| Path::new("."));
+    if !parent.exists() {
+        std::fs::create_dir_all(parent).map_err(|error| format!("mkdir {parent:?}: {error}"))?;
+        std::fs::set_permissions(parent, Permissions::from_mode(0o700))
+            .map_err(|error| format!("chmod {parent:?}: {error}"))?;
+    }
+    Ok(())
+}
+
 /// Bridges stdin/stdout to a running host. Frames are opaque bytes here on purpose: the
 /// bridge must not care which protocol version the two ends agreed on.
 ///
@@ -129,6 +151,9 @@ pub async fn proxy(socket: &Path, shell: &str) -> Result<(), String> {
             connect_with_patience(socket).await?
         }
     };
+    // The frames carry keystrokes: only bridge to our own socket, served by us.
+    check_socket_path(socket, current_uid())?;
+    check_peer(&stream, current_uid())?;
     let mut stdio = tokio::io::join(tokio::io::stdin(), tokio::io::stdout());
     let mut stream = stream;
     tokio::io::copy_bidirectional(&mut stdio, &mut stream)

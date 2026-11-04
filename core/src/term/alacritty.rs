@@ -15,6 +15,7 @@ use alacritty_terminal::term::color::Colors;
 use alacritty_terminal::term::{Config, Term as VtTerm, TermDamage, TermMode};
 use alacritty_terminal::vte::ansi::{Color, CursorShape, NamedColor, Processor, Rgb};
 
+use super::sync_timeout::SyncTimeout;
 use super::{
     Cell, Cursor, Snapshot, Term, ATTR_BOLD, ATTR_DIM, ATTR_ITALIC, ATTR_REVERSE,
     ATTR_STRIKETHROUGH, ATTR_UNDERLINE, ATTR_WRAP,
@@ -110,7 +111,7 @@ impl EventListener for ReplySink {
 /// One pane's terminal state.
 pub struct AlacrittyTerm {
     term: VtTerm<ReplySink>,
-    parser: Processor,
+    parser: Processor<SyncTimeout>,
     replies: Arc<Mutex<Vec<u8>>>,
     size: Arc<Mutex<GridSize>>,
     title: Arc<Mutex<Option<String>>>,
@@ -136,11 +137,13 @@ impl AlacrittyTerm {
         };
         let config = Config {
             scrolling_history: history,
+            // Programs push `CSI > flags u`; the client encodes keys by the active flags.
+            kitty_keyboard: true,
             ..Config::default()
         };
         Self {
             term: VtTerm::new(config, &size, sink),
-            parser: Processor::new(),
+            parser: Processor::<SyncTimeout>::new(),
             replies,
             size: size_cell,
             title,
@@ -148,14 +151,11 @@ impl AlacrittyTerm {
         }
     }
 
-    fn convert_row(&self, line: Line, colors: &Colors) -> Vec<Cell> {
+    /// `cols` comes from the caller, which reads the size once per picture rather than
+    /// locking it for every row.
+    fn convert_row(&self, line: Line, colors: &Colors, cols: u16) -> Vec<Cell> {
         let grid = self.term.grid();
-        let cols = self
-            .size
-            .lock()
-            .map(|size| size.cols as usize)
-            .unwrap_or(80);
-        (0..cols)
+        (0..usize::from(cols))
             .map(|col| {
                 let cell = &grid[Point::new(line, Column(col))];
                 let (attrs, width) = attributes(cell.flags);
@@ -180,30 +180,43 @@ impl AlacrittyTerm {
             .collect()
     }
 
-    /// One picture of the pane; `with_history: false` skips converting the scrollback.
-    fn picture(&self, with_history: bool) -> Snapshot {
-        let size = self.size.lock().map(|size| *size).unwrap_or(GridSize {
+    fn size(&self) -> GridSize {
+        self.size.lock().map(|size| *size).unwrap_or(GridSize {
             cols: 80,
             rows: 24,
             history: 0,
-        });
+        })
+    }
+
+    /// One picture of the pane with the newest `max_history` scrollback rows; 0 skips
+    /// converting the scrollback.
+    fn picture(&self, max_history: usize) -> Snapshot {
+        let size = self.size();
         let colors = self.term.colors();
-        let content = self.term.renderable_content();
-
         let screen = (0..size.rows)
-            .map(|row| self.convert_row(Line(row as i32), colors))
+            .map(|row| self.convert_row(Line(i32::from(row)), colors, size.cols))
             .collect();
-
-        let history = if size.history == 0 || !with_history {
+        let history = if size.history == 0 || max_history == 0 {
             Vec::new()
         } else {
             let topmost = self.term.grid().topmost_line().0;
-            // Newest-first in alacritty's storage; emit oldest-first.
-            (topmost..0)
-                .map(|line| self.convert_row(Line(line), colors))
+            // History lines run from `topmost` (oldest) to -1 (newest); keep the newest.
+            let available = usize::try_from(-topmost).unwrap_or(0);
+            let skip = available.saturating_sub(max_history);
+            let start = topmost.saturating_add(i32::try_from(skip).unwrap_or(i32::MAX));
+            (start..0)
+                .map(|line| self.convert_row(Line(line), colors, size.cols))
                 .collect()
         };
+        let mut snapshot = self.frame(size);
+        snapshot.screen = screen;
+        snapshot.history = history;
+        snapshot
+    }
 
+    /// Everything but the grid: size, cursor, alt screen, scroll region.
+    fn frame(&self, size: GridSize) -> Snapshot {
+        let content = self.term.renderable_content();
         Snapshot {
             cols: size.cols,
             rows: size.rows,
@@ -212,8 +225,8 @@ impl AlacrittyTerm {
             // alacritty keeps DECSTBM private; M0 reports the full screen and
             // documents the gap instead of guessing wrong values.
             scroll: (0, size.rows.saturating_sub(1)),
-            screen,
-            history,
+            screen: Vec::new(),
+            history: Vec::new(),
         }
     }
 }
@@ -221,6 +234,14 @@ impl AlacrittyTerm {
 impl Term for AlacrittyTerm {
     fn feed(&mut self, bytes: &[u8]) {
         self.parser.advance(&mut self.term, bytes);
+    }
+
+    fn sync_deadline(&self) -> Option<std::time::Instant> {
+        self.parser.sync_timeout().deadline()
+    }
+
+    fn flush_sync(&mut self) {
+        self.parser.stop_sync(&mut self.term);
     }
 
     fn resize(&mut self, cols: u16, rows: u16) {
@@ -239,15 +260,30 @@ impl Term for AlacrittyTerm {
     }
 
     fn snapshot(&self) -> Snapshot {
-        self.picture(true)
+        self.picture(usize::MAX)
     }
 
     fn screen_snapshot(&self) -> Snapshot {
-        self.picture(false)
+        self.picture(0)
+    }
+
+    fn snapshot_with_recent_history(&self, max_history: usize) -> Snapshot {
+        self.picture(max_history)
+    }
+
+    fn screen_rows(&self, rows: &[u16]) -> (Vec<(u16, Vec<Cell>)>, Snapshot) {
+        let size = self.size();
+        let colors = self.term.colors();
+        let picked = rows
+            .iter()
+            .filter(|y| **y < size.rows)
+            .map(|y| (*y, self.convert_row(Line(i32::from(*y)), colors, size.cols)))
+            .collect();
+        (picked, self.frame(size))
     }
 
     fn scrolled_snapshot(&self, offset: usize) -> (Snapshot, usize) {
-        let mut view = self.picture(false);
+        let mut view = self.picture(0);
         let total = (-self.term.grid().topmost_line().0).max(0) as usize;
         let offset = offset.min(total);
         if offset == 0 {
@@ -257,7 +293,7 @@ impl Term for AlacrittyTerm {
         // Screen line 0 is `Line(0)`; history runs to `Line(-total)`. Shifting the window up
         // by `offset` reads exactly `rows` lines, so a step costs one screen, not 10k lines.
         view.screen = (0..i32::from(view.rows))
-            .map(|row| self.convert_row(Line(row - offset as i32), colors))
+            .map(|row| self.convert_row(Line(row - offset as i32), colors, view.cols))
             .collect();
         // The cursor belongs to the live screen; drawing it over history would lie.
         view.cursor.visible = false;
@@ -288,8 +324,9 @@ impl Term for AlacrittyTerm {
     fn modes(&self) -> u32 {
         use super::{
             MODE_ALTERNATE_SCROLL, MODE_APP_CURSOR, MODE_APP_KEYPAD, MODE_BRACKETED_PASTE,
-            MODE_CURSOR_BLINK, MODE_FOCUS_EVENTS, MODE_MOUSE_CLICK, MODE_MOUSE_DRAG,
-            MODE_MOUSE_MOTION, MODE_MOUSE_SGR,
+            MODE_CURSOR_BLINK, MODE_FOCUS_EVENTS, MODE_KITTY_ALL_KEYS, MODE_KITTY_ALTERNATE_KEYS,
+            MODE_KITTY_ASSOCIATED_TEXT, MODE_KITTY_DISAMBIGUATE, MODE_KITTY_EVENT_TYPES,
+            MODE_MOUSE_CLICK, MODE_MOUSE_DRAG, MODE_MOUSE_MOTION, MODE_MOUSE_SGR,
         };
         let mode = self.term.mode();
         [
@@ -302,6 +339,11 @@ impl Term for AlacrittyTerm {
             (TermMode::FOCUS_IN_OUT, MODE_FOCUS_EVENTS),
             (TermMode::APP_KEYPAD, MODE_APP_KEYPAD),
             (TermMode::ALTERNATE_SCROLL, MODE_ALTERNATE_SCROLL),
+            (TermMode::DISAMBIGUATE_ESC_CODES, MODE_KITTY_DISAMBIGUATE),
+            (TermMode::REPORT_EVENT_TYPES, MODE_KITTY_EVENT_TYPES),
+            (TermMode::REPORT_ALTERNATE_KEYS, MODE_KITTY_ALTERNATE_KEYS),
+            (TermMode::REPORT_ALL_KEYS_AS_ESC, MODE_KITTY_ALL_KEYS),
+            (TermMode::REPORT_ASSOCIATED_TEXT, MODE_KITTY_ASSOCIATED_TEXT),
         ]
         .iter()
         .filter(|(flag, _)| mode.contains(*flag))

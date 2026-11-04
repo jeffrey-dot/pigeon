@@ -11,6 +11,9 @@ enum TerminalModes {
     static let appKeypad: UInt32 = 1 << 7
     static let alternateScroll: UInt32 = 1 << 8
     static let cursorBlink: UInt32 = 1 << 9
+    /// The kitty keyboard protocol's active flags (1, 2, 4, 8, 16) shifted up by `kittyShift`.
+    static let kittyShift: UInt32 = 10
+    static let kittyFlags: UInt32 = 0x1f << kittyShift
 
     /// Any of the three mouse-reporting modes: clicks then belong to the program.
     static let anyMouse = mouseClick | mouseDrag | mouseMotion

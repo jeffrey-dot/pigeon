@@ -13,6 +13,7 @@
 | `checks/m1-gui-check.sh` | M1：分屏、拖动分隔线、焦点（[m1-checklist](../docs/m1-checklist.md)） |
 | `checks/m2-gui-check.sh` | M2：宿主崩溃恢复、多客户端尺寸、真键盘（[m2-checklist](../docs/m2-checklist.md)） |
 | `checks/m3-gui-check.sh` | M3：侧栏、状态、未读（[m3-checklist](../docs/m3-checklist.md)） |
+| `checks/harp-ui-check.py --out /tmp/pigeon-ui` | 临时宿主与真实 OSC 会话，截取 Harp 风格浅色 / 深色主界面 |
 | `checks/metal-gui-check.sh` | Metal 渲染：两种外观各截一张 |
 | `checks/quit-on-last-session-check.sh` | 最后一个会话退出后宿主结束、应用退出 |
 | `checks/helpers/` | 上面脚本用的 Swift 小工具：按 pid 点窗口、取窗口号 |

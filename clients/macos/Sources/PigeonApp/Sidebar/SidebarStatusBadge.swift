@@ -1,12 +1,15 @@
 import AppKit
 
-/// The status mark on a row's circle. `working` is a turning arc rather than a static dashed
+/// The trailing status mark. `working` is a turning arc rather than a static dashed
 /// circle, so a busy agent is visible at a glance; turning `blocked` sends out one amber ring
 /// that fades, which draws the eye without blinking for as long as the agent waits.
 /// Both animations are skipped under Reduce Motion.
 final class SidebarStatusBadge: NSView {
     private let image = NSImageView()
     private let arc = CAShapeLayer()
+    private let track = CAShapeLayer()
+    private let waitingRing = CAShapeLayer()
+    private let waitingDot = CAShapeLayer()
     private let ping = CAShapeLayer()
     private var spinning = false
     private var arcColor: NSColor = SidebarTheme.iconStrong
@@ -25,6 +28,9 @@ final class SidebarStatusBadge: NSView {
     func show(symbol: String?, color: NSColor, working: Bool, pulse: Bool) {
         isHidden = symbol == nil && !working
         arcColor = color
+        track.isHidden = !working
+        waitingRing.isHidden = symbol != "record.circle"
+        waitingDot.isHidden = waitingRing.isHidden
         if working {
             image.isHidden = true
             arc.isHidden = false
@@ -32,7 +38,7 @@ final class SidebarStatusBadge: NSView {
         } else {
             stopSpinning()
             arc.isHidden = true
-            image.isHidden = symbol == nil
+            image.isHidden = symbol == nil || symbol == "record.circle"
             image.image = symbol.flatMap(Self.symbol)
             image.contentTintColor = color
         }
@@ -50,6 +56,11 @@ final class SidebarStatusBadge: NSView {
             center: CGPoint(x: bounds.midX, y: bounds.midY), radius: inset.width / 2,
             startAngle: 0, endAngle: .pi * 1.5, clockwise: false)
         arc.path = path
+        for shape in [track, waitingRing, waitingDot] { shape.frame = bounds }
+        let ringPath = CGPath(ellipseIn: inset, transform: nil)
+        track.path = ringPath
+        waitingRing.path = ringPath
+        waitingDot.path = CGPath(ellipseIn: bounds.insetBy(dx: 5, dy: 5), transform: nil)
         ping.frame = bounds
         ping.path = CGPath(ellipseIn: inset, transform: nil)
     }
@@ -107,13 +118,16 @@ final class SidebarStatusBadge: NSView {
     private func updateColors() {
         effectiveAppearance.performAsCurrentDrawingAppearance {
             arc.strokeColor = arcColor.cgColor
+            track.strokeColor = SidebarTheme.track.cgColor
+            waitingRing.strokeColor = SidebarTheme.iconNeedsRing.cgColor
+            waitingDot.fillColor = SidebarTheme.iconNeedsDot.cgColor
             ping.strokeColor = SidebarTheme.iconNeedsRing.cgColor
         }
     }
 
     private static func symbol(_ name: String) -> NSImage? {
         let config = NSImage.SymbolConfiguration(
-            pointSize: SidebarMetrics.statusBadgeSize, weight: .bold)
+            pointSize: SidebarMetrics.statusGlyphSize, weight: .semibold)
         return NSImage(systemSymbolName: name, accessibilityDescription: nil)?
             .withSymbolConfiguration(config)
     }
@@ -130,12 +144,17 @@ final class SidebarStatusBadge: NSView {
             image.topAnchor.constraint(equalTo: topAnchor),
             image.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
-        for shape in [arc, ping] {
+        for shape in [track, arc, waitingRing, waitingDot, ping] {
             shape.fillColor = nil
             shape.lineCap = .round
             layer?.addSublayer(shape)
         }
         arc.lineWidth = 1.8
+        track.lineWidth = 1.8
+        waitingRing.lineWidth = 1.5
+        track.isHidden = true
+        waitingRing.isHidden = true
+        waitingDot.isHidden = true
         ping.lineWidth = 1.5
         ping.opacity = 0
         arc.isHidden = true

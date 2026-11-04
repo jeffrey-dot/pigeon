@@ -1,3 +1,6 @@
+// Tests assert through public APIs, including the raw C ABI.
+#![allow(unsafe_code, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 //! Deltas through the same safe interface a Rust client uses without internals.
 
 use pigeon_core::api::{delta_of, Message, PgError, Row, WireCell, WireCursor};
@@ -33,8 +36,8 @@ fn delta() -> Message {
 
 #[test]
 fn a_delta_preserves_its_rows_widths_cursor_and_modes() {
-    let (pane, picture) = delta_of(&delta()).expect("delta");
-    assert_eq!(pane, 7);
+    let picture = delta_of(&delta()).expect("delta");
+    assert_eq!(picture.pane_id, 7);
     assert_eq!(picture.seq, 9);
     assert_eq!(picture.alt, Some(true));
     assert_eq!(picture.modes, Some(3));
@@ -74,7 +77,7 @@ fn a_cursor_only_delta_does_not_require_rows() {
         rows.clear();
         *modes = None;
     }
-    let (_, picture) = delta_of(&message).expect("cursor-only delta");
+    let picture = delta_of(&message).expect("cursor-only delta");
     assert!(picture.rows.is_empty());
     assert!(picture.cursor.is_some());
     assert_eq!(picture.modes, None);

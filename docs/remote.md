@@ -41,14 +41,17 @@ stdin/stdout 上说话。当前客户端优先使用 `--proxy`；它可在没有
 3. 一个都没有、都跑不起来，或协议大版本都不同（不兼容），才去取本机的产物，把二进制**从同一条 ssh 连接流过去**（不依赖 scp/ftp）：
 
    ```sh
-   ssh host 'mkdir -p ~/.pigeon/server/0.1.0 \
-     && cat > ~/.pigeon/server/0.1.0/pigeon-server.tmp \
-     && chmod +x ~/.pigeon/server/0.1.0/pigeon-server.tmp \
-     && mv ~/.pigeon/server/0.1.0/pigeon-server.tmp ~/.pigeon/server/0.1.0/pigeon-server' \
+   ssh host 'd=~/.pigeon/server/0.1.0; mkdir -p "$d" \
+     && tmp=$(mktemp "$d/.pigeon-server.XXXXXX") \
+     && cat > "$tmp" && chmod 755 "$tmp" \
+     && mv -f "$tmp" "$d/pigeon-server"' \
      < pigeon-server
    ```
 
-4. 在远端执行一次 `pigeon-server.tmp --version`：输出不是期望的那一行（传输被截断、架构不对）就删文件并报错，通过了才 `mv` 上线；
+   临时文件名由 `mktemp` 生成（Linux 与 macOS 同一写法），两个窗口同时安装时各写各的，
+   谁也不会在另一方检查完、`mv` 之前把它的文件截断；任何一步失败都删掉临时文件。
+
+4. 在远端执行一次临时文件的 `--version`：输出不是期望的那一行（传输被截断、架构不对）就删文件并报错，通过了才 `mv` 上线；
 5. 启动：`ssh host ~/.pigeon/server/0.1.0/pigeon-server --proxy`（宿主已在远端常驻，桥接它的 unix socket；socket 上没人监听时 `--proxy` 先拉起一个宿主——无共享 stdio、独立进程组，ssh 断开不会带走它——再桥接，所以重启后的第一次连接也只需要这一条命令）。
 
 ### 远端产物从哪来（GitHub Release，按需下载）
@@ -71,7 +74,8 @@ stdin/stdout 上说话。当前客户端优先使用 `--proxy`；它可在没有
 
 远端没有兼容的 server、本机缓存里也没有对应平台的产物时，客户端（`ServerDownload.swift`）才下载：取 `releases/download/v<App 版本>/SHA256SUMS` →
 下载对应 `.gz` → **校验哈希后**才解压、`chmod +x`、改名进 `~/.cache/pigeon/server/<版本>/`；
-校验不过什么都不留。同一版本同一平台只下一次。`PIGEON_SERVER_URL` 可指向镜像（内网 / 访问 GitHub 困难的地区）。
+校验不过什么都不留。同一版本同一平台只下一次。`PIGEON_SERVER_URL` 可指向镜像（内网 / 访问 GitHub 困难的地区），
+但必须是 `https`（含重定向后的最终地址）；明文 `http` 只允许 `localhost` / `127.0.0.1` / `::1`（本机测试用）。
 下载失败时退回普通 ssh 模式（不持久），界面照常说明。
 
 开发构建（没有 bundle 版本号）不下载，直接用 `PIGEON_HOST_ARTIFACTS` 或 `core/target/<triple>/release/pigeon-server`。
@@ -88,7 +92,7 @@ cargo build --release --manifest-path core/Cargo.toml --bin pigeon-server \
 
 `clients/macos/Sources/PigeonApp/Net/Host/HostInstaller.swift`：`ssh uname -sm` 探测平台 → 列出远端已装的 server 并读 `--version` →
 有协议大版本相同的（`pg_proto_version()`）就**不传**，否则才向本机要产物，放进以 App 版本号（`pg_core_version()`）命名的目录，把二进制流进
-`~/.pigeon/server/<版本>/pigeon-server.tmp`，**在远端**跑通 `--version` 后才 `mv` 成正式文件，
+`~/.pigeon/server/<版本>/.pigeon-server.XXXXXX`（`mktemp`），**在远端**跑通 `--version` 后才 `mv` 成正式文件，
 并只保留最新两个版本。远端的登录 shell 可能是 fish/csh，所以命令行走 base64 + `sh`，
 不假设是 POSIX sh。实跑记录见 `docs/m4-checklist.md`。
 
@@ -99,6 +103,13 @@ cargo build --release --manifest-path core/Cargo.toml --bin pigeon-server \
   绝不写 `/usr/local`、不用 sudo、不改 PATH 与 rc。
 - **只在不兼容时升级**：App 升级但协议大版本没变，远端继续用已装的 server；大版本变了才推新目录（`server/0.2.0/`），
   老会话继续跑老版本直到重启；保留最近 2 个版本并 GC。
+- **启动走 `--detach`**（与本机一致）：问 socket 有没有宿主在答；没有才在独立进程组里起一个，
+  等它监听后返回。已在服务的宿主不论版本都保留，不替换（替换就等于结束用户的会话）。
+- **已知缺口：大版本升级无法交接。** 老宿主占着 `~/.pigeon/state/pigeon.sock`，新二进制的 `--detach` / `--proxy`
+  都会连到它，`hello` 因大版本不同被拒，客户端只能提示。宿主没有 pidfile，`shutdown` 又必须在 `hello` 成功之后才收，
+  所以新二进制没有办法让旧宿主退出。PTY 进程属于旧宿主，换宿主必然结束这些会话，只能由用户确认。
+  建议的最小方案（需改协议，未实现）：把 `shutdown` 定为**跨大版本冻结**的消息，`hello_error{reason:"version"}`
+  之后仍接受；客户端遇到版本不符时问“结束远端 N 个旧会话并升级？”，确认后发 `shutdown`，再用新二进制 `--detach`。
 - **安装控制的现状**：安装层提供 `allowInstall` 参数，当前 GUI 连接默认允许按需安装；首次安装确认、“以后不再问”和 `--no-remote-install` 用户入口尚未实现。
 - **卸载**：`rm -rf ~/.pigeon` 就是卸载，远端不留任何其它痕迹。
 - **静态链接**（musl / 自带依赖）：不依赖远端 glibc、openssl、字体；只依赖内核 + PTY。
@@ -152,8 +163,16 @@ cargo build --release --manifest-path core/Cargo.toml --bin pigeon-server \
 
 - 只经 `ssh`；`pigeon-server` **只监听 unix socket**，权限 0700：装在 `~/.pigeon/server/` 下的远端宿主用
   `~/.pigeon/state/pigeon.sock`（`$XDG_RUNTIME_DIR` 会在用户最后一个登录会话结束时被 systemd 删掉，宿主就成了孤儿）；
-  其它情况（本机、开发构建）用 `$XDG_RUNTIME_DIR/pigeon.sock`，回退 `/tmp/pigeon-<uid>.sock`。
+  其它情况（本机、开发构建）用 `$XDG_RUNTIME_DIR/pigeon.sock`，回退 `/tmp/pigeon-<uid>/pigeon.sock`（与 tmux 的
+  `/tmp/tmux-<uid>/` 同理：目录 0700 且属于当前用户，别人事先建好的同名目录会被拒绝，不会被沿用）。
+  宿主与客户端都用 `lstat` 校验目录与 socket 的属主和类型，连上后再比对端 uid（详见 `docs/protocol.md` §1）。
+  同一路径只允许一个宿主：绑定前先对 `<socket>.lock` 加 `flock`。
 - `--proxy` 只转发协议帧：不接受任意命令、不做 shell 展开。
+- **已知缺口：release 没有签名。** `SHA256SUMS` 与二进制来自同一来源，只能发现下载损坏，挡不住来源本身被篡改
+  （GitHub 账号或镜像被攻破）；目前唯一的保护是 https。要补上需要一把由维护者持有的签名密钥（例如 minisign /
+  sigstore），客户端内置公钥、校验 `SHA256SUMS` 的签名后再信任其中的哈希。
+- 用户填的主机名只当 ssh 目的地：以 `-` 开头（如 `-oProxyCommand=…`，会在本机执行命令）、为空或含空白/控制字符的
+  直接拒绝，不降级成普通 ssh；每次调用 ssh 都在目的地前加 `--`。拼进远端 shell 的值里，远端返回的二进制路径一律单引号转义。
 - 不修改远端 shell 配置；安装层的 `allowInstall` 可阻止安装，但 GUI 确认与命令行安装控制尚未接入，不能承诺当前会先弹确认。
 - 认证/密钥/known_hosts 全部交给系统 `ssh`；pigeon 不读、不缓存任何凭据。
 - 远端进程以普通用户身份运行，与用户手敲命令同权限。

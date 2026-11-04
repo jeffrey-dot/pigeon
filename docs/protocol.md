@@ -19,7 +19,7 @@
 - 握手当前拒绝不同 major 并返回自身 `PROTO_VERSION`；“minor 取较小值”的目标尚未实现。
 - `scroll` 及历史发送的宿主处理尚未完整按 `scrollback` 握手能力门控；官方客户端通过 `history:false` 避免 attach 传整段历史。
 - 尺寸投票当前存在 `SessionState.vote`，同会话 pane 共用；尚未达到 §6 的 pane 级策略契约。首次投票者决定策略，仍有投票者时重新 attach 不会修改它。
-- 宿主尚未实现 hello 的 5s 超时；不同 major 会回 `hello_error`，但服务端没有在发送后主动关闭连接。
+- 宿主已实现 hello 5s / 入站空闲 45s 超时；版本拒绝或首帧非 hello 会发送答复后关闭连接。
 - `close_pane` 目前调用 PTY child 的 `kill()`；尚无显式的 SIGHUP 等待后 SIGKILL 的两阶段策略。
 
 这些差异是待完成项，不改变协议的兼容性规则；新增能力仍需同时补实现和测试。
@@ -28,7 +28,7 @@
 
 | 项 | 规定 |
 |---|---|
-| 传输 | 本机 unix socket（`$XDG_RUNTIME_DIR/pigeon.sock`，回退 `/tmp/pigeon-<uid>.sock`，`0700`）；客户端安装的远端宿主用 `~/.pigeon/state/pigeon.sock`，经 stdio/SSH 承载。路径由 `pigeon-server --socket-path` 查询 |
+| 传输 | 本机 unix socket（`$XDG_RUNTIME_DIR/pigeon.sock`，否则 `/tmp/pigeon-<uid>/pigeon.sock`；socket `0700`，所在目录必须属于当前用户且组/其他人不可写，或是 root 所有且带 sticky 位；双方用 `lstat` 校验属主与类型，不跟随符号链接；宿主用对端凭据、客户端用 `getpeereid` 确认对方是同一 uid，否则拒绝）；远端为同一协议的 stdio（`ssh host pigeon-server --proxy`） |
 | 帧 | `u32` 小端长度 `L` + 恰好 `L` 字节 payload。`L` **不含自身**；payload 为单个 CBOR map。不用换行分隔 |
 | 上限 | 单帧 ≤ 8 MiB（8388608）。超限即断开并回 `error{code:"frame_too_large"}`，payload 不进解析器 |
 | 半包 | 读端必须能处理“长度够但 payload 不足”的中间态，累积到 `L` 字节再解 |
@@ -93,7 +93,8 @@
 - `snapshot` 与 `delta` 都带可选 `modes: u32`（`core/src/term` 的 `MODE_*` 位）：`1` 应用光标键（DECCKM `?1`）、
   `2` 括号粘贴（`?2004`）、`4` 鼠标点击上报（`?1000`）、`8` 拖动上报（`?1002`）、`16` 全部移动上报（`?1003`）、
   `32` SGR 鼠标格式（`?1006`）、`64` 焦点事件（`?1004`）、`128` 应用小键盘、`256` 备用屏滚轮转方向键（`?1007`）、
-  `512` 光标闪烁（DECSCUSR 1/3/5）。
+  `512` 光标闪烁（DECSCUSR 1/3/5）、`1024`–`16384` kitty 键盘协议当前生效的 flag
+  （程序 `CSI > flags u` 栈顶，flag `1 << n` 对应位 `1024 << n`：消歧 / 事件类型 / 备选键 / 全部按键转义 / 附带文本）。
   客户端据此决定方向键、鼠标与滚轮发什么；缺省 = 0。
 
 - `seq` 只由 `delta` 递增（每 pane 从 1 开始）；`snapshot` 带的是它已包含的最新 `delta` 的 `seq`，自己不占号。所以别的窗口 `attach`/`scroll` 不会在这个窗口的增量流里留下空洞。客户端收到 `seq <= last` 的增量直接丢（快照已经包含）；`seq > last + 1` → 丢掉增量、重新 `attach`。
@@ -125,7 +126,7 @@
 | 方向 | 消息 | 必选字段 | 可选字段 | 说明 |
 |---|---|---|---|---|
 | c→s | `appearance` | — | `fg: u32`, `bg: u32`, `ansi: [u32]`（16 个 `0xRRGGBB`） | 客户端当前主题，供宿主回答程序发出的 `OSC 4/10/11` 颜色查询。**缺省值**：客户端还没发过时，宿主用内置的深色板（底 `#0E0F11` / 字 `#E6E6E6` + harp 的 `DARK_MODE_*` 十六色）作答；`fg`/`bg` 缺失或 `ansi` 不是 16 个时，保留上一次的答复（不 panic、不猜） |
-| c→s | `keys` | `pane_id: u32`, `bytes: bstr` | — | 已编码好的终端字节（当前两端为 xterm legacy；Kitty keyboard protocol 待完整接入） |
+| c→s | `keys` | `pane_id: u32`, `bytes: bstr` | — | 已编码好的终端字节（macOS 支持 legacy/Kitty keyboard protocol，按 modes 协商编码；Linux 暂为 legacy） |
 | c→s | `mouse` | `pane_id: u32`, `kind: "down"\|"up"\|"move"\|"wheel"`, `x: u16`, `y: u16`, `button: u8`, `mods: u8` | — | `mods` 位：`1` shift、`2` alt、`4` ctrl |
 | c→s | `paste` | `pane_id: u32`, `text: str` | — | 宿主负责括号粘贴包装：程序开了 `?2004` 才包 `ESC[200~ … ESC[201~`，并去掉正文里的起止标记（防止剪贴板内容提前结束粘贴、把后面当命令执行）；`\n`/`\r\n` 换成 `\r` |
 | s→c | `status` | `pane_id: u32`, `state: "idle"\|"working"\|"blocked"\|"done"\|"error"`, `seq: u32` | `kind: "permission"\|"question"\|"auth"`, `msg: str`, `app: str`, `id: str`, `age_ms: u64` | 来自 OSC 7501；`msg`/`app` 只当纯文本；`app` 是上报的 agent 名（`app=`），`id` 是记录 id；`age_ms` = 进入当前 `state` 已多少毫秒（宿主时钟上的时长，不是时间戳，两端时钟不必一致；同一状态重复上报不重置） |

@@ -107,10 +107,12 @@ extension AppDelegate {
     /// Points the window at a live client: the local socket and a remote bridge look the same
     /// from here on (that is the point of mode A/B).
     private func wire(_ client: HostClient, host: String) {
-        client.onMessage = { [weak self] message in
+        // Batch delivery keeps a burst of deltas in one run-loop turn.
+        client.onMessages = { [weak self] messages in
             DispatchQueue.main.async {
-                defer { Wire.free(message) }
-                self?.handle(message, host: host)
+                defer { messages.forEach(Wire.free) }
+                guard let self else { return }
+                for message in messages { self.handle(message, host: host) }
             }
         }
         client.onClose = { [weak self] in
@@ -312,9 +314,6 @@ extension AppDelegate {
     }
 
     private static func defaultSocketPath() -> String {
-        if let runtime = ProcessInfo.processInfo.environment["XDG_RUNTIME_DIR"] {
-            return runtime + "/pigeon.sock"
-        }
-        return "/tmp/pigeon-\(getuid()).sock"
+        SocketTrust.defaultPath(environment: ProcessInfo.processInfo.environment, uid: getuid())
     }
 }

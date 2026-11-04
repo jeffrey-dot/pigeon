@@ -1,7 +1,7 @@
 import XCTest
 @testable import PigeonApp
 
-/// What a session row says about its agent: the second line, the name, and the header badge.
+/// What a session row says about its agent: the tooltip, the name, and the header badge.
 final class AgentRowTests: XCTestCase {
     private func session(
         _ status: SidebarSession.Status,
@@ -23,10 +23,10 @@ final class AgentRowTests: XCTestCase {
         XCTAssertEqual(SidebarModel.detailLine(for: session(.blocked)), "Waiting for you")
     }
 
-    func testOnlyLiveStatesGetASecondLine() {
+    func testOnlyLiveStatesGetTaskDetails() {
         let busy = AgentInfo(app: "codex", message: "Refactoring the renderer")
         XCTAssertEqual(SidebarModel.detailLine(for: session(.working, agent: busy)), "Refactoring the renderer")
-        XCTAssertNil(SidebarModel.detailLine(for: session(.working)), "no task text, one line")
+        XCTAssertNil(SidebarModel.detailLine(for: session(.working)), "no task text")
         XCTAssertNil(SidebarModel.detailLine(for: session(.done, agent: busy)))
         XCTAssertNil(SidebarModel.detailLine(for: session(.idle, agent: busy)))
     }
@@ -39,14 +39,15 @@ final class AgentRowTests: XCTestCase {
             SidebarModel.rowTitle(for: session(.working, agent: agent, title: "api server")), "api server")
     }
 
-    func testTheHeaderBadgeCarriesStateAgeAndReason() {
+    func testTheHeaderBadgeStaysCompactAndTheReasonIsAvailableSeparately() {
         let now = Date(timeIntervalSince1970: 10_000)
         let asking = AgentInfo(
             app: "claude", message: "Run cargo test?", kind: "permission",
             since: now.addingTimeInterval(-120))
         var blocked = session(.blocked, agent: asking)
         blocked.lastSeen = asking.since
-        XCTAssertEqual(SidebarModel.headerBadge(for: blocked, now: now), "Needs you · 2m · Run cargo test?")
+        XCTAssertEqual(SidebarModel.headerBadge(for: blocked, now: now), "Needs you · 2m")
+        XCTAssertEqual(SidebarModel.detailLine(for: blocked), "Run cargo test?")
         XCTAssertEqual(SidebarModel.headerBadge(for: session(.working, reported: false), now: now), "")
         XCTAssertEqual(SidebarModel.headerBadge(for: session(.idle), now: now), "")
     }

@@ -125,7 +125,7 @@ tmux attach（前台，一个普通程序）
 2. 维护每个 pane 的**终端状态**（屏幕、光标、备用屏、滚动历史）——所以断线重连能原样画回来；
 3. 记住会话/窗口/分屏的布局；
 4. 解析程序上报的 OSC 7501，得到“在干活/在等你/完成了”；
-5. 在 `/tmp/pigeon-<uid>.sock` 上听窗口：`给我 pane 3 的快照`、`这些是键盘字节`、`窗口变成 120x40`。
+5. 在 `/tmp/pigeon-<uid>/pigeon.sock` 上听窗口：`给我 pane 3 的快照`、`这些是键盘字节`、`窗口变成 120x40`。
 
 **启动方式（和 tmux 一模一样，没有任何服务/配置）：**
 
@@ -276,19 +276,20 @@ M0–M1 可以直接复用现有代码：内核的对账语料（来自 tmux 阶
 | 会话保持与分屏 | 客户端关闭后任务继续；快照恢复、增量续传、嵌套分屏、resize、zoom/unzoom；宿主支持 `latest`/`smallest`/`locked`。宿主退出或机器重启后不恢复会话 |
 | macOS 终端 | Metal 网格、独立渲染线程、脏行更新、彩色字形图集；回看、拖选/双击选词/三击选行、复制粘贴、括号粘贴、鼠标/焦点事件、光标形状/闪烁、`NSTextInputClient`。`clients/macos/Sources/PigeonApp/Terminal/` |
 | macOS 增量与恢复 | 握手协商 `delta`/`scrollback`/`status_all`；缺序重新 attach，重连带 `since`；输入回显优先 flush、有界出站队列。`AppDelegate+Commands.swift`、`AppDelegate+Protocol.swift`、宿主 `connection/` |
-| macOS 侧栏 | 机器/项目/会话分组、状态与 `msg`/`app`、相对时间、未读、needs-you、跳转、改名和排序持久化；动态单/双行、悬停关闭、透明标题栏。具体口径见 [ui.md](ui.md) |
+| macOS 侧栏 | 机器/项目/会话分组、状态与 `msg`/`app`、相对时间、未读、needs-you、跳转、改名和排序持久化；Harp 单行侧栏、任务提示、悬停关闭、透明标题栏。具体口径见 [ui.md](ui.md) |
 | macOS 远端 | 系统 SSH，兼容宿主复用、按需下载/安装、A/B/C 三档对接与断线重连；15s 心跳、45s 静默超时。A/B 保持远端会话，C 明示不持久。见 [remote.md](remote.md) |
 | Linux 首片 | Rust + GTK4，`GtkGLArea` + OpenGL ES 3 / 3.3 core；本地自动拉起宿主、多 pane、分屏、zoom、焦点与 resize，灰度和彩色图集。见 [Linux README](../clients/linux/README.md) |
+| 合并远端改进 | 2026-11-04 合并 `origin/main` @ `edba2ed`：握手/空闲超时、私有 socket/对端验证、有界 PTY 输入、增量转换/渲染缓存、现代键盘与编程连字；本次合并重新验证，不能沿用旧测试数字 |
 | 质量与分发基础 | Rust 双平台 CI、Swift CI、无默认 feature 构建、头文件 diff、宿主体积上限；8 条 VT 文本 golden；macOS universal 包、Ed25519 应用更新、多个架构的远端宿主产物 |
 
 ### 仍未完成或有限制
 
 | 缺口 | 代码现状与用户影响 |
 |---|---|
-| Unicode 字素与整形 | `term::Cell` / 协议 cell 仅带一个码点，`convert_row` 未保留 combining 字符；两端按单码点绘制。分解重音、ZWJ emoji 不能完整保真，尚无编程连字/多码点整形。需要从内核快照、协议/接口到客户端一起补 |
+| Unicode 字素与整形 | `term::Cell` / 协议 cell 仅带一个码点，`convert_row` 未保留 combining 字符；分解重音、ZWJ emoji 不能完整保真；macOS 已能对 ASCII 标点段做编程连字，完整字素整形仍未贯通。需要从内核快照、协议/接口到客户端一起补 |
 | 搜索与完整文本选择 | 未实现终端搜索；macOS 选择和“Select All”只覆盖当前屏幕。已新增 `ATTR_WRAP` 并在 macOS 复制时保留逻辑换行；旧宿主无标志时仍按网格行处理 |
 | OSC 8 / OSC 52 | `convert_row` 的 `link` 恒为 0，`links` 不下发；OSC 52 事件被忽略。点击超链接、远端程序复制到本地剪贴板尚不可用；本地菜单复制粘贴已实现 |
-| 现代终端协议 | 两端 KeyEncoder 都是 xterm legacy，Kitty keyboard protocol 尚未贯通；图片协议、OSC 9;4 进度、完整 OSC 133 命令边界/命令输出导航未实现。不能把底层 VT 库的能力当成产品端到端能力 |
+| 现代终端协议 | macOS 已接 Kitty keyboard protocol 与应用小键盘，Linux 仍为 legacy；DEC 2026 同步输出与超时已接；图片协议、OSC 9;4 进度、完整 OSC 133 命令边界/命令输出导航未实现。不能把底层 VT 库的能力当成产品端到端能力 |
 | agent 记录同步 | 多 pane 最新状态聚合、来源 pane ack、隐藏 pane 未读和同连接重播去重已补，纯逻辑通过；同 pane 多记录、跨应用重启的未读事件身份仍待补，AppKit 交互待 macOS 验收 |
 | agent 接入与通知 | 目前注入 `PI_PROGRAM_STATUS=1`，其它程序必须自行上报 OSC 7501；没有通用的上报工具/接入指南、完整适配矩阵或桌面通知投递。不能把“能运行 agent”写成“能自动显示其状态” |
 | Linux 功能对齐 | 缺侧栏/会话选择、SSH 连接管理、回看、选择/剪贴板、IME、鼠标/焦点上报、括号粘贴、拖动分隔线、渲染脏行复用与自动断线恢复；协议 delta 已接，GTK CI 作业已加入但本轮未推送运行；GUI 发布产物未做 |
@@ -298,7 +299,7 @@ M0–M1 可以直接复用现有代码：内核的对账语料（来自 tmux 阶
 | 多客户端尺寸设置 | 三种策略已有测试，但实现的 `SizeVote` 存在会话级，与协议的 pane 级契约有差异；macOS 默认 latest，缺策略选择 UI，Linux 未展示尺寸来源 |
 | 协议保留项与接口一致性 | `zstd` 尚未协商/实现；`new_session.env` 被宿主忽略，结构化 `mouse` 消息返回 unsupported（macOS 用 `keys` 发送编码后的鼠标字节）。`api::delta_of` 与 FFI 已统一，新增静态 import 检查 |
 | 安装控制与分发 | 远端安装层有 `allowInstall` 参数，但首次安装确认、`--no-remote-install` / `--remote-dir` 未接用户入口；macOS 缺 Developer ID 签名/公证，Linux GUI 无发布包。见 [update.md](update.md) |
-| 验收深度 | 未形成完整的 `vttest`/属性对账、fuzz、跨平台 GUI/IME/无障碍、16 pane 持续输出、弱网时延和功耗基线。8 条文本 golden 只覆盖基础场景；CI 仍缺 unsafe/平台依赖静态检查 |
+| 验收深度 | 未形成完整的 `vttest`/属性对账、fuzz、跨平台 GUI/IME/无障碍、16 pane 持续输出、弱网时延和功耗基线。8 条文本 golden 只覆盖基础场景；core 的 unsafe/生产 panic 已有编译 lint；平台依赖静态检查和 Linux unsafe 边界仍待补 |
 | TERM/terminfo 后续 | 已修复继承外部 TERM：新 pane 固定 xterm-256color/truecolor，四种外部环境回归通过；专用 terminfo 随现代能力完善 |
 | 其它限制 | 无 OSC 7501 的会话不显示虚构活动时间；宿主状态不写盘（既定取舍）；`swift test` 需要完整 Xcode |
 

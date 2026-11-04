@@ -1,6 +1,6 @@
 import AppKit
 
-/// The row pill from harp (`docs/ui.md` §7.1/§7.2): 8pt radius, 0.5pt edge, a filled
+/// The row pill from Harp (`docs/ui.md` §3–4): 8pt radius, 0.5pt edge, a filled
 /// white (dark: lifted grey) surface when selected, a faint wash under the pointer.
 ///
 /// `NSTableView.selectionHighlightStyle` is `.none`; this view owns the whole look so

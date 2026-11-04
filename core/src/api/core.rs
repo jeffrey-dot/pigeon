@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 
+use super::outbox::Outbox;
 use crate::error::{PgError, PgResult};
 use crate::layout::{Axis, Layout, PaneId, Rect, SplitId};
 use crate::session::PaneState;
@@ -13,18 +14,33 @@ use crate::status::Record;
 use crate::term::Snapshot;
 
 /// Core-wide settings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Config {
     /// 0 = core default (10000 lines); capped at 100000.
     pub scrollback_lines: u32,
+    /// `false`: OSC 7501 reports are ignored and every pane's status stays empty.
+    pub osc7501_enabled: bool,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            scrollback_lines: 0,
+            osc7501_enabled: true,
+        }
+    }
 }
 
 /// One embedded session: N panes plus the layout tree that places them.
 pub struct Core {
     config: Config,
     panes: BTreeMap<PaneId, PaneState>,
+    /// Replies and damage drained from each pane but not yet taken by the client.
+    outboxes: BTreeMap<PaneId, Outbox>,
     /// Geometry and focus live in the layout tree; the map only holds panes.
     layout: Option<Layout>,
+    /// The window's size in cells: what the layout's normalized rects are fractions of.
+    window: (u16, u16),
     next_pane: PaneId,
 }
 
@@ -33,7 +49,9 @@ impl Core {
         Self {
             config,
             panes: BTreeMap::new(),
+            outboxes: BTreeMap::new(),
             layout: None,
+            window: (80, 24),
             next_pane: 1,
         }
     }
@@ -46,9 +64,11 @@ impl Core {
         if self.layout.is_some() {
             return Err(PgError::InvalidArg);
         }
-        let pane = PaneState::new(pane_id, cols, rows, self.scrollback_lines());
+        let mut pane = PaneState::new(pane_id, cols, rows, self.scrollback_lines());
+        pane.set_status_enabled(self.config.osc7501_enabled);
         self.panes.insert(pane_id, pane);
         self.layout = Some(Layout::new(pane_id));
+        self.window = (cols.max(2), rows.max(1));
         Ok(pane_id)
     }
 
@@ -56,6 +76,7 @@ impl Core {
     /// (the last pane, say) is not an error.
     pub fn free_pane(&mut self, pane_id: PaneId) -> PgResult<()> {
         self.panes.remove(&pane_id).ok_or(PgError::NoSuchPane)?;
+        self.outboxes.remove(&pane_id);
         if let Some(layout) = self.layout.as_mut() {
             let _ = layout.close(pane_id);
         }
@@ -68,14 +89,42 @@ impl Core {
         Ok(())
     }
 
+    /// Resizes one pane. The window is taken to be whatever box gives this pane that
+    /// grid at its current rect, so later layout changes divide the right extent.
     pub fn resize(&mut self, pane_id: PaneId, cols: u16, rows: u16) -> PgResult<()> {
-        self.pane_mut(pane_id)?.resize(cols, rows);
+        let pane = self.panes.get_mut(&pane_id).ok_or(PgError::NoSuchPane)?;
+        pane.resize(cols, rows);
+        let (cols, rows) = pane.size();
+        if let Some(outbox) = self.outboxes.get_mut(&pane_id) {
+            outbox.clip_rows(rows);
+        }
+        let rect = self.layout.as_ref().and_then(|layout| {
+            layout
+                .rects()
+                .into_iter()
+                .find_map(|(id, rect)| (id == pane_id).then_some(rect))
+        });
+        if let Some(rect) = rect {
+            self.window = window_for(rect, cols, rows, self.window);
+        }
         Ok(())
     }
 
     /// Pending terminal replies (DA/DSR/…) the caller must write to the PTY.
     pub fn take_replies(&mut self, pane_id: PaneId) -> PgResult<Vec<u8>> {
-        Ok(self.pane_mut(pane_id)?.take_replies())
+        Ok(self.outbox(pane_id)?.take_replies())
+    }
+
+    /// The same replies without consuming them, so a caller whose buffer is too small
+    /// can ask again; follow with [`Core::consume_replies`].
+    pub fn peek_replies(&mut self, pane_id: PaneId) -> PgResult<&[u8]> {
+        Ok(self.outbox(pane_id)?.replies())
+    }
+
+    /// Drops the first `count` pending reply bytes (clamped to what is pending).
+    pub fn consume_replies(&mut self, pane_id: PaneId, count: usize) -> PgResult<()> {
+        self.outbox(pane_id)?.consume_replies(count);
+        Ok(())
     }
 
     /// Full picture of a pane, history included.
@@ -83,9 +132,20 @@ impl Core {
         Ok(self.pane_mut(pane_id)?.snapshot())
     }
 
-    /// Row indices dirty since the last call.
+    /// Row indices dirty since the last call, ascending and without duplicates.
     pub fn take_dirty_rows(&mut self, pane_id: PaneId) -> PgResult<Vec<u16>> {
-        Ok(self.pane_mut(pane_id)?.take_damage())
+        Ok(self.outbox(pane_id)?.take_dirty())
+    }
+
+    /// The same rows without consuming them; follow with [`Core::consume_dirty_rows`].
+    pub fn peek_dirty_rows(&mut self, pane_id: PaneId) -> PgResult<&[u16]> {
+        Ok(self.outbox(pane_id)?.dirty())
+    }
+
+    /// Drops the first `count` pending dirty rows (clamped to what is pending).
+    pub fn consume_dirty_rows(&mut self, pane_id: PaneId, count: usize) -> PgResult<()> {
+        self.outbox(pane_id)?.consume_dirty(count);
+        Ok(())
     }
 
     /// The focused pane and its OSC 7501 records.
@@ -94,45 +154,48 @@ impl Core {
         Ok((pane.pane_id, pane.status().records()))
     }
 
-    /// Marks the pane's default done/error record as seen; false when `seq`
-    /// is not its current one.
+    /// Marks the done/error record carrying `seq` as seen, whatever its id, exactly
+    /// like the host's `ack_status`; false when no such record is pending.
     pub fn ack_status(&mut self, pane_id: PaneId, seq: u32) -> PgResult<bool> {
-        Ok(self.pane_mut(pane_id)?.status_mut().ack("", seq))
+        Ok(self.pane_mut(pane_id)?.status_mut().ack_seq(seq))
     }
 
-    /// Splits a pane and returns the **new pane id**, which takes focus.
+    /// Splits a pane and returns the **new pane id**, which takes focus. Both halves
+    /// get the share of the window their rect says, not a fixed half.
     pub fn split(&mut self, pane_id: PaneId, axis: Axis, ratio: f32) -> PgResult<PaneId> {
-        // The target pane's own size is the extent being divided.
+        // The target pane's own size is the extent being divided (its minimum clamp).
         let (cols, rows) = self.pane(pane_id)?.size();
         let new_id = self.allocate_pane_id();
         let history = self.scrollback_lines();
         let layout = self.layout.as_mut().ok_or(PgError::NoSuchPane)?;
         layout.split(pane_id, new_id, axis, ratio, cols, rows)?;
-        let (child_cols, child_rows) = match axis {
-            Axis::Vertical => ((cols / 2).max(2), rows),
-            Axis::Horizontal => (cols, (rows / 2).max(1)),
-        };
-        let mut pane = PaneState::new(new_id, child_cols, child_rows, history);
-        pane.resize(child_cols, child_rows);
-        self.panes.insert(new_id, pane);
         let _ = layout.focus(new_id);
+        let mut pane = PaneState::new(new_id, cols, rows, history);
+        pane.set_status_enabled(self.config.osc7501_enabled);
+        self.panes.insert(new_id, pane);
+        self.fit_panes();
         Ok(new_id)
     }
 
     /// Closes a pane; its sibling takes over the parent rect.
     pub fn close(&mut self, pane_id: PaneId) -> PgResult<()> {
         self.panes.remove(&pane_id).ok_or(PgError::NoSuchPane)?;
+        self.outboxes.remove(&pane_id);
         if let Some(layout) = self.layout.as_mut() {
             layout.close(pane_id)?;
         }
+        self.fit_panes();
         Ok(())
     }
 
-    /// Changes a split's ratio, clamped so both sides keep their minimum size.
+    /// Changes a split's ratio, clamped so both sides keep their minimum size inside
+    /// the window (not inside whichever pane happens to have focus).
     pub fn set_split_ratio(&mut self, split_id: SplitId, ratio: f32) -> PgResult<()> {
-        let (cols, rows) = self.focused_pane()?.size();
+        let (cols, rows) = self.window;
         let layout = self.layout.as_mut().ok_or(PgError::NoSuchSplit)?;
-        layout.set_ratio(split_id, ratio, cols, rows)
+        layout.set_ratio(split_id, ratio, cols, rows)?;
+        self.fit_panes();
+        Ok(())
     }
 
     /// One normalized rect per pane, in tree order.
@@ -163,6 +226,27 @@ impl Core {
         self.layout.as_ref().and_then(Layout::focused)
     }
 
+    /// Gives every pane the grid its rect covers in the window.
+    fn fit_panes(&mut self) {
+        let Some(layout) = self.layout.as_ref() else {
+            return;
+        };
+        let (cols, rows) = self.window;
+        for (pane_id, rect) in layout.rects() {
+            let Some(pane) = self.panes.get_mut(&pane_id) else {
+                continue;
+            };
+            let wanted = cells_of(rect, cols, rows);
+            if pane.size() == wanted {
+                continue;
+            }
+            pane.resize(wanted.0, wanted.1);
+            if let Some(outbox) = self.outboxes.get_mut(&pane_id) {
+                outbox.clip_rows(wanted.1);
+            }
+        }
+    }
+
     fn allocate_pane_id(&mut self) -> PaneId {
         let pane_id = self.next_pane;
         self.next_pane = self.next_pane.saturating_add(1);
@@ -177,6 +261,15 @@ impl Core {
         self.panes.get_mut(&pane_id).ok_or(PgError::NoSuchPane)
     }
 
+    /// The pane's outbox, topped up with whatever the terminal produced since.
+    fn outbox(&mut self, pane_id: PaneId) -> PgResult<&mut Outbox> {
+        let pane = self.panes.get_mut(&pane_id).ok_or(PgError::NoSuchPane)?;
+        let outbox = self.outboxes.entry(pane_id).or_default();
+        outbox.push_replies(pane.take_replies());
+        outbox.push_dirty(pane.take_damage());
+        Ok(outbox)
+    }
+
     fn focused_pane(&self) -> PgResult<&PaneState> {
         self.pane(self.focused().ok_or(PgError::NoSuchPane)?)
     }
@@ -187,4 +280,26 @@ impl Core {
             lines => usize::try_from(lines.min(100_000)).unwrap_or(10_000),
         }
     }
+}
+
+/// A rect's share of the window in cells, with the minimum a VT grid needs.
+fn cells_of(rect: Rect, cols: u16, rows: u16) -> (u16, u16) {
+    let cols = ((rect.w * f32::from(cols)).round() as u16).max(2);
+    let rows = ((rect.h * f32::from(rows)).round() as u16).max(1);
+    (cols, rows)
+}
+
+/// The window a pane of `cols`x`rows` at `rect` implies; `fallback` for an empty rect.
+fn window_for(rect: Rect, cols: u16, rows: u16, fallback: (u16, u16)) -> (u16, u16) {
+    let extent = |cells: u16, share: f32, old: u16| {
+        if share > 0.0 {
+            ((f32::from(cells) / share).round() as u16).max(1)
+        } else {
+            old
+        }
+    };
+    (
+        extent(cols, rect.w, fallback.0).max(2),
+        extent(rows, rect.h, fallback.1),
+    )
 }

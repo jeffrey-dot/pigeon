@@ -1,3 +1,6 @@
+// Tests assert through public APIs, including the raw C ABI.
+#![allow(unsafe_code, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 //! Text fidelity at the safe client interface, including logical line boundaries.
 
 use pigeon_core::api::{Config, Core, ATTR_WRAP};
@@ -32,7 +35,7 @@ fn wrap_metadata_survives_snapshot_delta_history_and_c_abi() {
     let delta = pane.delta_message().expect("delta");
     let frame = encode_frame(&delta).expect("encode delta");
     let (decoded, _) = decode_frame(&frame).expect("decode").expect("complete");
-    let (_, decoded) = delta_of(&decoded).expect("delta picture");
+    let decoded = delta_of(&decoded).expect("delta picture");
     assert_ne!(decoded.rows[0].1[3].attrs & ATTR_WRAP, 0);
 
     let snapshot = pane.snapshot_message(false);
@@ -46,8 +49,8 @@ fn wrap_metadata_survives_snapshot_delta_history_and_c_abi() {
     let message = pg_msg_decode_frame(frame.as_ptr(), frame.len(), &mut used);
     let picture = pg_msg_snapshot(message);
     assert!(!picture.is_null());
-    // SAFETY: the live snapshot owns a 4-column screen and is freed after this read.
     assert_ne!(
+        // SAFETY: the live snapshot owns a 4-column screen and is freed after this read.
         unsafe { (*(*picture).screen).cells.add(3).read().attrs } & ATTR_WRAP,
         0
     );

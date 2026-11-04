@@ -273,7 +273,8 @@ extension AppDelegate {
             title: session.map(SidebarModel.rowTitle(for:)) ?? row.app,
             cwd: cwd,
             // No OSC 7501 record means no state to report: leave the badge blank.
-            badge: session.map { SidebarModel.headerBadge(for: $0) } ?? ""
+            badge: session.map { SidebarModel.headerBadge(for: $0) } ?? "",
+            detail: session.flatMap { SidebarModel.detailLine(for: $0) }
         )
     }
 

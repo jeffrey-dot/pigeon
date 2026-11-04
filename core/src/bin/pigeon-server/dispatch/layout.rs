@@ -22,12 +22,15 @@ pub async fn split(
         SplitAxis::Vertical => Axis::Vertical,
         SplitAxis::Horizontal => Axis::Horizontal,
     };
-    let mut map = host.sessions.lock().await;
-    let Some(session_id) = session_of(&map, pane_id) else {
-        return Some(no_such_pane(pane_id, Some(id)));
+    // fork/exec takes milliseconds: done without the sessions lock, which every keystroke
+    // and every other window needs. The size is read first and the tree edited after.
+    let (cols, rows) = {
+        let map = host.sessions.lock().await;
+        let Some(session_id) = session_of(&map, pane_id) else {
+            return Some(no_such_pane(pane_id, Some(id)));
+        };
+        map.get(&session_id)?.split_size(axis)
     };
-    let session = map.get_mut(&session_id)?;
-    let (cols, rows) = session.split_size(axis);
     let Some((new_pane, sender)) = spawn_pane(host, &host.shell, None, cols, rows) else {
         return Some(Message::Error {
             code: "internal".into(),
@@ -35,12 +38,20 @@ pub async fn split(
             id: Some(id),
         });
     };
+    let mut map = host.sessions.lock().await;
+    // The pane may have closed meanwhile; the new shell then goes with its sender.
+    let Some(session_id) = session_of(&map, pane_id) else {
+        send_or_queue(&sender, Cmd::Kill);
+        return Some(no_such_pane(pane_id, Some(id)));
+    };
+    let session = map.get_mut(&session_id)?;
     let (box_cols, box_rows) = session.size();
     if session
         .layout
         .split(pane_id, new_pane, axis, ratio, box_cols, box_rows)
         .is_err()
     {
+        send_or_queue(&sender, Cmd::Kill);
         return Some(no_such_pane(pane_id, Some(id)));
     }
     session.panes.insert(new_pane, sender);
@@ -82,6 +93,7 @@ pub async fn focus(host: &HostState, client_id: u32, pane_id: u32) -> Option<Mes
     session.layout.focus(pane_id);
     // `latest`: focusing is what makes a window the one that owns the size.
     if session.vote.focus(client_id) {
+        host.votes_changed();
         session.refit();
     }
     apply_layout(session_id, session, &host.events);
@@ -101,6 +113,7 @@ pub async fn resize_pane(
     // The box this client's grid implies for the whole session.
     let wanted = session.box_for(pane_id, cols, rows)?;
     session.vote.report(client_id, wanted);
+    host.votes_changed();
     if session.refit() {
         apply_layout(session_id, session, &host.events);
     } else {

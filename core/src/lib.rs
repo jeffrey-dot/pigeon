@@ -16,6 +16,8 @@
 
 pub mod api;
 pub mod error;
+// The C ABI is the one place raw pointers cross; everywhere else `unsafe_code` is denied.
+#[allow(unsafe_code)]
 pub mod ffi;
 
 /// Declares a module that is public with `internals` and crate-private without.

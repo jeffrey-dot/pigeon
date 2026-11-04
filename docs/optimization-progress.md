@@ -45,3 +45,11 @@ Swift 纯逻辑使用临时目录中的官方 Swift 6.1.2 Linux 工具链；没�
 5. 完整性能基线、16 pane/弱网/功耗测量和 S0 的属性/fuzz 覆盖。
 
 本批未发布、未推送 PR、未改动用户 shell/tmux 配置。
+
+## 2026-11-04：推送前合并远端
+
+fetch 后发现本地分支与 `origin/main` 分叉（本地既有 Linux 4 个提交，远端 53 个提交）。保留本地七个优化/文档提交后，合并远端 `edba2ed`。
+保留远端的 Harp 单行 UI、Kitty 键盘协议、编程连字、同步更新、socket 安全和渲染/宿主优化；本地 pane 状态、TERM、软换行、GTK 和 CI 切片叠加其上。
+`api::delta_of` 采用远端已公开的 `Delta` 返回类型，追加 modes，保留本地行验证；Linux 与新增测试同步适配。旧评估对应合并前本地版本，当前文档已纠正范围。
+
+合并后本机 Rust 全量：241 passed、2 ignored；后续 GitHub CI 结果追加于此。合并不是“覆盖远端”的强制推送。

@@ -44,7 +44,8 @@ pub extern "C" fn pg_msg_delta(msg: *const super::msg::PgMsg) -> *mut PgDelta {
     ffi_call(ptr::null_mut(), || {
         let msg = msg_ref(msg)?;
         let message = msg.to_message()?;
-        let (pane_id, delta) = delta_of(&message)?;
+        let delta = delta_of(&message)?;
+        let pane_id = delta.pane_id;
         let rows = delta
             .rows
             .into_iter()

@@ -35,9 +35,18 @@ final class HostClient {
 
     /// Receives an owned message; the callee must `Wire.free` it.
     var onMessage: ((OpaquePointer) -> Void)?
+    /// When set, replaces `onMessage`: every message decoded from one read, in order, each
+    /// owned by the callee.
+    var onMessages: (([OpaquePointer]) -> Void)?
     var onClose: (() -> Void)?
 
     static func connect(path: String) throws -> HostClient {
+        let uid = getuid()
+        do {
+            try SocketTrust.checkPath(path, uid: uid)
+        } catch {
+            throw Failure.connect("\(error)")
+        }
         var address = sockaddr_un()
         address.sun_family = sa_family_t(AF_UNIX)
         let pathBytes = Array(path.utf8)
@@ -62,6 +71,13 @@ final class HostClient {
             let detail = String(cString: strerror(errno))
             Darwin.close(fd)
             throw Failure.connect(detail)
+        }
+        // The path may have been swapped between the check and `connect`: the peer decides.
+        do {
+            try SocketTrust.checkPeer(fd, uid: uid)
+        } catch {
+            Darwin.close(fd)
+            throw Failure.connect("\(error)")
         }
 
         return HostClient(read: fd, write: fd)
@@ -154,39 +170,60 @@ final class HostClient {
     }
 
     private func readAvailable() {
-        var chunk = [UInt8](repeating: 0, count: 16 * 1024)
-        let count = Darwin.read(fd, &chunk, chunk.count)
+        // Read straight into the inbox's free tail: no per-read scratch allocation.
+        let start = inbox.count
+        inbox.count = start + Self.readSize
+        let count = inbox.withUnsafeMutableBytes { raw -> Int in
+            guard let base = raw.baseAddress else { return -1 }
+            return Darwin.read(fd, base.advanced(by: start), Self.readSize)
+        }
+        inbox.count = start + max(count, 0)
         if count <= 0 {
+            if count < 0, errno == EINTR || errno == EAGAIN { return }
             onClose?()
             close()
             return
         }
-        inbox.append(contentsOf: chunk[0..<count])
         drain()
     }
 
+    static let readSize = 64 * 1024
+
     private func drain() {
-        while true {
+        var batch: [OpaquePointer] = []
+        var offset = 0
+        var broken = false
+        while offset < inbox.count {
             var consumed = 0
             var message: OpaquePointer?
             inbox.withUnsafeBytes { raw in
-                message = pg_msg_decode_frame(
-                    raw.baseAddress?.assumingMemoryBound(to: UInt8.self),
-                    raw.count,
-                    &consumed
-                )
+                guard let base = raw.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
+                message = pg_msg_decode_frame(base + offset, raw.count - offset, &consumed)
             }
-            if let message {
-                inbox.removeFirst(consumed)
-                onMessage?(message)
-                continue
+            guard let message else {
+                broken = pg_last_error_code() != PG_OK
+                break
             }
-            if pg_last_error_code() != PG_OK {
-                NSLog("pigeon: protocol error")
-                onClose?()
-                close()
-            }
+            offset += consumed
+            batch.append(message)
+        }
+        // Compact once per read instead of shifting the buffer after every message.
+        if offset > 0 { inbox.removeSubrange(0..<offset) }
+        deliver(batch)
+        if broken {
+            NSLog("pigeon: protocol error")
+            onClose?()
+            close()
+        }
+    }
+
+    /// Hands one read's messages over together, so a burst costs the receiver one hop.
+    private func deliver(_ batch: [OpaquePointer]) {
+        guard !batch.isEmpty else { return }
+        if let onMessages {
+            onMessages(batch)
             return
         }
+        for message in batch { onMessage?(message) }
     }
 }

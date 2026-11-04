@@ -1,3 +1,12 @@
+// Tests and tools, not production: panics and raw FFI calls are how they assert.
+#![allow(
+    unsafe_code,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::undocumented_unsafe_blocks
+)]
+
 //! Dev helper: attach to a pane and send raw bytes.
 //!
 //! Synthetic keyboard events need Accessibility permission; this goes through the

@@ -6,6 +6,7 @@
 
 pub mod alacritty;
 pub mod frozen;
+pub mod sync_timeout;
 
 /// Attribute bits, mirrored by `PG_ATTR_*` in the C ABI and by the protocol's
 /// `cell[1]`.
@@ -118,7 +119,7 @@ pub struct Colour {
 }
 
 impl Colour {
-    pub fn from_rgb(value: u32) -> Self {
+    pub const fn from_rgb(value: u32) -> Self {
         Self {
             r: ((value >> 16) & 0xff) as u8,
             g: ((value >> 8) & 0xff) as u8,
@@ -144,16 +145,23 @@ impl Palette {
     /// answers with before any client has told it otherwise. Once a client sends
     /// `appearance`, that palette is the only source — this is a pre-client fallback, not a
     /// second palette the panes switch between.
-    pub fn default_dark() -> Self {
-        Self::from_rgb(
-            0x00e6_e6e6,
-            0x000e_0f11,
-            &[
-                0x616161, 0xFF8272, 0xB4FA72, 0xFEFDC2, 0xA5D5FE, 0xFF8FFD, 0xD0D1FE, 0xF1F1F1,
-                0x8E8E8E, 0xFFC4BD, 0xD6FCB9, 0xFEFDD5, 0xC1E3FE, 0xFFB1FE, 0xE5E6FE, 0xFEFFFF,
-            ],
-        )
-        .expect("default palette is well-formed")
+    pub const fn default_dark() -> Self {
+        const ANSI: [u32; 16] = [
+            0x616161, 0xFF8272, 0xB4FA72, 0xFEFDC2, 0xA5D5FE, 0xFF8FFD, 0xD0D1FE, 0xF1F1F1,
+            0x8E8E8E, 0xFFC4BD, 0xD6FCB9, 0xFEFDD5, 0xC1E3FE, 0xFFB1FE, 0xE5E6FE, 0xFEFFFF,
+        ];
+        // Built at compile time from a fixed-size table, so there is no length to get wrong.
+        let mut ansi = [Colour { r: 0, g: 0, b: 0 }; 16];
+        let mut index = 0;
+        while index < ANSI.len() {
+            ansi[index] = Colour::from_rgb(ANSI[index]);
+            index += 1;
+        }
+        Self {
+            fg: Colour::from_rgb(0x00e6_e6e6),
+            bg: Colour::from_rgb(0x000e_0f11),
+            ansi,
+        }
     }
 
     /// Builds a palette from the wire values; a wrong-length ANSI list is rejected rather
@@ -215,6 +223,25 @@ pub trait Term {
         snapshot.history.clear();
         snapshot
     }
+    /// The screen plus only the newest `max_history` scrollback rows (oldest first): what
+    /// a history `attach` can fit in one frame, without converting the rows it would drop.
+    fn snapshot_with_recent_history(&self, max_history: usize) -> Snapshot {
+        let mut snapshot = self.snapshot();
+        let drop = snapshot.history.len().saturating_sub(max_history);
+        snapshot.history.drain(..drop);
+        snapshot
+    }
+    /// The given screen rows (out-of-range ones skipped) and a picture without `screen` or
+    /// `history` for the cursor/alt/scroll fields. A delta converts one row, not the grid.
+    fn screen_rows(&self, rows: &[u16]) -> (Vec<(u16, Vec<Cell>)>, Snapshot) {
+        let mut snapshot = self.screen_snapshot();
+        let picked = rows
+            .iter()
+            .filter_map(|y| snapshot.screen.get(usize::from(*y)).map(|cells| (*y, cells.clone())))
+            .collect();
+        snapshot.screen.clear();
+        (picked, snapshot)
+    }
     /// The screen scrolled back `offset` lines (clamped to the history), plus the history
     /// length; equal to `snapshot().scrolled(offset)` without `history`. Engines override it
     /// to convert one screen of rows instead of the whole backlog on every scroll step.
@@ -241,6 +268,15 @@ pub trait Term {
     fn modes(&self) -> u32 {
         0
     }
+
+    /// When an open synchronized update (DEC 2026) must be shown even without its end
+    /// marker; `None` when no update is open. The driver calls [`Term::flush_sync`] then.
+    fn sync_deadline(&self) -> Option<std::time::Instant> {
+        None
+    }
+
+    /// Applies whatever an open synchronized update has buffered and ends it.
+    fn flush_sync(&mut self) {}
 }
 
 /// Arrow keys send `ESC O A` instead of `ESC [ A` (DECCKM, `?1`).
@@ -263,6 +299,17 @@ pub const MODE_APP_KEYPAD: u32 = 1 << 7;
 pub const MODE_ALTERNATE_SCROLL: u32 = 1 << 8;
 /// The program asked for a blinking cursor (DECSCUSR 1/3/5, or `?12h`).
 pub const MODE_CURSOR_BLINK: u32 = 1 << 9;
+/// Kitty keyboard protocol flag 1: disambiguate escape codes (`CSI > 1 u`). Bits 10–14
+/// carry the active flags of the program's `CSI > flags u` stack, flag `1 << n` at bit `10 + n`.
+pub const MODE_KITTY_DISAMBIGUATE: u32 = 1 << 10;
+/// Kitty flag 2: report press / repeat / release.
+pub const MODE_KITTY_EVENT_TYPES: u32 = 1 << 11;
+/// Kitty flag 4: report alternate (shifted and base-layout) keys.
+pub const MODE_KITTY_ALTERNATE_KEYS: u32 = 1 << 12;
+/// Kitty flag 8: report every key, text keys included, as an escape code.
+pub const MODE_KITTY_ALL_KEYS: u32 = 1 << 13;
+/// Kitty flag 16: report the text a key produces alongside its code.
+pub const MODE_KITTY_ASSOCIATED_TEXT: u32 = 1 << 14;
 
 #[cfg(test)]
 mod tests {
@@ -306,6 +353,37 @@ mod tests {
         // Garbage mode numbers change nothing.
         term.feed(b"\x1b[?99999h");
         assert_eq!(term.modes(), off);
+    }
+
+    #[test]
+    fn kitty_keyboard_flags_follow_the_programs_stack() {
+        use super::{
+            MODE_KITTY_ALL_KEYS, MODE_KITTY_ALTERNATE_KEYS, MODE_KITTY_ASSOCIATED_TEXT,
+            MODE_KITTY_DISAMBIGUATE, MODE_KITTY_EVENT_TYPES,
+        };
+        let all = MODE_KITTY_DISAMBIGUATE
+            | MODE_KITTY_EVENT_TYPES
+            | MODE_KITTY_ALTERNATE_KEYS
+            | MODE_KITTY_ALL_KEYS
+            | MODE_KITTY_ASSOCIATED_TEXT;
+        let mut term = term();
+        assert_eq!(term.modes() & all, 0, "legacy keys until a program asks");
+        // What neovim / fish push on start.
+        term.feed(b"\x1b[>1u");
+        assert_eq!(term.modes() & all, MODE_KITTY_DISAMBIGUATE);
+        term.feed(b"\x1b[>31u");
+        assert_eq!(term.modes() & all, all);
+        // The query is answered with the active flags.
+        term.feed(b"\x1b[?u");
+        assert_eq!(term.take_replies(), b"\x1b[?31u");
+        // Popping returns to the previous entry, then to legacy.
+        term.feed(b"\x1b[<u");
+        assert_eq!(term.modes() & all, MODE_KITTY_DISAMBIGUATE);
+        term.feed(b"\x1b[<u");
+        assert_eq!(term.modes() & all, 0);
+        // Malformed: popping an empty stack or a garbage flag value leaves legacy keys.
+        term.feed(b"\x1b[<5u\x1b[>zu");
+        assert_eq!(term.modes() & all, 0);
     }
 
     #[test]

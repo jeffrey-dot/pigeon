@@ -1,3 +1,12 @@
+// Tests and tools, not production: panics and raw FFI calls are how they assert.
+#![allow(
+    unsafe_code,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::undocumented_unsafe_blocks
+)]
+
 //! End-to-end: a client attaches, types, disconnects, reconnects — and the shell
 //! is still there with the same screen. This is the M0 promise ("关闭窗口进程不死"),
 //! proven against the real host binary over the real socket.
@@ -35,6 +44,7 @@ impl Drop for Host {
         let _ = self.child.wait();
         let _ = std::fs::remove_file(&self.socket);
         environment::cleanup(&self.socket);
+        let _ = std::fs::remove_file(std::path::Path::new(&self.socket).with_extension("lock"));
     }
 }
 
@@ -74,6 +84,16 @@ fn start_host_on_with_term(socket: &str, program: &str, term: Option<&str>) -> H
         Some(term) => command.env("TERM", term),
         None => command.env_remove("TERM"),
     };
+    spawn_host(socket, command)
+}
+
+fn start_host_env(socket: &str, program: &str, env: &[(&str, &str)]) -> Host {
+    let mut command = environment::command(socket, program);
+    command.envs(env.iter().copied());
+    spawn_host(socket.to_owned(), command)
+}
+
+fn spawn_host(socket: String, mut command: Command) -> Host {
     let child = command
         .stdout(Stdio::null())
         .stderr(if std::env::var_os("PIGEON_DEBUG").is_some() {
@@ -203,6 +223,19 @@ impl Client {
                 }
             }
         }
+    }
+
+    /// Whether the host closes the connection within `within`; frames before that are read.
+    fn closed_within(&mut self, within: Duration) -> bool {
+        let deadline = Instant::now() + within;
+        while Instant::now() < deadline {
+            match self.incoming.recv_timeout(Duration::from_millis(20)) {
+                Ok(chunk) => self.buffer.extend_from_slice(&chunk),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return true,
+            }
+        }
+        false
     }
 
     fn drain(&mut self, want: &impl Fn(&Message) -> bool) -> Option<Message> {
@@ -452,6 +485,49 @@ fn bad_version_is_rejected_with_hello_error() {
     });
     let reply = client.wait_for(|m| matches!(m, Message::HelloError { .. }));
     assert!(matches!(reply, Message::HelloError { .. }));
+    // Protocol §3.1: the connection closes right after `hello_error`.
+    assert!(client.closed_within(Duration::from_secs(3)));
+}
+
+#[test]
+fn a_first_message_other_than_hello_is_refused_and_closed() {
+    let _serial = one_at_a_time();
+    let host = start_host();
+    let mut client = Client::connect(&host.socket);
+    client.send(&Message::Sessions { items: Vec::new() });
+    let reply = client.wait_for(|m| matches!(m, Message::Error { .. }));
+    assert!(matches!(reply, Message::Error { code, .. } if code == "protocol"));
+    assert!(client.closed_within(Duration::from_secs(3)));
+}
+
+/// Protocol §1/§3.1: no `hello` within the hello timeout, or no frame at all within the
+/// idle timeout, and the host hangs up. Shortened here; the real values are 5 s and 45 s.
+#[test]
+fn silent_connections_are_closed_and_pinging_ones_kept() {
+    let _serial = one_at_a_time();
+    let quiet = script("#!/bin/sh\nexec env PS1= /bin/sh -i\n");
+    let host = start_host_env(
+        &unique_socket(),
+        quiet.to_str().expect("utf8"),
+        &[("PIGEON_HELLO_MS", "300"), ("PIGEON_IDLE_MS", "600")],
+    );
+    let mut mute = Client::connect(&host.socket);
+    assert!(mute.closed_within(Duration::from_secs(3)), "no hello");
+
+    let mut pinging = Client::connect(&host.socket);
+    hello(&mut pinging);
+    for ts in 0..8 {
+        pinging.send(&Message::Ping { ts });
+        let _ = pinging.wait_for(|m| matches!(m, Message::Pong { .. }));
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    let mut idle = Client::connect(&host.socket);
+    hello(&mut idle);
+    assert!(
+        idle.closed_within(Duration::from_secs(3)),
+        "idle past the timeout"
+    );
+    let _ = std::fs::remove_file(&quiet);
 }
 
 #[test]
@@ -484,6 +560,16 @@ fn unknown_message_gets_unsupported_and_the_connection_survives() {
         unreachable!()
     };
     assert_eq!(ts, 9);
+
+    // Arriving in the same read as the next frame, it must cost exactly one frame.
+    let mut both = frame.clone();
+    both.extend_from_slice(&proto::encode_frame(&Message::Ping { ts: 10 }).expect("encode"));
+    client.writer.write_all(&both).expect("write");
+    let _ = client.wait_for(|m| matches!(m, Message::Unsupported { .. }));
+    let Message::Pong { ts } = client.wait_for(|m| matches!(m, Message::Pong { .. })) else {
+        unreachable!()
+    };
+    assert_eq!(ts, 10, "the frame after an unknown one is still handled");
 }
 
 #[test]
@@ -2281,6 +2367,110 @@ fn a_second_host_does_not_steal_a_live_socket() {
     );
 }
 
+/// A directory anyone can write to (and that is not sticky) lets another user swap the
+/// socket: the host refuses to serve there, and leaves a foreign file at its path alone.
+#[test]
+fn a_host_refuses_an_unsafe_socket_directory_or_a_non_socket_path() {
+    use std::os::unix::fs::PermissionsExt;
+    let _serial = one_at_a_time();
+    let dir = std::path::PathBuf::from(unique_socket()).with_extension("d");
+    std::fs::create_dir(&dir).expect("mkdir");
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).expect("chmod");
+    let run = |socket: &std::path::Path| {
+        Command::new(env!("CARGO_BIN_EXE_pigeon-server"))
+            .arg("--socket")
+            .arg(socket)
+            .args(["--shell", "/bin/sh"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("run pigeon-server")
+    };
+    let socket = dir.join("pigeon.sock");
+    assert!(!run(&socket).success(), "a world-writable directory");
+    assert!(!socket.exists());
+
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).expect("chmod");
+    std::fs::write(&socket, b"not a socket").expect("write");
+    assert!(!run(&socket).success(), "a regular file at the path");
+    assert_eq!(
+        std::fs::read(&socket).expect("still there"),
+        b"not a socket"
+    );
+    let _ = std::fs::remove_file(&socket);
+    let _ = std::fs::remove_file(socket.with_extension("lock"));
+    let _ = std::fs::remove_dir(&dir);
+}
+
+/// A child that never reads its input: the host queues a bounded amount and pushes back
+/// instead of buffering without limit, and it keeps serving other connections meanwhile.
+#[test]
+fn input_the_child_never_reads_does_not_wedge_the_host() {
+    let _serial = one_at_a_time();
+    let pane = script("#!/bin/sh\nprintf 'deaf\\n'\nexec sleep 60\n");
+    let host = start_host_with(pane.to_str().expect("utf8"));
+    let mut typist = Client::connect(&host.socket);
+    hello(&mut typist);
+    let pane_id = attach_first(&mut typist);
+    // Far more than the PTY and the input queue together can hold.
+    let flood = vec![b'x'; 64 * 1024];
+    let writer = std::thread::spawn(move || {
+        for _ in 0..64 {
+            typist.send(&Message::Keys {
+                pane_id,
+                bytes: flood.clone(),
+            });
+        }
+        typist
+    });
+    std::thread::sleep(Duration::from_millis(500));
+    let mut other = Client::connect(&host.socket);
+    hello(&mut other);
+    other.send(&Message::Sessions { items: Vec::new() });
+    let _ = other.wait_for(|m| matches!(m, Message::Sessions { .. }));
+    drop(other);
+    // Ending the child lets the queued input go nowhere and the typist finish.
+    let mut closer = Client::connect(&host.socket);
+    hello(&mut closer);
+    closer.send(&Message::ClosePane { id: 5, pane_id });
+    let typist = writer.join().expect("typist");
+    drop(typist);
+    let _ = std::fs::remove_file(&pane);
+}
+
+/// Hosts started at the same moment on a stale socket (a crash left it, two windows open at
+/// once) must not both take it over: exactly one serves, the others exit.
+#[test]
+fn hosts_racing_for_a_stale_socket_leave_exactly_one() {
+    let _serial = one_at_a_time();
+    let socket = unique_socket();
+    // A socket file nobody listens on.
+    drop(std::os::unix::net::UnixListener::bind(&socket).expect("bind"));
+    let mut racers: Vec<Child> = (0..6)
+        .map(|_| {
+            Command::new(env!("CARGO_BIN_EXE_pigeon-server"))
+                .args(["--socket", &socket, "--shell", "/bin/sh"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("spawn pigeon-server")
+        })
+        .collect();
+    std::thread::sleep(Duration::from_secs(2));
+    let alive = racers
+        .iter_mut()
+        .filter_map(|child| child.try_wait().expect("wait").is_none().then_some(()))
+        .count();
+    for child in &mut racers {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    let _ = std::fs::remove_file(&socket);
+    let _ = std::fs::remove_file(std::path::Path::new(&socket).with_extension("state"));
+    let _ = std::fs::remove_file(std::path::Path::new(&socket).with_extension("lock"));
+    assert_eq!(alive, 1, "one host serves, the rest give up");
+}
+
 #[test]
 fn the_socket_is_private_from_the_moment_it_exists() {
     use std::os::unix::fs::PermissionsExt;
@@ -2817,4 +3007,75 @@ fn shutdown_before_hello_is_a_protocol_error() {
         host.child.try_wait().expect("wait").is_none(),
         "the host keeps running"
     );
+}
+
+/// Protocol §3.2: an exited pane stays until `close_pane`, and attaching to it gives its
+/// last screen followed by `pane_exited` (like tmux `remain-on-exit`).
+#[test]
+fn attach_after_exit_gets_the_final_output_and_the_exit_code() {
+    let _serial = one_at_a_time();
+    let pane = script("#!/bin/sh\nprintf 'final words\\n'\nexit 3\n");
+    let host = start_host_with(pane.to_str().expect("utf8"));
+    let mut client = Client::connect(&host.socket);
+    hello(&mut client);
+    client.send(&Message::NewSession {
+        id: 1,
+        cwd: None,
+        shell: None,
+        env: None,
+    });
+    let Message::Created { pane_id, .. } =
+        client.wait_for(|m| matches!(m, Message::Created { .. }))
+    else {
+        unreachable!()
+    };
+    // Long enough for the child to finish and the host to notice.
+    std::thread::sleep(Duration::from_millis(800));
+    client.send(&Message::Attach {
+        id: 2,
+        pane_id,
+        size_policy: None,
+        history: None,
+        since: None,
+    });
+    let reply = client.wait_for(|m| matches!(m, Message::Snapshot { .. } | Message::Error { .. }));
+    assert!(
+        matches!(reply, Message::Snapshot { .. }),
+        "attach after exit must return the screen, got {reply:?}"
+    );
+    assert!(screen_text(&reply).contains("final words"));
+    let exited = client.wait_for(|m| matches!(m, Message::PaneExited { .. }));
+    assert!(matches!(exited, Message::PaneExited { code: 3, .. }));
+    let _ = std::fs::remove_file(&pane);
+}
+
+/// DEC 2026: a program that begins a synchronized update and never ends it must not freeze
+/// the pane; the buffered output shows up after the timeout.
+#[test]
+fn an_unterminated_synchronized_update_shows_after_the_timeout() {
+    let _serial = one_at_a_time();
+    let pane = script("#!/bin/sh\nprintf '\\033[?2026hstuck in sync'\nexec sleep 60\n");
+    let host = start_host_with(pane.to_str().expect("utf8"));
+    let mut client = Client::connect(&host.socket);
+    hello(&mut client);
+    let pane_id = attach_first(&mut client);
+    let started = Instant::now();
+    let found = loop {
+        client.send(&Message::Attach {
+            id: 3,
+            pane_id,
+            size_policy: None,
+            history: Some(false),
+            since: None,
+        });
+        if screen_text(&snapshot(&mut client)).contains("stuck in sync") {
+            break true;
+        }
+        if started.elapsed() > Duration::from_secs(5) {
+            break false;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    assert!(found, "the synchronized update never timed out");
+    let _ = std::fs::remove_file(&pane);
 }

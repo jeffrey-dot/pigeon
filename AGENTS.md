@@ -3,7 +3,7 @@
 给编码 agent 的工作说明。人看的部分在 `README.md`，产品/架构在设计文档里（见 §11）。
 **当前状态（2026-11-04 核对）：M0–M4 主体已落地，M5 Linux 客户端进行中**。
 macOS 已有分屏、回看、zoom、agent 侧栏、SSH 三档对接、Metal 渲染、增量更新、选择复制粘贴、鼠标上报与
-`NSTextInputClient` 输入法；Linux 已有 GTK4/OpenGL 网格、本地宿主连接、分屏与 zoom，尚未功能对齐。
+`NSTextInputClient` 输入法、Kitty keyboard protocol、编程连字；Linux 已有 GTK4/OpenGL 网格、本地宿主连接、分屏与 zoom，尚未功能对齐。
 当前缺口以 `docs/plan.md` §11 为准；`docs/m*-checklist.md` 是各阶段的历史验收证据，不代表当前全功能已验收。
 
 ## 1. 项目是什么
@@ -60,7 +60,7 @@ Rust 客户端走 `pigeon_core::api`。客户端不认识 `core` 的内部类型
 可移植性标记：
 
 - `core/`（Rust）—— **portable**：只许 std + POSIX 绑定（`libc`/`nix`/`rustix`）+ VT/序列化依赖；
-  `unsafe` 只允许出现在 `core/src/ffi/`（FFI 边界）。
+  `unsafe` 只允许出现在 `core/src/ffi/`（FFI 边界），由编译器强制（见 §4）。
 - `include/pigeon_core.h` —— **生成物**：由 `cbindgen` 从 `core/src/ffi/mod.rs` 生成，**手改无效**（CI 会比对新旧输出）。
 - `clients/` —— **客户端层**，每个平台一个目录；客户端只通过客户端接口看图，不认识 `core` 内部类型。
 - `clients/macos/` —— **macOS only**：C 头封装（`Sources/PigeonCore/`）+ AppKit 客户端（`Sources/PigeonApp/`）。
@@ -88,7 +88,7 @@ pigeon/
 │   ├── Cargo.toml
 │   ├── cbindgen.toml             # 头文件生成配置（名字/前缀/文档注释）
 │   ├── src/
-│   │   ├── lib.rs                # 模块声明；unsafe 只允许出现在 ffi/
+│   │   ├── lib.rs                # 模块声明；只有 ffi 模块放行 unsafe_code
 │   │   ├── api/                  # 安全的 Rust 客户端 API（Rust 客户端唯一入口）
 │   │   ├── ffi/                  # extern "C" 导出（头文件的唯一来源；api 的薄包装）
 │   │   │   ├── mod.rs            # 生命周期 / pane / 快照 / 状态 / 布局
@@ -126,7 +126,7 @@ pigeon/
     │   │       │   ├── CoreTextRenderer.swift  # 唯一 import CoreText 的文件：字体度量 + 字形光栅化
     │   │       │   ├── PaneView+Metal.swift    # 把格子交给渲染线程（唯一的网格渲染路径）
     │   │       │   ├── Render/                 # GPU 渲染：图集、脏行、实例构建、Metal 线程与 shader
-    │   │       │   └── KeyEncoder.swift        # 按键 → 字节（xterm legacy；kitty protocol 待做）
+    │   │       │   └── KeyEncoder.swift        # 按键 → 字节（legacy + KittyKeyEncoder）
     │   │       ├── Layout/           # 分屏：把 PgRect 画成 AppKit 视图、焦点与选择
     │   │       └── Update/           # 软件更新：检查 latest.json、验签、替换 Pigeon.app 并重启
     │   └── Tests/PigeonAppTests/     # SidebarModel / Grouping / KeyEncoder 等纯逻辑单测
@@ -148,11 +148,12 @@ pigeon/
 | 渲染、字体、输入法 | `clients/macos/Sources/PigeonApp/Terminal/`，不往下漏 |
 | 一次性脚本 / 对账工具 | `tools/` 下的 `build/` `bench/` `checks/` `vt-parity/`，不放进 `clients/` 或 `core/src/` |
 
-### 可移植性硬规则（CI 跑 fmt / clippy / test / tokio+portable-pty 引用检查 / `--lib --no-default-features` 构建 / 体积上限 / 头文件 diff；仍缺 `unsafe` 与平台 crate 的静态检查，见 `docs/plan.md` §11）
+### 可移植性硬规则（CI 跑 fmt / clippy（含 §4 的 lint）/ test / tokio+portable-pty 引用检查 / `--lib --no-default-features` 构建 / 体积上限 / 头文件 diff；平台 crate 还没有静态检查）
 
 - `core/` 里**不许**出现：平台专属 crate（`core-foundation`、`objc2`…）、`cfg(target_os = …)` 分支
  （PTY 与信号可以有一处，且必须两边都有实现）、直接操作窗口/字体/图形 API。
-- `core/src/` 里**不许**出现 `unsafe`（唯一例外：`ffi/` 的 `extern "C"` 边界）。
+- `core/src/` 里**不许**出现 `unsafe`（唯一例外：`ffi/` 的 `extern "C"` 边界）。`core/Cargo.toml` 的 `[lints]` 把
+  `unsafe_code` 设成 deny，只有 `lib.rs` 里的 `ffi` 模块放行；宿主需要的 POSIX 调用走 `nix`，不自己写 `unsafe`。
 - Swift 侧：`PigeonCore` 不许 `import AppKit`；`PigeonApp` 可以，但 `import CoreText` 只允许在
  `CoreTextRenderer.swift`。
 - PTY 用 `portable-pty`（内部就是 `forkpty`/`openpty` 的封装）。因为 `core/src` 除 `ffi/` 外不许 `unsafe`，
@@ -180,14 +181,17 @@ pigeon/
 
 ## 4. 代码风格
 
-- Swift 6 / Rust 2021 edition，4 空格缩进；公开 API 写显式类型；`guard`/`if let` 早返回，避免深嵌套。
-- Rust：提交前 `cargo fmt` + `cargo clippy -- -D warnings`；`unwrap()`/`expect()` 只允许在测试里，
-  生产路径返回 `Result<T, PgError>`；不允许 `panic!` 越过 FFI 边界。
+- Swift 6 工具链（语言模式 v5，见 `Package.swift`）/ Rust 2021 edition，4 空格缩进；公开 API 写显式类型；`guard`/`if let` 早返回，避免深嵌套。
+- Rust：提交前 `cargo fmt` + `cargo clippy --all-targets -- -D warnings`。生产路径返回 `Result<T, PgError>`；
+  `unwrap()`/`expect()`/`panic!` 由 `[lints.clippy]` 设成 deny（`core/clippy.toml` 放行单元测试，
+  `core/tests/*`、`core/examples/*` 在文件头放行），每个 `unsafe` 块前必须有 `// SAFETY:` 注释（`undocumented_unsafe_blocks`）。
+  FFI 导出一律包 `catch_unwind`，panic 不越过边界。不要用 `#[allow]` 绕过这些 lint；确需例外，在 PR 里说明。
 - **后台进程里禁止 `!` 强解包 / `try!`**；所有失败返回 `Result` 或 `throws` 的自定义 error enum。
 - 并发：`core/` 不用可变全局；每个 pane 的状态由宿主串行驱（一个 task/线程一处所有权）；`App` 的 UI 状态只在主线程改。
 - 命名：类型 UpperCamelCase，函数/变量 lowerCamelCase；协议名用名词（`Term`、`GridRenderer`）而不是 `-able` 广告。
 - 注释只写“为什么”，不写“做了什么”；对外部协议的实现要在文件头注明依据（例如 OSC 7501 revision）。
 - 语言约定：**代码与注释英文；`docs/` 中文；UI 文案英文**（与参考图一致，如 `Working · 1m`）。
+- 文档只写现状：功能删了就删掉对应文字，改名就按新名字重写，不留“上一版…”“已取消”“做过又删”之类的历史说明（历史在 git 里）。
 
 ## 5. 测试要求
 

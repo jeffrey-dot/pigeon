@@ -37,10 +37,10 @@ impl Screen {
 
     /// False requests a fresh snapshot; validation never leaves a partially patched grid.
     pub fn apply_delta(&mut self, message: &Message) -> bool {
-        let Ok((pane_id, delta)) = delta_of(message) else {
+        let Ok(delta) = delta_of(message) else {
             return false;
         };
-        if pane_id != self.pane_id {
+        if delta.pane_id != self.pane_id {
             return false;
         }
         if delta.seq <= self.seq {

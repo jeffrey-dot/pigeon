@@ -1,6 +1,7 @@
 //! One pane: a PTY, the threads that move its bytes, and the task that owns its terminal
 //! state. Everything that touches `PaneState` goes through this task's `Cmd` queue.
 
+use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
@@ -18,10 +19,23 @@ use crate::host::state::{Exits, HostState, Meta};
 use crate::pane::cmd::Cmd;
 
 const SCROLLBACK: usize = 10_000;
+/// One PTY read. Big enough that `cat` of a large file takes a few reads per frame, not
+/// dozens; the buffer is reused, and each read becomes one owned chunk of exactly its size.
+const READ_CHUNK: usize = 64 * 1024;
+/// At most this many bytes are fed per batch before the per-batch work (metadata, status,
+/// replies, frame) runs, so a flood still yields to commands and frames regularly.
+const BATCH_BYTES: usize = 256 * 1024;
+/// Chunks of input waiting for the PTY. A child that stops reading its input (busy, or
+/// stopped with ^Z) fills this; the actor then stops taking commands until it drains, which
+/// pushes back through the bounded command queue to the client instead of growing memory.
+const INPUT_QUEUE: usize = 64;
 /// At most one delta per pane per frame. A burst of output (`cat`, a build log) arrives in
 /// many small PTY reads, and one delta each would repaint the whole screen dozens of times
 /// per frame and flood an ssh link; a lone keystroke still goes out immediately.
 const FRAME: Duration = Duration::from_millis(16);
+/// How long an exited child's PTY may stay open (a background job still holding it)
+/// before the exit is announced anyway.
+const EXIT_GRACE: Duration = Duration::from_millis(500);
 
 /// Pane ids are unique for the whole process, not per session.
 static NEXT_PANE: AtomicU32 = AtomicU32::new(1);
@@ -68,6 +82,7 @@ pub fn spawn_pane(
         child,
         master,
         write_tx,
+        unwritten: VecDeque::new(),
         events: host.events.clone(),
         meta: Arc::clone(&host.meta),
         exits: Arc::clone(&host.exits),
@@ -84,9 +99,9 @@ pub fn spawn_pane(
 /// PTY output, read on a thread because the PTY reader is blocking.
 fn start_reader(mut reader: Box<dyn Read + Send>) -> mpsc::Receiver<Vec<u8>> {
     let (pty_tx, pty_rx) = mpsc::channel::<Vec<u8>>(64);
-    let debug = std::env::var_os("PIGEON_DEBUG").is_some();
+    let debug = crate::debug();
     std::thread::spawn(move || {
-        let mut buffer = [0u8; 8192];
+        let mut buffer = vec![0u8; READ_CHUNK];
         loop {
             match reader.read(&mut buffer) {
                 Ok(0) | Err(_) => break,
@@ -108,10 +123,10 @@ fn start_reader(mut reader: Box<dyn Read + Send>) -> mpsc::Receiver<Vec<u8>> {
 }
 
 /// PTY input, written on a thread so a stalled child never blocks the actor.
-fn start_writer(mut writer: Box<dyn Write + Send>) -> std::sync::mpsc::Sender<Vec<u8>> {
-    let (write_tx, write_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+fn start_writer(mut writer: Box<dyn Write + Send>) -> mpsc::Sender<Vec<u8>> {
+    let (write_tx, mut write_rx) = mpsc::channel::<Vec<u8>>(INPUT_QUEUE);
     std::thread::spawn(move || {
-        for chunk in write_rx {
+        while let Some(chunk) = write_rx.blocking_recv() {
             if writer.write_all(&chunk).is_err() {
                 break;
             }
@@ -124,7 +139,11 @@ struct PaneActor {
     pane: PaneState,
     child: Box<dyn Child + Send + Sync>,
     master: Master,
-    write_tx: std::sync::mpsc::Sender<Vec<u8>>,
+    write_tx: mpsc::Sender<Vec<u8>>,
+    /// Input the writer had no room for yet, in order. While it is not empty the actor
+    /// takes no commands (see `INPUT_QUEUE`), so at most one command's worth waits here
+    /// besides query answers.
+    unwritten: VecDeque<Vec<u8>>,
     events: broadcast::Sender<Event>,
     meta: Meta,
     exits: Exits,
@@ -151,35 +170,82 @@ impl PaneActor {
         let mut ticker = interval(Duration::from_millis(150));
         ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
         let mut commands_open = true;
+        let mut output_open = true;
+        // The child's exit code once reaped, and when: the exit is announced only after
+        // the PTY has delivered its last bytes (or a grace period, for a background job
+        // that keeps the PTY open), so the final screen includes the final output.
+        let mut reaped: Option<(i32, Instant)> = None;
+        let mut announced = false;
         loop {
+            let sync_deadline = self.pane.sync_deadline().map(Instant::from_std);
             tokio::select! {
+                _ = sleep_until(sync_deadline.unwrap_or_else(Instant::now)), if sync_deadline.is_some() => {
+                    self.pane.flush_sync();
+                    self.after_feed().await;
+                }
                 _ = sleep_until(self.last_flush + FRAME), if self.dirty => {
                     self.flush_now();
                 }
-                command = cmd_rx.recv(), if commands_open => {
+                permit = self.write_tx.clone().reserve_owned(), if !self.unwritten.is_empty() => {
+                    match permit {
+                        Ok(permit) => {
+                            if let Some(chunk) = self.unwritten.pop_front() {
+                                permit.send(chunk);
+                            }
+                        }
+                        // The writer is gone with the child: nobody will read this input.
+                        Err(_) => self.unwritten.clear(),
+                    }
+                }
+                command = cmd_rx.recv(), if commands_open && self.unwritten.is_empty() => {
                     match command {
                         Some(command) => self.handle(command),
                         None => commands_open = false,
                     }
                 }
-                _ = ticker.tick() => {
-                    if let Ok(Some(status)) = self.child.try_wait() {
-                        self.exited(status.exit_code() as i32);
-                        break;
+                _ = ticker.tick(), if !announced => {
+                    if reaped.is_none() {
+                        if let Ok(Some(status)) = self.child.try_wait() {
+                            reaped = Some((status.exit_code() as i32, Instant::now()));
+                        }
                     }
                 }
-                chunk = pty_rx.recv() => {
-                    let Some(chunk) = chunk else {
-                        let code = self
-                            .child
-                            .wait()
-                            .map(|status| status.exit_code() as i32)
-                            .unwrap_or(-1);
-                        self.exited(code);
-                        break;
-                    };
-                    self.output(&chunk).await;
+                chunk = pty_rx.recv(), if output_open => {
+                    match chunk {
+                        Some(chunk) => {
+                            // Whatever else is already queued goes in the same batch, so
+                            // the per-batch work runs once per wake-up, not once per read.
+                            self.pane.feed(&chunk);
+                            let mut fed = chunk.len();
+                            while fed < BATCH_BYTES {
+                                let Ok(more) = pty_rx.try_recv() else {
+                                    break;
+                                };
+                                self.pane.feed(&more);
+                                fed += more.len();
+                            }
+                            self.after_feed().await;
+                        }
+                        None => output_open = false,
+                    }
                 }
+            }
+            if let Some((code, at)) = reaped.filter(|_| !announced) {
+                if !output_open || at.elapsed() >= EXIT_GRACE {
+                    while let Ok(chunk) = pty_rx.try_recv() {
+                        self.output(&chunk).await;
+                    }
+                    if self.dirty {
+                        self.flush_now();
+                    }
+                    self.exited(code);
+                    announced = true;
+                }
+            }
+            // Like tmux `remain-on-exit`: an exited pane keeps answering snapshot, scroll
+            // and status requests until `close_pane` drops its last sender.
+            if !commands_open && announced {
+                break;
             }
         }
     }
@@ -189,10 +255,11 @@ impl PaneActor {
         match command {
             Cmd::Input(bytes) => {
                 self.echo_due = true;
-                let _ = self.write_tx.send(bytes);
+                self.write_input(bytes);
             }
             Cmd::Paste(text) => {
-                let _ = self.write_tx.send(pane.paste_bytes(&text));
+                let bytes = pane.paste_bytes(&text);
+                self.write_input(bytes);
             }
             Cmd::Resize(cols, rows) => {
                 pane.resize(cols, rows);
@@ -250,8 +317,13 @@ impl PaneActor {
     }
 
     async fn output(&mut self, chunk: &[u8]) {
-        let pane_id = self.pane.pane_id;
         self.pane.feed(chunk);
+        self.after_feed().await;
+    }
+
+    /// What follows any change to the terminal: metadata, status, query answers, a frame.
+    async fn after_feed(&mut self) {
+        let pane_id = self.pane.pane_id;
         let cwd = self.pane.cwd().map(str::to_owned);
         let title = self.pane.title();
         if cwd.is_some() || title.is_some() {
@@ -274,7 +346,7 @@ impl PaneActor {
         }
         let replies = self.pane.take_replies();
         if !replies.is_empty() {
-            let _ = self.write_tx.send(replies);
+            self.write_input(replies);
         }
         if self.echo_due || self.last_flush.elapsed() >= FRAME {
             self.echo_due = false;
@@ -293,6 +365,19 @@ impl PaneActor {
             exits.insert(pane_id, code);
         }
         let _ = self.events.send(Event::Exited { pane_id, code });
+    }
+
+    /// Queues bytes for the PTY without waiting; what does not fit waits in `unwritten`
+    /// behind anything already there, so input and query answers keep their order.
+    fn write_input(&mut self, bytes: Vec<u8>) {
+        if !self.unwritten.is_empty() {
+            self.unwritten.push_back(bytes);
+            return;
+        }
+        match self.write_tx.try_send(bytes) {
+            Ok(()) | Err(mpsc::error::TrySendError::Closed(_)) => {}
+            Err(mpsc::error::TrySendError::Full(bytes)) => self.unwritten.push_back(bytes),
+        }
     }
 
     fn flush_now(&mut self) {

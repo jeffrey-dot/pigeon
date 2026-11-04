@@ -1,62 +1,44 @@
 import Foundation
 
-/// One key press, already decoded from AppKit. Pure data so it can be tested
-/// without a window server.
-public struct KeyStroke: Equatable {
-    public enum Key: Equatable {
-        case character(Character)
-        case enter
-        case tab
-        case backspace
-        case escape
-        case delete
-        case up
-        case down
-        case left
-        case right
-        case home
-        case end
-        case pageUp
-        case pageDown
-        case function(Int)
-    }
-
-    public var key: Key
-    public var control: Bool
-    public var option: Bool
-    public var shift: Bool
-    public var command: Bool
-
-    public init(
-        key: Key,
-        control: Bool = false,
-        option: Bool = false,
-        shift: Bool = false,
-        command: Bool = false
-    ) {
-        self.key = key
-        self.control = control
-        self.option = option
-        self.shift = shift
-        self.command = command
-    }
-}
-
 /// Turns a key stroke into the bytes a terminal expects: xterm's encoding, including its
 /// modifier parameter (`CSI 1;5C` for Ctrl+→) and application cursor mode (DECCKM), which
-/// is what readline, vim and fish actually bind. The kitty keyboard protocol is later.
+/// is what readline, vim and fish actually bind. Once a program pushes kitty keyboard flags,
+/// `KittyKeyEncoder` takes over and falls back here only where that protocol keeps legacy bytes.
 public enum KeyEncoder {
-    /// `appCursor`: the program turned on DECCKM (`?1h`), so unmodified arrows, Home and
-    /// End go out as `SS3` (`ESC O A`) instead of `CSI`.
-    public static func encode(_ stroke: KeyStroke, appCursor: Bool = false) -> [UInt8]? {
+    /// `modes`: the `TerminalModes` bits the program turned on. DECCKM (`?1h`) sends
+    /// unmodified arrows, Home and End as `SS3` (`ESC O A`) instead of `CSI`; DECKPAM
+    /// (`ESC =`) sends unmodified keypad keys as `SS3` too.
+    public static func encode(_ stroke: KeyStroke, modes: UInt32 = 0) -> [UInt8]? {
         // Command chords belong to the app, not the shell.
-        if stroke.command { return nil }
+        if stroke.command, !stroke.isModifierKey { return nil }
+        let appCursor = modes & TerminalModes.appCursor != 0
+
+        let kitty = KittyKeyEncoder.Flags(modes: modes)
+        if !kitty.isEmpty {
+            switch KittyKeyEncoder.encode(stroke, flags: kitty) {
+            case let .bytes(bytes): return bytes
+            case .none: return nil
+            case .legacy: break
+            }
+        }
+        // Legacy terminals only see presses; modifier keys alone type nothing.
+        if stroke.action == .release { return nil }
+        if stroke.isModifierKey { return nil }
+
+        if modes & TerminalModes.appKeypad != 0, let sequence = applicationKeypad(stroke) {
+            return sequence
+        }
 
         if let sequence = special(stroke, appCursor: appCursor) {
             return sequence
         }
 
-        guard case let .character(character) = stroke.key else { return nil }
+        guard case var .character(character) = stroke.key else { return nil }
+
+        // Ctrl+С on a Russian layout means Ctrl+C: control bytes only exist for ASCII.
+        if stroke.control, character.asciiValue == nil, let base = stroke.base {
+            character = base
+        }
 
         if stroke.control, let byte = controlByte(character) {
             return stroke.option ? [0x1b, byte] : [byte]
@@ -69,6 +51,29 @@ public enum KeyEncoder {
         return bytes
     }
 
+    /// xterm's application keypad (DECKPAM): `SS3` plus a final byte per key. Modified
+    /// keypad keys keep their normal encoding, as in xterm without `modifyKeypadKeys`.
+    private static func applicationKeypad(_ stroke: KeyStroke) -> [UInt8]? {
+        guard stroke.keypad, !stroke.control, !stroke.option, !stroke.shift else { return nil }
+        let final: Character
+        switch stroke.key {
+        case .enter:
+            final = "M"
+        case let .character(character):
+            guard let found = keypadFinals[character] else { return nil }
+            final = found
+        default:
+            return nil
+        }
+        return Array("\u{1b}O\(final)".utf8)
+    }
+
+    private static let keypadFinals: [Character: Character] = [
+        "0": "p", "1": "q", "2": "r", "3": "s", "4": "t", "5": "u", "6": "v", "7": "w",
+        "8": "x", "9": "y", ".": "n", ",": "l", "*": "j", "+": "k", "-": "m", "/": "o",
+        "=": "X",
+    ]
+
     private static func controlByte(_ character: Character) -> UInt8? {
         guard let ascii = character.asciiValue else { return nil }
         switch ascii {
@@ -79,10 +84,17 @@ public enum KeyEncoder {
         case UInt8(ascii: "["), UInt8(ascii: "\\"), UInt8(ascii: "]"),
              UInt8(ascii: "^"), UInt8(ascii: "_"), UInt8(ascii: "@"):
             return ascii - 0x40
-        case UInt8(ascii: "?"):
+        case UInt8(ascii: "?"), UInt8(ascii: "8"):
             return 0x7f
-        case UInt8(ascii: " "):
+        case UInt8(ascii: " "), UInt8(ascii: "2"):
             return 0x00
+        // xterm's VT220-style digits: Ctrl+3…7 are ESC, FS, GS, RS, US.
+        case UInt8(ascii: "3")...UInt8(ascii: "7"):
+            return ascii - UInt8(ascii: "3") + 0x1b
+        case UInt8(ascii: "/"):
+            return 0x1f
+        case UInt8(ascii: "~"):
+            return 0x1e
         default:
             return nil
         }
@@ -136,6 +148,14 @@ public enum KeyEncoder {
             return tildeKey(5, stroke)
         case .pageDown:
             return tildeKey(6, stroke)
+        case .insert:
+            return tildeKey(2, stroke)
+        case let .function(number) where (13...20).contains(number):
+            // xterm-256color's kf13–kf20 are Shift+F1–F8.
+            var shifted = stroke
+            shifted.key = .function(number - 12)
+            shifted.shift = true
+            return special(shifted, appCursor: appCursor)
         case let .function(number):
             if (1...4).contains(number) {
                 // F1–F4 are SS3 P/Q/R/S, or `CSI 1;m P` once modified.
@@ -146,7 +166,7 @@ public enum KeyEncoder {
             let codes = [15, 17, 18, 19, 20, 21, 23, 24]
             guard number >= 5, number <= 12 else { return nil }
             return tildeKey(codes[number - 5], stroke)
-        case .character:
+        case .character, .modifier:
             return nil
         }
     }
