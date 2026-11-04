@@ -3,15 +3,7 @@ import PigeonCore
 
 /// The single terminal pane: shows a grid snapshot, sends keys, reports resizes.
 final class PaneView: NSView {
-    struct Cell: Equatable, Sendable {
-        var codepoint: UInt32
-        var attrs: UInt8
-        var fg: UInt32
-        var bg: UInt32
-        var width: UInt8
-
-        static let blank = Cell(codepoint: 32, attrs: 0, fg: 0, bg: 0, width: 1)
-    }
+    typealias Cell = TerminalCell
 
     struct Cursor: Equatable, Sendable {
         enum Shape: UInt8, Sendable {

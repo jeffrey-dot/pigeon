@@ -31,7 +31,7 @@ struct TerminalSelection: Equatable {
     }
 
     /// Start and end in reading order, both inclusive, after snapping to `unit`.
-    func range(cells: [PaneView.Cell], cols: Int) -> (start: Point, end: Point) {
+    func range(cells: [TerminalCell], cols: Int) -> (start: Point, end: Point) {
         let (low, high) = anchor < head ? (anchor, head) : (head, anchor)
         switch unit {
         case .cell:
@@ -45,23 +45,25 @@ struct TerminalSelection: Equatable {
         }
     }
 
-    func contains(_ point: Point, cells: [PaneView.Cell], cols: Int) -> Bool {
+    func contains(_ point: Point, cells: [TerminalCell], cols: Int) -> Bool {
         let (start, end) = range(cells: cells, cols: cols)
         return start <= point && point <= end
     }
 
-    /// The selected text. Trailing blanks on each row are dropped (a terminal row is padded
-    /// to its width), rows join with `\n`, and a wide character's continuation cell adds
-    /// nothing, so `中文` copies as two characters, not four.
-    func text(cells: [PaneView.Cell], cols: Int, rows: Int) -> String {
+    /// Core marks automatic wraps; those join without a newline or trimming real spaces.
+    /// A wide character's continuation cell adds nothing to the copied text.
+    func text(cells: [TerminalCell], cols: Int, rows: Int) -> String {
         guard cols > 0, rows > 0, cells.count >= cols * rows else { return "" }
         let (start, end) = range(cells: cells, cols: cols)
-        var lines: [String] = []
-        for row in max(start.row, 0)...min(end.row, rows - 1) {
+        let firstRow = max(start.row, 0)
+        let lastRow = min(end.row, rows - 1)
+        guard firstRow <= lastRow else { return "" }
+        var text = ""
+        for row in firstRow...lastRow {
             let first = row == start.row ? max(start.column, 0) : 0
             let last = row == end.row ? min(end.column, cols - 1) : cols - 1
             guard first <= last else {
-                lines.append("")
+                if row < lastRow { text.append("\n") }
                 continue
             }
             var line = ""
@@ -74,16 +76,19 @@ struct TerminalSelection: Equatable {
                     line.unicodeScalars.append(scalar)
                 }
             }
-            while line.last == " " { line.removeLast() }
-            lines.append(line)
+            let wraps = cells[(row + 1) * cols - 1].attrs & CellAttrs.wrap != 0
+            let joinsNext = row < lastRow && last == cols - 1 && wraps
+            if !joinsNext { while line.last == " " { line.removeLast() } }
+            text.append(line)
+            if row < lastRow && !joinsNext { text.append("\n") }
         }
-        return lines.joined(separator: "\n")
+        return text
     }
 
     /// The run of word characters around `point`; a non-word cell selects just itself.
     /// Path and URL punctuation counts as part of a word, so a double-click takes
     /// `src/main.rs:12` or `https://example.com/a?b=1` whole.
-    static func wordBounds(at point: Point, cells: [PaneView.Cell], cols: Int) -> (start: Point, end: Point) {
+    static func wordBounds(at point: Point, cells: [TerminalCell], cols: Int) -> (start: Point, end: Point) {
         guard cols > 0, point.row >= 0, (point.row + 1) * cols <= cells.count else {
             return (point, point)
         }

@@ -6,4 +6,5 @@ enum CellAttrs {
     static let reverse: UInt8 = 1 << 3
     static let strikethrough: UInt8 = 1 << 4
     static let dim: UInt8 = 1 << 5
+    static let wrap: UInt8 = 1 << 6
 }

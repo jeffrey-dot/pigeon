@@ -4,14 +4,14 @@ import XCTest
 /// What a drag, double-click or triple-click selects, and the text ⌘C copies.
 final class SelectionTests: XCTestCase {
     /// Rows of the same width; `中` takes two cells (the second a continuation).
-    private func grid(_ lines: [String], cols: Int) -> [PaneView.Cell] {
-        var cells: [PaneView.Cell] = []
+    private func grid(_ lines: [String], cols: Int) -> [TerminalCell] {
+        var cells: [TerminalCell] = []
         for line in lines {
-            var row: [PaneView.Cell] = []
+            var row: [TerminalCell] = []
             for scalar in line.unicodeScalars {
                 let wide = scalar.value >= 0x4E00 && scalar.value <= 0x9FFF
-                row.append(PaneView.Cell(codepoint: scalar.value, attrs: 0, fg: 0, bg: 0, width: wide ? 2 : 1))
-                if wide { row.append(PaneView.Cell(codepoint: 32, attrs: 0, fg: 0, bg: 0, width: 0)) }
+                row.append(TerminalCell(codepoint: scalar.value, attrs: 0, fg: 0, bg: 0, width: wide ? 2 : 1))
+                if wide { row.append(TerminalCell(codepoint: 32, attrs: 0, fg: 0, bg: 0, width: 0)) }
             }
             while row.count < cols { row.append(.blank) }
             cells.append(contentsOf: row.prefix(cols))
@@ -28,6 +28,22 @@ final class SelectionTests: XCTestCase {
         var selection = TerminalSelection(at: point(0, 1))
         selection.head = point(1, 2)
         XCTAssertEqual(selection.text(cells: cells, cols: 8, rows: 2), "ello\nwor")
+    }
+
+    func testAutomaticWrapJoinsWithoutInventingANewline() {
+        var cells = grid(["abcd", "efgh", "xy"], cols: 4)
+        cells[3].attrs |= CellAttrs.wrap
+        var selection = TerminalSelection(at: point(0, 0))
+        selection.head = point(2, 1)
+        XCTAssertEqual(selection.text(cells: cells, cols: 4, rows: 3), "abcdefgh\nxy")
+    }
+
+    func testSpacesAtTheAutomaticWrapArePartOfTheCommand() {
+        var cells = grid(["ab  ", "cd"], cols: 4)
+        cells[3].attrs |= CellAttrs.wrap
+        var selection = TerminalSelection(at: point(0, 0))
+        selection.head = point(1, 1)
+        XCTAssertEqual(selection.text(cells: cells, cols: 4, rows: 2), "ab  cd")
     }
 
     func testDraggingBackwardsSelectsTheSameText() {
