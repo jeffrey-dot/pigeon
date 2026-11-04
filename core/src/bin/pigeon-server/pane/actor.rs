@@ -45,11 +45,9 @@ pub fn spawn_pane(
     let pair = native_pty_system().openpty(size).ok()?;
     let mut command = CommandBuilder::new(shell);
     command.env("PI_PROGRAM_STATUS", "1");
-    // A terminal must tell programs what it is; without this htop/vim refuse.
-    command.env(
-        "TERM",
-        std::env::var("TERM").unwrap_or_else(|_| "xterm-256color".to_owned()),
-    );
+    // The starter may be a Linux console or another emulator. Its terminfo would
+    // advertise capabilities unrelated to the VT state owned by this host.
+    command.env("TERM", "xterm-256color");
     command.env("COLORTERM", "truecolor");
     if let Some(dir) = cwd {
         command.cwd(dir);

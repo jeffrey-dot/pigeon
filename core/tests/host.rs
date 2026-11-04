@@ -19,6 +19,11 @@ fn one_at_a_time() -> std::sync::MutexGuard<'static, ()> {
 
 use pigeon_core::proto::{self, Message};
 
+#[path = "host/environment.rs"]
+mod environment;
+#[path = "host/terminal_environment.rs"]
+mod terminal_environment;
+
 struct Host {
     child: Child,
     socket: String,
@@ -29,6 +34,7 @@ impl Drop for Host {
         let _ = self.child.kill();
         let _ = self.child.wait();
         let _ = std::fs::remove_file(&self.socket);
+        environment::cleanup(&self.socket);
     }
 }
 
@@ -58,9 +64,17 @@ fn start_host_with(program: &str) -> Host {
 }
 
 fn start_host_on(socket: &str, program: &str) -> Host {
+    start_host_on_with_term(socket, program, Some("xterm-256color"))
+}
+
+fn start_host_on_with_term(socket: &str, program: &str, term: Option<&str>) -> Host {
     let socket = socket.to_owned();
-    let child = Command::new(env!("CARGO_BIN_EXE_pigeon-server"))
-        .args(["--socket", &socket, "--shell", program])
+    let mut command = environment::command(&socket, program);
+    match term {
+        Some(term) => command.env("TERM", term),
+        None => command.env_remove("TERM"),
+    };
+    let child = command
         .stdout(Stdio::null())
         .stderr(if std::env::var_os("PIGEON_DEBUG").is_some() {
             Stdio::inherit()
@@ -86,14 +100,8 @@ fn start_host_on(socket: &str, program: &str) -> Host {
 fn start_stdio_host() -> (Host, Client) {
     let quiet = script("#!/bin/sh\nexec env PS1= /bin/sh -i\n");
     let socket = unique_socket();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_pigeon-server"))
-        .args([
-            "--stdio",
-            "--socket",
-            &socket,
-            "--shell",
-            quiet.to_str().expect("utf8"),
-        ])
+    let mut child = environment::command(&socket, quiet.to_str().expect("utf8"))
+        .arg("--stdio")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(if std::env::var_os("PIGEON_DEBUG").is_some() {
@@ -659,18 +667,13 @@ fn proxy_mode_starts_a_host_when_none_is_running() {
             let _ = Command::new("pkill").args(["-f", &self.0]).status();
             let _ = std::fs::remove_file(&self.0);
             let _ = std::fs::remove_file(std::path::Path::new(&self.0).with_extension("state"));
+            environment::cleanup(&self.0);
         }
     }
     let _reap = Reap(socket.clone());
 
-    let mut proxy = Command::new(env!("CARGO_BIN_EXE_pigeon-server"))
-        .args([
-            "--proxy",
-            "--socket",
-            &socket,
-            "--shell",
-            quiet.to_str().expect("utf8"),
-        ])
+    let mut proxy = environment::command(&socket, quiet.to_str().expect("utf8"))
+        .arg("--proxy")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -2714,18 +2717,13 @@ fn detach_starts_one_host_that_outlives_its_starter() {
             for file in [path.to_path_buf(), path.with_extension("log")] {
                 let _ = std::fs::remove_file(file);
             }
+            environment::cleanup(&self.0);
         }
     }
     let _reap = Reap(socket.clone());
     let detach = || {
-        Command::new(env!("CARGO_BIN_EXE_pigeon-server"))
-            .args([
-                "--detach",
-                "--socket",
-                &socket,
-                "--shell",
-                quiet.to_str().expect("utf8"),
-            ])
+        environment::command(&socket, quiet.to_str().expect("utf8"))
+            .arg("--detach")
             .arg("--log")
             .arg(&log)
             .status()
