@@ -122,9 +122,8 @@ pub fn handshake(link: &HostLink) -> Result<Screen, String> {
     link.send(Message::Hello {
         proto: PROTO_VERSION,
         client: CLIENT_NAME.to_owned(),
-        // No `delta`: this client wants whole snapshots (protocol §5), which keeps width
-        // derivation in the core instead of here.
-        features: Vec::new(),
+        // Both snapshots and deltas use the core's safe cell conversion.
+        features: vec!["delta".to_owned()],
     });
     loop {
         match link.recv().ok_or("host closed during the handshake")? {

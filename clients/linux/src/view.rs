@@ -13,7 +13,9 @@ use std::rc::Rc;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk4 as gtk;
-use pigeon_core::api::{layout_focus, layout_rects, layout_splits, Message, PaneId, Rect, Split, SplitAxis};
+use pigeon_core::api::{
+    layout_focus, layout_rects, layout_splits, Message, PaneId, Rect, Split, SplitAxis,
+};
 
 use crate::host::HostLink;
 use crate::input;
@@ -136,9 +138,16 @@ impl Workspace {
                 }
                 true
             }
-            // Not negotiated: a delta means the connection is out of step.
             Message::Delta { pane_id, .. } => {
-                self.attach(*pane_id);
+                let applied = self
+                    .panes
+                    .get_mut(pane_id)
+                    .is_some_and(|screen| screen.apply_delta(message));
+                if applied {
+                    self.area.queue_render();
+                } else {
+                    self.attach(*pane_id);
+                }
                 true
             }
             _ => true,
@@ -410,10 +419,7 @@ mod tests {
 
     #[test]
     fn side_by_side_panes_split_the_canvas() {
-        let layout = [
-            (1, rect(0.0, 0.0, 0.5, 1.0)),
-            (2, rect(0.5, 0.0, 0.5, 1.0)),
-        ];
+        let layout = [(1, rect(0.0, 0.0, 0.5, 1.0)), (2, rect(0.5, 0.0, 0.5, 1.0))];
         let placed = place(&layout, None, [1000.0, 400.0], &[1, 2]);
         assert_eq!(placed.len(), 2);
         assert_eq!(placed[0], (1, [0.0, 0.0], [500.0, 400.0]));
@@ -422,10 +428,7 @@ mod tests {
 
     #[test]
     fn zoom_gives_one_pane_the_whole_area() {
-        let layout = [
-            (1, rect(0.0, 0.0, 0.5, 1.0)),
-            (2, rect(0.5, 0.0, 0.5, 1.0)),
-        ];
+        let layout = [(1, rect(0.0, 0.0, 0.5, 1.0)), (2, rect(0.5, 0.0, 0.5, 1.0))];
         let placed = place(&layout, Some(2), [800.0, 600.0], &[1, 2]);
         assert_eq!(placed, vec![(2, [0.0, 0.0], [800.0, 600.0])]);
     }
@@ -434,10 +437,7 @@ mod tests {
     fn a_pane_without_a_screen_yet_is_not_drawn() {
         // The layout names a pane whose snapshot has not arrived: drawing it would paint an
         // empty rect over its sibling's half.
-        let layout = [
-            (1, rect(0.0, 0.0, 0.5, 1.0)),
-            (2, rect(0.5, 0.0, 0.5, 1.0)),
-        ];
+        let layout = [(1, rect(0.0, 0.0, 0.5, 1.0)), (2, rect(0.5, 0.0, 0.5, 1.0))];
         let placed = place(&layout, None, [100.0, 100.0], &[2]);
         assert_eq!(placed.len(), 1);
         assert_eq!(placed[0].0, 2);
