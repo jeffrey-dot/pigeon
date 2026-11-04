@@ -66,6 +66,15 @@ final class HostConnectionTests: XCTestCase {
         XCTAssertTrue(connection.receivedScreen.isEmpty)
     }
 
+    func testReconnectDiscardsSnapshotsWaitingForThePreviousConnectionsLayout() {
+        var connection = HostConnection<Int>()
+        connection.instanceChanged(to: "a")
+        connection.pending = [10: Data([1, 2, 3])]
+        connection.reconnected(now: now)
+        connection.instanceChanged(to: "a")
+        XCTAssertTrue(connection.pending.isEmpty, "a new layout must not qualify an old buffered picture")
+    }
+
     func testHostsWithoutAnInstanceCannotReuseIdentityAcrossConnections() {
         var connection = HostConnection<Int>()
         connection.instanceChanged(to: "")

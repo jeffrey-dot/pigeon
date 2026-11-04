@@ -38,6 +38,7 @@ struct HostConnection<Row> {
         receivedScreen = []
         stale = seen
         requested = []
+        pending = [:]
         heartbeat = Heartbeat(now: now)
     }
 
