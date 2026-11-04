@@ -17,6 +17,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::error::{PgError, PgResult};
 
+mod cell_text;
+pub use cell_text::{CellText, MAX_CELL_TEXT_BYTES};
+
 /// A frame may not exceed 8 MiB (protocol §1).
 pub const MAX_FRAME: usize = 8 * 1024 * 1024;
 
@@ -268,6 +271,8 @@ pub enum Message {
         cursor: Cursor,
         scroll: Scroll,
         screen: Vec<Vec<Cell>>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        text: Vec<CellText>,
         #[serde(skip_serializing_if = "Option::is_none")]
         history: Option<Vec<Vec<Cell>>>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -287,6 +292,8 @@ pub enum Message {
         pane_id: u32,
         seq: u32,
         rows: Vec<Row>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        text: Vec<CellText>,
         #[serde(skip_serializing_if = "Option::is_none")]
         cursor: Option<Cursor>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -666,6 +673,7 @@ mod tests {
                 since: None,
             },
             Message::Snapshot {
+        text: Vec::new(),
                 pane_id: 1,
                 seq: 1,
                 cols: 2,
@@ -695,6 +703,7 @@ mod tests {
                 modes: Some(0b10),
             },
             Message::Delta {
+        text: Vec::new(),
                 pane_id: 1,
                 seq: 2,
                 rows: vec![Row {
@@ -931,6 +940,7 @@ mod tests {
             MAX_FRAME + 1
         ];
         let message = Message::Snapshot {
+        text: Vec::new(),
             pane_id: 1,
             seq: 1,
             cols: 1,

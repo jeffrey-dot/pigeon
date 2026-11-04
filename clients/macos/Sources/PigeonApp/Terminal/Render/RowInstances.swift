@@ -49,18 +49,18 @@ struct RowInstances: Equatable {
             // the light and the dark card where mixing toward the background would not.
             let text = CellPalette.components(
                 textColor(fg), alpha: cell.attrs & CellAttrs.dim != 0 ? 0.6 : 1)
-            if let strokes = BoxDrawing.rects(
+            if cell.extraText == nil, let strokes = BoxDrawing.rects(
                 cell.codepoint, origin: SIMD2(left, top), size: SIMD2(right - left, bottom - top),
                 thin: metrics.lineThickness, color: text) {
                 out.decorations.append(contentsOf: strokes)
-            } else if cell.codepoint > 32, cell.codepoint != 0x7f, shapedGlyph != GlyphKey.noGlyph {
+            } else if (cell.codepoint > 32 || cell.extraText != nil), cell.codepoint != 0x7f, shapedGlyph != GlyphKey.noGlyph {
                 let key = GlyphKey(
                     codepoint: cell.codepoint,
                     bold: cell.attrs & CellAttrs.bold != 0,
                     italic: cell.attrs & CellAttrs.italic != 0,
                     span: UInt8(span),
                     pixelHeight: pixelHeight,
-                    glyph: shapedGlyph)
+                    glyph: shapedGlyph, text: cell.extraText)
                 if let slot = glyph(key) {
                     out.glyphs.append(GlyphInstance(
                         origin: SIMD2(left + Float(slot.bearingX), top + Float(slot.bearingY)),
@@ -91,7 +91,7 @@ struct RowInstances: Equatable {
         var out: [Int: UInt16] = [:]
         var runStart: Int?
         func isCandidate(_ cell: PaneView.Cell) -> Bool {
-            cell.width == 1 && cell.codepoint > 0x20 && cell.codepoint < 0x7F
+            cell.extraText == nil && cell.width == 1 && cell.codepoint > 0x20 && cell.codepoint < 0x7F
                 && !(0x30...0x39).contains(cell.codepoint)
                 && !(0x41...0x5A).contains(cell.codepoint) && !(0x61...0x7A).contains(cell.codepoint)
                 && !BoxDrawing.handles(cell.codepoint)

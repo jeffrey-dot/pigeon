@@ -59,6 +59,9 @@ const FALLBACKS: &[&str] = &[
 ];
 
 impl Font {
+    pub fn face_count(&self) -> u8 {
+        self.faces.len().min(usize::from(u8::MAX)) as u8
+    }
     pub fn load(size: f32) -> Result<Self, String> {
         let (data, index) = monospace()?;
         let data: &'static [u8] = Box::leak(data.into_boxed_slice());

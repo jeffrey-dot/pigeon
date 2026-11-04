@@ -297,8 +297,10 @@ fn normalized(message: &Message) -> Message {
             screen,
             history,
             links,
+            text,
             ..
         } => Message::Snapshot {
+            text,
             pane_id,
             seq: 0,
             cols,

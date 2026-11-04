@@ -127,7 +127,7 @@ enum CoreTextRenderer {
             }
         } else {
             guard let scalar = Unicode.Scalar(key.codepoint) else { return nil }
-            let line = CTLineCreateWithAttributedString(attributed(String(Character(scalar)), base))
+            let line = CTLineCreateWithAttributedString(attributed(key.text ?? String(Character(scalar)), base))
             let traits = runTraits(line, primary: base)
             ink = inkBounds(line, colored: traits.colored)
             colored = traits.colored

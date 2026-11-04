@@ -175,6 +175,14 @@ impl AlacrittyTerm {
                     // protocol does not carry yet, so M0 reports "no link".
                     link: 0,
                     width,
+                    extra_text: cell.zerowidth().filter(|marks| !marks.is_empty()).map(|marks| {
+                        let mut text = cell.c.to_string();
+                        for mark in marks {
+                            if text.len() + mark.len_utf8() > 4096 { break; }
+                            text.push(*mark);
+                        }
+                        Arc::from(text)
+                    }),
                 }
             })
             .collect()

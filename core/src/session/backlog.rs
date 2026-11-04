@@ -26,7 +26,8 @@ impl Backlog {
     /// Remembers a delta just sent out; `seq` must be one more than the previous one.
     pub fn push(&mut self, seq: u32, message: &Message) {
         let cells = match message {
-            Message::Delta { rows, .. } => rows.iter().map(|row| row.cells.len()).sum(),
+            Message::Delta { rows, text, .. } => rows.iter().map(|row| row.cells.len()).sum::<usize>()
+                + text.iter().map(|entry| (entry.text.len() + 32).div_ceil(20)).sum::<usize>(),
             _ => return,
         };
         if self
@@ -93,6 +94,7 @@ mod tests {
 
     fn delta(seq: u32, cols: usize) -> Message {
         Message::Delta {
+        text: Vec::new(),
             pane_id: 1,
             seq,
             rows: vec![Row {

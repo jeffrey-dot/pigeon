@@ -5,6 +5,19 @@ import XCTest
 /// A `delta` patches only the rows it names; a frame that does not fit the grid is refused
 /// so the window re-attaches instead of drawing a torn screen.
 final class PaneDeltaTests: XCTestCase {
+    func testSnapshotCopiesCombiningTextBeforeTheCoreSnapshotIsFreed() {
+        let core = pg_core_new(nil)!
+        let pane = pg_pane_new(core, nil)
+        let bytes = Array("e\u{301}".utf8)
+        XCTAssertTrue(bytes.withUnsafeBufferPointer { pg_pane_feed(core, pane, $0.baseAddress, $0.count) })
+        let snapshot = pg_pane_snapshot(core, pane)!
+        let view = PaneView(frame: .zero)
+        view.apply(snapshot: snapshot)
+        pg_snapshot_free(snapshot)
+        pg_core_free(core)
+        XCTAssertEqual(Array(view.cells[0].text.unicodeScalars).map(\.value), [0x65, 0x301])
+    }
+
     private func cell(_ character: Character) -> PgCell {
         PgCell(
             size: UInt32(MemoryLayout<PgCell>.size),
@@ -31,7 +44,7 @@ final class PaneDeltaTests: XCTestCase {
                     cols: 3, rows: 2, alt_screen: 0, cursor: cursor(x: 0, y: 0),
                     scroll_region: PgScrollRegion(
                         size: UInt32(MemoryLayout<PgScrollRegion>.size), top: 0, bottom: 1),
-                    screen: rowBuffer.baseAddress, history: nil, history_count: 0)
+                    screen: rowBuffer.baseAddress, history: nil, history_count: 0, text_count: 0, text: nil)
                 view.apply(snapshot: &snapshot)
             }
         }
@@ -47,7 +60,7 @@ final class PaneDeltaTests: XCTestCase {
             return withUnsafePointer(to: &row) { rowPointer in
                 var delta = PgDelta(
                     size: UInt32(MemoryLayout<PgDelta>.size), pane_id: 1, seq: 1, row_count: 1,
-                    rows: rowPointer, has_cursor: 1, cursor: cursor(x: 2, y: y), alt_screen: alt)
+                    rows: rowPointer, has_cursor: 1, cursor: cursor(x: 2, y: y), alt_screen: alt, text_count: 0, text: nil)
                 return view.apply(delta: &delta)
             }
         }

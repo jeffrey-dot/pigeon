@@ -7,6 +7,7 @@ use pigeon_core::api::{delta_of, Message, PgError, Row, WireCell, WireCursor};
 
 fn delta() -> Message {
     Message::Delta {
+        text: Vec::new(),
         pane_id: 7,
         seq: 9,
         rows: vec![Row {

@@ -65,7 +65,7 @@ fn main() -> ExitCode {
                 // Width 0 is the second half of a wide character; a renderer skips it, so
                 // the text comparison has to as well.
                 .filter(|cell| cell.width != 0)
-                .map(|cell| char::from_u32(cell.codepoint).unwrap_or(' '))
+                .map(|cell| cell.text())
                 .collect();
             text.trim_end().to_owned()
         })

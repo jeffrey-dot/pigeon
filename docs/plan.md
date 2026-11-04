@@ -286,7 +286,7 @@ M0–M1 可以直接复用现有代码：内核的对账语料（来自 tmux 阶
 
 | 缺口 | 代码现状与用户影响 |
 |---|---|
-| Unicode 字素与整形 | `term::Cell` / 协议 cell 仅带一个码点，`convert_row` 未保留 combining 字符；分解重音、ZWJ emoji 不能完整保真；macOS 已能对 ASCII 标点段做编程连字，完整字素整形仍未贯通。需要从内核快照、协议/接口到客户端一起补 |
+| Unicode 字素与整形 | 已保留引擎附加码点，经稀疏 text 表传到快照/delta/历史/C ABI；两端按 cell 文本整形，macOS 复制保留码点。跨宽 cell 的 ZWJ emoji 整簇宽度仍待补；单格文本边界上限 4096 字节，GUI 视觉待验。需要从内核快照、协议/接口到客户端一起补 |
 | 搜索与完整文本选择 | 未实现终端搜索；macOS 选择和“Select All”只覆盖当前屏幕。已新增 `ATTR_WRAP` 并在 macOS 复制时保留逻辑换行；旧宿主无标志时仍按网格行处理 |
 | OSC 8 / OSC 52 | `convert_row` 的 `link` 恒为 0，`links` 不下发；OSC 52 事件被忽略。点击超链接、远端程序复制到本地剪贴板尚不可用；本地菜单复制粘贴已实现 |
 | 现代终端协议 | macOS 已接 Kitty keyboard protocol 与应用小键盘，Linux 仍为 legacy；DEC 2026 同步输出与超时已接；图片协议、OSC 9;4 进度、完整 OSC 133 命令边界/命令输出导航未实现。不能把底层 VT 库的能力当成产品端到端能力 |
@@ -306,4 +306,4 @@ M0–M1 可以直接复用现有代码：内核的对账语料（来自 tmux 阶
 **优化前核对证据**：8 条已提交 VT golden 通过。用 `vt-dump` 输入 `e\u0301` 得到 `e`，输入 `👩\u200d💻` 得到 `👩💻`，确认组合码点在快照转换时丢失；预组字符 `é` 保留。
 Linux 默认环境 `TERM=linux` 下，`cargo test --manifest-path core/Cargo.toml --offline` 的 `vim_alternate_screen_survives_a_reconnect` 超时。
 改用 `TERM=xterm-256color cargo test --manifest-path core/Cargo.toml --offline --quiet` 后全量通过：194 passed，2 ignored（含文档测试）。
-上述 TERM 问题已在本轮修复；后续实现与验证见 [优化执行记录](optimization-progress.md)。本轮 macOS 完整构建/GUI 未验。
+上述 TERM 问题已在本轮修复；后续实现与验证见 [优化执行记录](optimization-progress.md)。合并提交 `7dd459a` 的 macOS 完整构建/测试已由 CI 通过，真实 GUI 仍未验。

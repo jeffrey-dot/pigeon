@@ -31,8 +31,8 @@ pub use crate::error::{PgError, PgResult};
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub use crate::layout::{Axis, PaneId, Rect, SplitId};
 pub use crate::proto::{
-    decode, decode_frame, encode, encode_frame, Cell as WireCell, Cursor as WireCursor, Link,
-    Message, Node, Row, Scroll, SessionInfo, SplitAxis, SplitNode, MAX_FRAME, PROTO_VERSION,
+    decode, decode_frame, encode, encode_frame, Cell as WireCell, CellText, Cursor as WireCursor,
+    Link, Message, Node, Row, Scroll, SessionInfo, SplitAxis, SplitNode, MAX_FRAME, PROTO_VERSION,
 };
 pub use crate::session::DeltaRows;
 pub use crate::status::{Kind as StatusKind, Record as StatusRecord, State as StatusState};

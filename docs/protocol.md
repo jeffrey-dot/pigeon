@@ -10,7 +10,7 @@
 
 - 宿主提供 `delta`、`scrollback`、`osc7501`、`status_all`；macOS 请求 `delta`、`scrollback`、`status_all`，Linux 请求 `delta`，首帧快照之后应用连续增量。
 - `zstd` 是预留能力，宿主不提供，当前 payload 为裸 CBOR，无压缩 tag。
-- `snapshot`/`delta` 的 `links` 已有类型，但 VT 转换未保留 OSC 8，实际不下发链接；每格仍只有一个码点。
+- `snapshot`/`delta` 的 `links` 已有类型，但 VT 转换未保留 OSC 8，实际不下发链接；基础 cell 仍为单码点，附加码点通过下面的 `text` 稀疏表传递。
 - `new_session.env` 能编解码，但宿主尚未应用；结构化 `mouse` 能编解码但宿主返回 `unsupported`。
   macOS 将鼠标按当前 VT 模式编码成 `keys.bytes`，不是发送 `mouse`。
 - `status_all` 已通过独立 `status` 帧补发状态；`sessions` 本身不包含状态记录。未协商 `status_all` 的连接仍接收已 attach pane 的状态，不能靠未请求 `osc7501` 推断不会收到 `status`。
@@ -114,6 +114,11 @@
   - `attrs` 位：`1` 粗体、`2` 斜体、`4` 下划线、`8` 反色、`16` 删除线、`32` 暗色、`64` 软换行（行末格后接下一行，不插入文本换行）。一旦发布只加位、不改语义。
   - 颜色：`0x01000000 | idx` 表示调色板索引；否则按 `0xRRGGBB`。
   - `link` 缺省 = 无超链接；非 0 时指向同一帧 `links` 表里的 `id`（`links` 随该帧的 `snapshot`/`delta` 下发）。
+- `snapshot` / `delta` 可带 `text: [{row:i32, col:u16, text:str}]`：完整单元格文本（主码点 + 零宽附加码点），空表省略。
+  `row >= 0` 表示屏幕；快照 `row < 0` 从历史末尾倒数（-1 最新），delta 的 row 必须是本帧被替换的行。
+  未列出的格子仅有主码点；快照/行替换同时清除旧附加文本，不能把旧表保留到新行上。
+  接收端拒绝越界、重复坐标、主码点不一致、控制字符以及单格 >4096 UTF-8 字节；旧消息不带表仍合法，旧客户端忽略表。
+  导出极长附加序列在码点边界截到 4096 字节；历史预算与 backlog 计费包括附加文本。见 [ADR-0012](adr/0012-cell-text.md)。
 - 同一 `pane_id` 的 `snapshot` 会把该客户端的 `seq` 基准重置。
 - `scroll` 的答复是一个 `snapshot`，额外带两个只有它才有的字段：`history_len`（滚回缓冲一共多少行）与 `offset`（这一屏回看的行数，0 = 实时屏）。客户端据此画滚动条位置；别的 `snapshot` 不带这两个字段。
 - `scroll` 的 offset 是**相对当前位置的增量**（除了 `0` 表示“回到底部”），宿主把它夹在 `[0, history_len]`，所以多按几次 PageUp 不会越界；窗口各自回看，互不影响。

@@ -279,6 +279,7 @@ final class PaneView: NSView {
             shape: Cursor.Shape(rawValue: view.cursor.shape) ?? .block
         )
         alt = view.alt_screen != 0
+        applyText(view.text, count: view.text_count)
         reported = (UInt16(cols), UInt16(rows))
         if ProcessInfo.processInfo.environment["PIGEON_DEBUG"] != nil {
             let first = cells.prefix(40).map { cell -> Character in
@@ -341,8 +342,19 @@ final class PaneView: NSView {
         if frame.alt_screen < 2 {
             alt = frame.alt_screen != 0
         }
+        applyText(frame.text, count: frame.text_count)
         screenChanged()
         return true
+    }
+
+    private func applyText(_ entries: UnsafePointer<PgCellText>?, count: UInt32) {
+        guard let entries else { return }
+        for index in 0..<Int(count) {
+            let entry = entries[index]
+            let row = Int(entry.row), column = Int(entry.col)
+            guard row >= 0, row < rows, column < cols else { continue }
+            cells[row * cols + column].extraText = Wire.string(entry.text)
+        }
     }
 
     override func keyDown(with event: NSEvent) {

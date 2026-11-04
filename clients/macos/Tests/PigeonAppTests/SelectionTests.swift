@@ -38,6 +38,13 @@ final class SelectionTests: XCTestCase {
         XCTAssertEqual(selection.text(cells: cells, cols: 4, rows: 3), "abcdefgh\nxy")
     }
 
+    func testCombiningMarksAreCopiedWithoutNormalization() {
+        var cells = grid(["e"], cols: 4)
+        cells[0].extraText = "e\u{301}"
+        let selection = TerminalSelection(at: point(0, 0))
+        XCTAssertEqual(Array(selection.text(cells: cells, cols: 4, rows: 1).unicodeScalars).map(\.value), [0x65, 0x301])
+    }
+
     func testSpacesAtTheAutomaticWrapArePartOfTheCommand() {
         var cells = grid(["ab  ", "cd"], cols: 4)
         cells[3].attrs |= CellAttrs.wrap

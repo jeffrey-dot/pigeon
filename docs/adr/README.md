@@ -46,5 +46,7 @@
 | [0008](0008-remote-over-system-ssh.md) | 远端经系统 ssh，推送静态 server（a/b/c 三档） | 2026-10-27 |
 | [0009](0009-explicit-size-policy.md) | 多客户端尺寸策略显式且可见 | 2026-10-28 |
 | [0010](0010-gpl-3-0-or-later.md) | 许可证 GPL-3.0-or-later | 2026-10-27 |
+| [0011](0011-linux-rendering.md) | Linux GTK4 + GtkGLArea/OpenGL | 2026-11-02 |
+| [0012](0012-cell-text.md) | 单元格附加文本与兼容快照扩展 | 2026-11-04 |
 
 「还没做的事」在 [plan.md §11](../plan.md) 的已知缺口里，不在这。

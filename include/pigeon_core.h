@@ -254,6 +254,16 @@ typedef struct PgRow {
     const struct PgCell *cells;
 } PgRow;
 
+typedef struct PgCellText {
+    uint32_t size;
+    int32_t row;
+    uint16_t col;
+    /**
+     * Borrowed until the owning snapshot/delta is freed.
+     */
+    struct PgStr text;
+} PgCellText;
+
 typedef struct PgSnapshot {
     uint32_t size;
     uint32_t version;
@@ -272,6 +282,11 @@ typedef struct PgSnapshot {
      */
     const struct PgRow *history;
     uint32_t history_count;
+    /**
+     * Sparse complete text; omitted cells contain only their codepoint.
+     */
+    uint32_t text_count;
+    const struct PgCellText *text;
 } PgSnapshot;
 
 typedef struct PgStatus {
@@ -340,6 +355,8 @@ typedef struct PgDelta {
      * 0 main screen, 1 alternate screen, 2 not reported (keep what you had).
      */
     uint8_t alt_screen;
+    uint32_t text_count;
+    const struct PgCellText *text;
 } PgDelta;
 
 /**

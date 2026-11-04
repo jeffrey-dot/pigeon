@@ -15,9 +15,11 @@ use std::ptr;
 
 use crate::api::{self, Axis, Core, PgError, PgResult, StatusKind, StatusState};
 
+mod cell_text;
 pub mod delta;
 pub mod msg;
 
+pub use cell_text::PgCellText;
 pub use delta::*;
 pub use msg::*;
 
@@ -371,6 +373,9 @@ pub struct PgSnapshot {
     /// `history_count` entries, oldest first; may be NULL.
     pub history: *const PgRow,
     pub history_count: u32,
+    /// Sparse complete text; omitted cells contain only their codepoint.
+    pub text_count: u32,
+    pub text: *const PgCellText,
 }
 
 /// Owned by the caller; free with [`pg_snapshot_free`]. Immutable, thread-safe.
@@ -423,6 +428,7 @@ pub extern "C" fn pg_snapshot_free(snap: *mut PgSnapshot) {
         // SAFETY: `screen`/`history` and their cell buffers were leaked by build_snapshot with
         // exactly these lengths (rows × cols, history_count × cols) and are reclaimed once here.
         unsafe {
+            cell_text::free(snap.text_count, snap.text);
             if rows > 0 && !snap.screen.is_null() {
                 reclaim((*snap.screen).cells.cast_mut(), rows * cols);
             }
@@ -507,6 +513,8 @@ pub(crate) fn build_snapshot(
         screen: screen_rows.as_ptr(),
         history: history_rows.as_ptr(),
         history_count,
+        text_count: 0,
+        text: ptr::null(),
     };
 
     // The rows borrow the cell grids, so all three allocations leak together and
@@ -814,7 +822,7 @@ fn snapshot_to_ffi(
     } else {
         Vec::new()
     };
-    build_snapshot(
+    let result = build_snapshot(
         pane_id,
         snapshot.cols,
         snapshot.rows,
@@ -833,7 +841,31 @@ fn snapshot_to_ffi(
         },
         screen,
         history,
-    )
+    )?;
+    let history = if with_history {
+        snapshot.history.as_slice()
+    } else {
+        &[]
+    };
+    let (count, text) = cell_text::export(
+        snapshot
+            .screen
+            .iter()
+            .enumerate()
+            .map(|(y, row)| (y as i32, row.as_slice()))
+            .chain(
+                history
+                    .iter()
+                    .enumerate()
+                    .map(|(y, row)| (y as i32 - history.len() as i32, row.as_slice())),
+            ),
+    );
+    // SAFETY: result was just allocated above and is exclusively owned until returned.
+    unsafe {
+        (*result).text_count = count;
+        (*result).text = text;
+    }
+    Ok(result)
 }
 
 pub(crate) fn to_pg_cell(cell: &api::Cell) -> PgCell {

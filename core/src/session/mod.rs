@@ -5,6 +5,7 @@
 //! embedded client would drive the same struct through the C ABI.
 
 mod backlog;
+mod cell_text;
 mod delta_rows;
 mod pane_meta;
 mod session_state;
@@ -233,6 +234,7 @@ impl PaneState {
             return None;
         }
         let (changed, snapshot) = self.term.screen_rows(&dirty);
+        let text = cell_text::collect(changed.iter().map(|(y, cells)| (i32::from(*y), cells.as_slice())));
         let rows: Vec<Row> = changed
             .into_iter()
             .map(|(y, cells)| Row {
@@ -245,6 +247,7 @@ impl PaneState {
         }
         let seq = self.next_seq();
         let message = Message::Delta {
+        text,
             pane_id: self.pane_id,
             seq,
             rows,
@@ -281,7 +284,13 @@ fn message_from_snapshot(
     with_history: bool,
     modes: u32,
 ) -> Message {
+    let history = if with_history { history_window(&snapshot.history, snapshot.cols) } else { &[] };
+    let text = cell_text::collect(
+        snapshot.screen.iter().enumerate().map(|(y, row)| (y as i32, row.as_slice()))
+        .chain(history.iter().enumerate().map(|(y, row)| (y as i32 - history.len() as i32, row.as_slice())))
+    );
     Message::Snapshot {
+        text,
         pane_id,
         seq,
         cols: snapshot.cols,
@@ -295,8 +304,7 @@ fn message_from_snapshot(
             .map(|row| row.iter().map(to_proto_cell).collect())
             .collect(),
         history: with_history.then(|| {
-            history_window(&snapshot.history, snapshot.cols)
-                .iter()
+            history.iter()
                 .map(|row| row.iter().map(to_proto_cell).collect())
                 .collect()
         }),
@@ -312,7 +320,13 @@ fn message_from_snapshot(
 /// blow past it and turn `attach` into a hard failure. Keep the newest rows that fit,
 /// dropping the oldest — an incomplete history beats no snapshot.
 fn history_window(history: &[Vec<crate::term::Cell>], cols: u16) -> &[Vec<crate::term::Cell>] {
-    let keep = history.len().min(history_rows_that_fit(cols));
+    let mut bytes = 0usize;
+    let keep = history.iter().rev().take_while(|row| {
+        bytes = bytes.saturating_add(usize::from(cols) * 20 + 16);
+        bytes = bytes.saturating_add(row.iter().filter_map(|cell| cell.extra_text.as_ref())
+            .map(|text| text.len() + 32).sum::<usize>());
+        bytes <= HISTORY_BUDGET
+    }).count();
     &history[history.len() - keep..]
 }
 
@@ -367,6 +381,7 @@ pub fn snapshot_from_message(message: &Message) -> Option<Snapshot> {
         scroll,
         screen,
         history,
+        text,
         ..
     } = message
     else {
@@ -377,7 +392,7 @@ pub fn snapshot_from_message(message: &Message) -> Option<Snapshot> {
     if screen.len() != usize::from(*rows) {
         return None;
     }
-    Some(Snapshot {
+    let mut picture = Snapshot {
         cols: *cols,
         rows: *rows,
         alt: *alt,
@@ -393,7 +408,9 @@ pub fn snapshot_from_message(message: &Message) -> Option<Snapshot> {
             Some(rows) => rows_from_proto(rows, *cols)?,
             None => Vec::new(),
         },
-    })
+    };
+    cell_text::snapshot(&mut picture, text)?;
+    Some(picture)
 }
 
 fn rows_from_proto(rows: &[Vec<ProtoCell>], cols: u16) -> Option<Vec<Vec<crate::term::Cell>>> {
@@ -429,6 +446,7 @@ fn cells_from_proto(row: &[ProtoCell]) -> Vec<crate::term::Cell> {
             attrs: u32::from(cell.attrs),
             link: cell.link.unwrap_or(0),
             width,
+            extra_text: None,
         });
     }
     cells
@@ -442,6 +460,7 @@ pub fn delta_from_message(message: &Message) -> Option<DeltaRows> {
         cursor,
         alt,
         modes,
+        text,
         ..
     } = message
     else {
@@ -456,7 +475,7 @@ pub fn delta_from_message(message: &Message) -> Option<DeltaRows> {
             return None;
         }
     }
-    Some(DeltaRows {
+    let mut picture = DeltaRows {
         seq: *seq,
         alt: *alt,
         modes: *modes,
@@ -470,7 +489,9 @@ pub fn delta_from_message(message: &Message) -> Option<DeltaRows> {
             visible: cursor.visible,
             shape: cursor.shape,
         }),
-    })
+    };
+    cell_text::delta(&mut picture.rows, text)?;
+    Some(picture)
 }
 
 #[cfg(test)]
@@ -590,6 +611,7 @@ mod tests {
     fn rebuild(pane: &mut PaneState) -> crate::term::Snapshot {
         let original = pane.snapshot();
         let message = Message::Snapshot {
+        text: Vec::new(),
             pane_id: 1,
             seq: 0,
             cols: original.cols,

@@ -20,7 +20,7 @@ pub const ATTR_DIM: u32 = 1 << 5;
 pub const ATTR_WRAP: u32 = 1 << 6;
 
 /// One grid cell.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Cell {
     pub codepoint: u32,
     /// `0x01000000 | idx` for a palette entry, else `0xRRGGBB`.
@@ -31,6 +31,8 @@ pub struct Cell {
     pub link: u32,
     /// 0 = wide-char continuation, 1 = normal, 2 = owns the next cell.
     pub width: u8,
+    /// Complete UTF-8 text when this cell has attached zero-width codepoints.
+    pub extra_text: Option<std::sync::Arc<str>>,
 }
 
 impl Cell {
@@ -41,7 +43,17 @@ impl Cell {
         attrs: 0,
         link: 0,
         width: 1,
+        extra_text: None,
     };
+
+    /// Text preserved by this cell, excluding a wide character's continuation.
+    pub fn text(&self) -> std::borrow::Cow<'_, str> {
+        if self.width == 0 { return std::borrow::Cow::Borrowed(""); }
+        match &self.extra_text {
+            Some(text) => std::borrow::Cow::Borrowed(text),
+            None => std::borrow::Cow::Owned(char::from_u32(self.codepoint).unwrap_or(' ').to_string()),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -477,7 +489,7 @@ mod tests {
     fn truecolor_survives_the_snapshot() {
         let mut t = term();
         t.feed(b"\x1b[38;2;1;2;3m\x1b[48;2;4;5;6mX");
-        let cell = t.snapshot().screen[0][0];
+        let cell = &t.snapshot().screen[0][0];
         assert_eq!(cell.fg, 0x0001_0203);
         assert_eq!(cell.bg, 0x0004_0506);
     }

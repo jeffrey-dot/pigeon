@@ -1021,6 +1021,7 @@ mod tests {
             link: None,
         };
         let snapshot = Message::Snapshot {
+            text: Vec::new(),
             pane_id: 1,
             seq: 4,
             cols: 1,
@@ -1063,6 +1064,7 @@ mod tests {
 
     fn wire_snapshot(cols: u16, rows: u16, screen: Vec<Vec<api::WireCell>>) -> Message {
         Message::Snapshot {
+            text: Vec::new(),
             pane_id: 1,
             seq: 1,
             cols,

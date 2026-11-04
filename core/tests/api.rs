@@ -157,6 +157,7 @@ fn message_helpers_refuse_the_wrong_message_type() {
 
 fn wire_snapshot(cols: u16, rows: u16, screen: Vec<Vec<WireCell>>) -> Message {
     Message::Snapshot {
+        text: Vec::new(),
         pane_id: 7,
         seq: 1,
         cols,
@@ -322,6 +323,7 @@ fn a_status_record_with_an_id_is_acked_by_seq_like_the_host_does() {
 #[test]
 fn a_delta_message_decodes_into_rows() {
     let message = Message::Delta {
+        text: Vec::new(),
         pane_id: 3,
         seq: 9,
         rows: vec![Row {

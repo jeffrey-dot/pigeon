@@ -36,6 +36,8 @@ pub struct PgDelta {
     pub cursor: PgCursor,
     /// 0 main screen, 1 alternate screen, 2 not reported (keep what you had).
     pub alt_screen: u8,
+    pub text_count: u32,
+    pub text: *const super::PgCellText,
 }
 
 /// Builds an owned delta from a `delta` message; NULL for any other message type.
@@ -46,6 +48,12 @@ pub extern "C" fn pg_msg_delta(msg: *const super::msg::PgMsg) -> *mut PgDelta {
         let message = msg.to_message()?;
         let delta = delta_of(&message)?;
         let pane_id = delta.pane_id;
+        let (text_count, text) = super::cell_text::export(
+            delta
+                .rows
+                .iter()
+                .map(|(y, cells)| (i32::from(*y), cells.as_slice())),
+        );
         let rows = delta
             .rows
             .into_iter()
@@ -83,6 +91,8 @@ pub extern "C" fn pg_msg_delta(msg: *const super::msg::PgMsg) -> *mut PgDelta {
                 shape: cursor.shape,
             },
             alt_screen: delta.alt.map_or(2, u8::from),
+            text_count,
+            text,
         })))
     })
 }
@@ -95,6 +105,10 @@ pub extern "C" fn pg_delta_free(delta: *mut PgDelta) {
         }
         // SAFETY: pointer came from pg_msg_delta and is freed exactly once.
         let delta = unsafe { Box::from_raw(delta) };
+        // SAFETY: sparse text is exclusively owned by this delta.
+        unsafe {
+            super::cell_text::free(delta.text_count, delta.text);
+        }
         let count = delta.row_count as usize;
         if count == 0 || delta.rows.is_null() {
             return Ok(());

@@ -89,7 +89,8 @@ PgSnapshot {            // 字段以 include/pigeon_core.h 为准，此处只写
 - 快照是**不可变**的，宿主可以跨线程持有；内核不回收已被快照引用的内存，直到 `pg_snapshot_free`。
 - **滚动缓冲**：嵌入接口 `PgConfig.scrollback_lines = 0` 取默认 10,000 行，上限 100,000；宿主当前固定 10,000 行，未暴露配置。macOS attach 使用 `history:false`，回看由宿主按 `scroll` 请求切出一屏。
 - 软换行由 `ATTR_WRAP` / `PG_ATTR_WRAP`（64）标在行末格，快照/增量/历史保留；macOS 复制自动折行时不插入换行。
-- **当前数据限制**：每 cell 只有一个码点，组合字符未完整保留；OSC 8 链接未下发，DECSTBM 的导出范围为整屏。详见 [plan.md §11](plan.md#11-当前能力与已知缺口)。
+- **文本扩展**：Rust `Cell.text()` 返回主码点及附加文本；C ABI 在 PgSnapshot/PgDelta 尾部追加 PgCellText 表，表和字符串由快照持有并随其释放，PgCell 数组步长不变。
+- **当前数据限制**：已保留引擎 cell 中的附加码点，但跨多个宽 cell 的完整字素宽度/整簇重排仍未实现；OSC 8 链接未下发，DECSTBM 的导出范围为整屏。详见 [plan.md §11](plan.md#11-当前能力与已知缺口)。
 
 ## 6. 语言选型
 

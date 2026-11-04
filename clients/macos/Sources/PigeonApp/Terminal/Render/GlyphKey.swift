@@ -11,6 +11,8 @@ struct GlyphKey: Hashable {
     /// A glyph ID in the primary face chosen by shaping (a ligature or contextual alternate),
     /// drawn instead of `codepoint`'s own glyph; 0 for "the codepoint's glyph".
     var glyph: UInt16 = 0
+    /// Complete text for a cell with combining marks; part of the atlas identity.
+    var text: String? = nil
 
     /// In a shaped run: this cell is covered by a ligature that starts to its left.
     static let noGlyph: UInt16 = 0xFFFF

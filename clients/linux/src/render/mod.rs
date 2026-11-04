@@ -10,6 +10,7 @@ mod font;
 mod gl;
 mod instances;
 mod palette;
+mod shaped_cell;
 
 use glow::HasContext;
 

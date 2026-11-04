@@ -13,6 +13,7 @@ fn cell(ch: char) -> WireCell {
 
 fn screen() -> Screen {
     Screen::from_message(&Message::Snapshot {
+        text: Vec::new(),
         pane_id: 7,
         seq: 4,
         cols: 3,
@@ -37,6 +38,7 @@ fn screen() -> Screen {
 
 fn delta(seq: u32) -> Message {
     Message::Delta {
+        text: Vec::new(),
         pane_id: 7,
         seq,
         rows: vec![Row {
@@ -99,4 +101,21 @@ fn missing_or_malformed_frames_leave_the_previous_screen_intact() {
         screen.apply_delta(&delta(5)),
         "rejected frames did not advance seq"
     );
+}
+
+#[test]
+fn a_later_plain_row_clears_the_previous_combining_text() {
+    let mut screen = screen();
+    let mut marked = delta(5);
+    if let Message::Delta { text, .. } = &mut marked {
+        text.push(pigeon_core::api::CellText {
+            row: 1,
+            col: 2,
+            text: "x\u{301}".into(),
+        });
+    }
+    assert!(screen.apply_delta(&marked));
+    assert_eq!(screen.cell(2, 1).expect("cell").text(), "x\u{301}");
+    assert!(screen.apply_delta(&delta(6)));
+    assert_eq!(screen.cell(2, 1).expect("cell").text(), "x");
 }

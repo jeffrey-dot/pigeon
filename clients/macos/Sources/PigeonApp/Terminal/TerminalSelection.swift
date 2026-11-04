@@ -72,8 +72,8 @@ struct TerminalSelection: Equatable {
                 guard cell.width != 0 else { continue }
                 if cell.codepoint == 0 {
                     line.append(" ")
-                } else if let scalar = Unicode.Scalar(cell.codepoint) {
-                    line.unicodeScalars.append(scalar)
+                } else {
+                    line.append(cell.text)
                 }
             }
             let wraps = cells[(row + 1) * cols - 1].attrs & CellAttrs.wrap != 0

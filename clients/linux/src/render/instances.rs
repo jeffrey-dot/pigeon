@@ -109,7 +109,8 @@ pub fn build(draw: &mut Draw<'_>, screen: &Screen, origin: [f32; 2], cursor_on: 
 
             // Box drawing and blocks are rectangles: a font's `─` rarely meets its
             // neighbour, and TUI borders then break into dashes.
-            if boxdraw::handles(cell.codepoint)
+            if cell.extra_text.is_none()
+                && boxdraw::handles(cell.codepoint)
                 && boxdraw::draw(
                     cell.codepoint,
                     [left, top],
@@ -122,7 +123,30 @@ pub fn build(draw: &mut Draw<'_>, screen: &Screen, origin: [f32; 2], cursor_on: 
                 continue;
             }
 
-            if cell.codepoint > 0x20 && cell.codepoint != 0x7f {
+            if let Some(value) = &cell.extra_text {
+                for shaped in super::shaped_cell::shape(font, value) {
+                    let key = Key {
+                        face: shaped.face,
+                        glyph: shaped.glyph,
+                        bold: attrs & pigeon_core::api::ATTR_BOLD != 0,
+                    };
+                    if let Some(slot) = atlas.slot(gl, font, key) {
+                        let instance = GlyphInstance {
+                            pos: [
+                                left + shaped.x + slot.left as f32,
+                                top + metrics.baseline - shaped.y - slot.top as f32,
+                            ],
+                            size: [slot.w as f32, slot.h as f32],
+                            uv: slot.uv(),
+                            color: text,
+                        };
+                        match slot.layer {
+                            Layer::Mask => batch.glyphs.push(instance),
+                            Layer::Color => batch.color_glyphs.push(instance),
+                        }
+                    }
+                }
+            } else if cell.codepoint > 0x20 && cell.codepoint != 0x7f {
                 if let Some(ch) = char::from_u32(cell.codepoint) {
                     if let Some((face, glyph)) = font.glyph(ch) {
                         let key = Key {

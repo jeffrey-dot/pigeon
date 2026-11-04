@@ -53,3 +53,12 @@ fetch 后发现本地分支与 `origin/main` 分叉（本地既有 Linux 4 个�
 `api::delta_of` 采用远端已公开的 `Delta` 返回类型，追加 modes，保留本地行验证；Linux 与新增测试同步适配。旧评估对应合并前本地版本，当前文档已纠正范围。
 
 合并后本机 Rust 全量：241 passed、2 ignored；后续 GitHub CI 结果追加于此。合并不是“覆盖远端”的强制推送。
+
+## 2026-11-04：GitHub CI 与组合字符切片
+
+- `main` @ `7dd459a` 已推送，[CI 41833307041](https://github.com/jeffrey-dot/pigeon/actions/runs/41833307041) 六项全部通过：docs、header、Swift、Rust macOS/Ubuntu、GTK。
+  macOS `swift build`、`swift test` 与纯逻辑测试均通过；真实窗口交互仍不等于已验。
+- 后续文本切片按 ADR-0012：保留引擎 cell 的附加码点，协议用可省略 text 表，C ABI 保持 PgCell 步长并扩展快照尾部。
+  两端渲染读取 cell 全文，macOS 复制保留分解码点；覆盖/新 delta 会清除旧附加内容。
+- 新增测试覆盖嵌入 API、快照/delta/历史往返、真实宿主重连、C ABI 所有权、非法坐标/重复项/控制字符/长度与 GTK 缓存替换。
+  这片尚不保证跨格 ZWJ emoji 的完整宽度/整簇形状；极长单格附加文本在导出边界限制为 4096 字节。
