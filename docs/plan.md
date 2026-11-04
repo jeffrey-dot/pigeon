@@ -307,4 +307,4 @@ M0–M1 可以直接复用现有代码：内核的对账语料（来自 tmux 阶
 **优化前核对证据**：8 条已提交 VT golden 通过。用 `vt-dump` 输入 `e\u0301` 得到 `e`，输入 `👩\u200d💻` 得到 `👩💻`，确认组合码点在快照转换时丢失；预组字符 `é` 保留。
 Linux 默认环境 `TERM=linux` 下，`cargo test --manifest-path core/Cargo.toml --offline` 的 `vim_alternate_screen_survives_a_reconnect` 超时。
 改用 `TERM=xterm-256color cargo test --manifest-path core/Cargo.toml --offline --quiet` 后全量通过：194 passed，2 ignored（含文档测试）。
-上述 TERM 问题已在本轮修复；后续实现与验证见 [优化执行记录](optimization-progress.md)。合并提交 `7dd459a` 的 macOS 完整构建/测试已由 CI 通过，真实 GUI 仍未验。
+上述 TERM 问题已在本轮修复；后续实现与验证见 [优化执行记录](optimization-progress.md)。当前实现提交 `8ccaeb3` 的 Rust 双平台、GTK 和 macOS 15 Intel Swift 完整构建/测试已由 CI 通过；Apple Silicon 最终版本与真实 GUI 仍未验。

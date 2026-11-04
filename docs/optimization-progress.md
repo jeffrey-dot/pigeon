@@ -26,8 +26,10 @@
 | `7dd459a` | [41833307041](https://github.com/jeffrey-dot/pigeon/actions/runs/41833307041) | docs、header、Swift、Rust macOS/Ubuntu、GTK 全部通过 |
 | `c7c1ec0` | [41843748579](https://github.com/jeffrey-dot/pigeon/actions/runs/41843748579) | 全部通过，含组合字符与文本资源收尾 |
 | `7a4a71e` | [41845716261](https://github.com/jeffrey-dot/pigeon/actions/runs/41845716261) | 全部通过，含 Linux 输入整合 |
+| `8ccaeb3` | [41888692090](https://github.com/jeffrey-dot/pigeon/actions/runs/41888692090) | 全部通过：Rust Ubuntu/macOS 15 Intel、GTK、Swift、header、docs，含状态完整集合客户端与复审修复 |
 
-文本预算提交 `ba4be01` 的 [CI 41867405175](https://github.com/jeffrey-dot/pigeon/actions/runs/41867405175) 已通过 Swift 完整构建/测试、Ubuntu Rust、GTK、header 和 docs；macOS Rust 被取消后已重排，仍待结果，整体未全绿。该提交包含状态确认复审修复，尚不包含本轮完整状态集合接口。
+最终代码验收对应 `8ccaeb3`。macOS 15 Intel 的 `swift build` 与 `swift test` 通过：执行 352 项、跳过 7 项、0 failures；独立 Foundation 测试 98 项通过。
+Apple Silicon 的最终提交尚未完成验收；不能用 Intel 结果代替。CI 构建和测试也不等于真实状态面板/SSH/GPU 呈现验收。
 
 ## 主线程本地验证
 
@@ -38,15 +40,15 @@
 - 状态复审：新增 pending 快照与合法低 seq 回退测试先失败，再修复；Foundation-only 86 tests 通过。AppDelegate 语法检查不等于 AppKit 类型检查或 GPU 呈现验收。
 - Linux 回看整合：GTK 40 passed / 1 ignored，fmt/clippy/build 通过；主线程复跑输入与回看隔离桌面脚本，10,000 行、80ms 延迟、快速翻页、回底部 delta、输入/IME/粘贴、resize/zoom/备用屏/分屏全部通过。47s 阅读/ping 和能力退化另有子任务验收记录。
 - 文本预算/字体回收整合：主线程复验核心 262 passed / 2 ignored、无默认 feature 175 passed / 1 ignored、GTK 42 passed / 1 ignored；fmt、三组 clippy、VT 8/8 通过。合并后的独立回看桌面脚本全通过；256 次双 face 加载/整形/释放的 RSS 样本增长为 0 bytes，仅代表该测试环境。
-- 宿主完整状态接口：整合核心 278 passed / 2 ignored；借用式 wire 校验调整后状态专题 7/7、C ABI 专题 3/3 和默认/无默认 feature clippy 通过。无默认 feature 整合回归 187 passed / 1 ignored，头文件 diff 与 GTK clippy 通过。两轴复审已结束：规范轴的缺口表同步与借用校验建议已落实，行为轴无新增可确认缺陷；macOS 完整集合已接入；主线程复验 Foundation-only 98 tests 和 Swift ↔ C ABI 2 tests，含占位选择清空确认目标的回归。完整 AppKit 构建/GUI 尚需验证。
+- 宿主完整状态接口：整合核心 278 passed / 2 ignored；借用式 wire 校验调整后状态专题 7/7、C ABI 专题 3/3 和默认/无默认 feature clippy 通过。无默认 feature 整合回归 187 passed / 1 ignored，头文件 diff 与 GTK clippy 通过。两轴复审已结束：规范轴的缺口表同步与借用校验建议已落实，行为轴无新增可确认缺陷；macOS 完整集合已接入；主线程复验 Foundation-only 98 tests 和 Swift ↔ C ABI 2 tests，含占位选择清空确认目标的回归。完整 AppKit 构建与自动测试已由上述 Intel CI 通过，真实 GUI 尚需验证。
 - macOS 完整集合客户端复审：规范轴仅发现 UI 文档未区分 legacy/完整集合，已修正；行为轴无可确认新增缺陷。Foundation-only 98 tests、Swift ↔ C ABI 2 tests 通过，真实面板交互未验。
 - CI 默认使用明确的 `macos-15-intel`，手动 workflow_dispatch 可选择 `macos-latest` 运行 Apple Silicon 验证。切换原因是 latest 作业连续没有分配 runner 并被取消，不属于代码测试失败；两个架构的结果分别记录。
-- Intel macOS CI `0f1be1a` 的 Swift 构建通过，测试复现侧栏按钮被空 toolbar 遮挡（既有 hit-test 用例）。窗口使用系统内容区边界安置按钮，修复待新提交 CI 验证；状态集合相关测试未报失败。
+- 窗口按系统可点击内容边界安置侧栏按钮，原生标题栏命中测试通过；历史转换计数使用稳定线程局部接口，macOS Rust clippy/test 通过。
 - 验证脚本在 `tools/checks/`；本机测试不修改用户 shell/tmux 配置或操作用户已有终端。
 
 ## 尚未完成的验收与能力
 
-1. 完整状态集合的最终跨平台 CI；真实 macOS 窗口激活、遮挡、回看、zoom、跨主机与 GPU 呈现/SSH 恢复验收。
+1. 最终提交的 Apple Silicon 验证；真实 macOS 窗口激活、遮挡、回看、zoom、跨主机与 GPU 呈现/SSH 恢复验收。
 2. Linux 侧栏接入完整集合与修订号，身份集合有界存储、多进程同时写 JSON 的一致性；宿主与双外形接口已经实现。
 3. 密集整屏文本的 8 MiB 上限处理、整帧编码/引擎内部附加码点预算、跨 cell ZWJ 字素宽度及宽字符折行占位。
 4. Linux 拖选/侧栏/SSH 管理与渲染脏行；真实 Wayland、IBus、日文 IME、非美式键盘和混合 DPI 验收。

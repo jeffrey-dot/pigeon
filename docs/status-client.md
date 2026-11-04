@@ -66,7 +66,8 @@ cargo test --manifest-path core/Cargo.toml --offline
 
 ## 未验证与风险
 
-完整 `swift build && swift test`、AppKit 面板布局/点击/焦点、真实 Metal 呈现和 SSH 断线需 macOS CI/人工验收。
+`8ccaeb3` 的 [macOS 15 Intel CI](https://github.com/jeffrey-dot/pigeon/actions/runs/41888692090) 已通过完整 `swift build` 与 `swift test`（352 项、7 skipped、0 failures）。
+Apple Silicon 最终版本、AppKit 面板布局/点击/焦点、真实 Metal 呈现和 SSH 断线仍需验收。
 非激活面板设计用于保留主窗口焦点；真实 macOS 上仍须确认下拉与按钮交互、长文本滚动及可见性不会误判。
 `receivedScreen` 证明当前连接数据已应用，仍不是 GPU 呈现完成回执。
 
@@ -87,4 +88,4 @@ seen 身份仍随长寿命 pane 增长；磁盘保存沿用主线程 best-effort
    当前连接只收到状态但尚未收到屏幕时不能确认；补取快照后恢复。宿主重启复用 pane/seq 不串 seen。
 6. 重启客户端验证未读去重及已 seen 重播 ack；连接不支持 status_snapshot 的旧宿主验证单条状态、自动确认和菜单仍正常。
 
-主线程整合检查：Foundation-only 98 tests、Swift ↔ C ABI 2 tests 通过；选择占位项会清除原确认目标，避免下拉框和按钮目标不一致。AppKit 完整构建与窗口交互仍按对应提交 CI/手动验收记录。
+主线程整合检查：Foundation-only 98 tests、Swift ↔ C ABI 2 tests 通过；选择占位项会清除原确认目标，避免下拉框和按钮目标不一致。AppKit 完整构建已由上述 CI 验证，真实窗口交互仍需手动验收。

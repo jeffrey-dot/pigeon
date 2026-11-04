@@ -72,8 +72,8 @@ git diff --check
   未设置会丢失去重证据的任意淘汰上限；压缩和有界存储需后续设计。写盘仍在主线程且按状态变化原子保存。
 - 写盘失败仍按现有 best-effort 策略保留内存状态，不阻塞 UI；无法保证磁盘满、损坏或多客户端进程同时写同一文件时的跨进程一致性。
   不同客户端各自查看/确认的全局同步也没有新增协议保证。
-- 本机无 AppKit。完整 `swift build && swift test`、窗口激活/遮挡、zoom、回看、同批状态与 GPU 真正呈现顺序、
-  SSH 重连和宿主重启的真实交互需父线程 macOS CI/GUI 验收。run loop 延后不是 GPU 呈现完成回执。
+- 本机无 AppKit。完整 `swift build && swift test` 已由 `8ccaeb3` 的 macOS 15 Intel CI 通过；窗口激活/遮挡、zoom、回看、同批状态与 GPU 真正呈现顺序、
+  SSH 重连和宿主重启仍需真实 GUI 验收。run loop 延后不是 GPU 呈现完成回执。
 - 客户端跨重启身份持久化与 macOS 完整集合已实现；AppKit 真正呈现与 SSH 交互验收仍待补。
 
 ## 主线程整合验收
@@ -81,4 +81,4 @@ git diff --check
 主线程审查后加入连接级 `receivedScreen`：重连握手完成与新状态到达仍不能让旧屏幕授权自动确认，必须应用当前连接的快照/有效增量。
 `attach.since` 无缺帧时可以不回屏幕，状态路径会补取无 since 的快照。已读身份的重发 ack 不受此新记录可见性要求影响。
 重连同时清空待布局到达后才展示的 pending 快照，避免旧缓存被标成当前连接屏幕。
-增加重连确认凭据、pending 快照和合法低 seq 回退测试，合并后 Foundation-only 86 tests 通过；完整 macOS 构建/测试以最终 CI 为准。
+增加重连确认凭据、pending 快照和合法低 seq 回退测试，合并后 Foundation-only 86 tests 通过；完整构建/测试已由 macOS 15 Intel 的 [最终 CI](https://github.com/jeffrey-dot/pigeon/actions/runs/41888692090) 通过。
