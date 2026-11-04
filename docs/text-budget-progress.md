@@ -1,13 +1,12 @@
 # 文本导出预算与字体资源回收
 
 2026-11-05，基线 `cc51ce22aec38519ef038b6ac7f2d8791c36ccc2`，独立 worktree 实施。
-本页记录 [文本资源说明](text-followup.md) 的后续切片，沿用
-[ADR-0012](adr/0012-cell-text.md) 的文本与格宽语义。父线程负责 review、整合与共享现状页同步；
-本切片只维护此页，不修改共享 `plan.md` / `optimization-progress.md`。
+本页描述当前文本预算与字体所有权实现，沿用 [ADR-0012](adr/0012-cell-text.md) 的文本与格宽语义。
+集中缺口见 [plan.md §11](plan.md#11-当前能力与已知缺口)，验证记录注明所用环境与基线。
 
 ## 历史导出：先计费，再转换
 
-- `Term::snapshot_with_history_budget` 取代内部按行数取最近历史的方法。
+- `Term::snapshot_with_history_budget` 按字节计费导出历史。
   Alacritty 从最新历史行向前借用读取，每行计费通过后才纳入转换范围；遇到首个放不下的整行立即停止。
   预检不分配 cell/string，也不先构造一条可能超预算的行。实际转换只覆盖最终选中的连续后缀。
 - `ExportedText` 统一计算导出主码点、附加码点前缀与 UTF-8 长度；计费和分配使用同一前缀，
@@ -46,7 +45,7 @@ cols × 20 + 16 + Σ(每个 extra_text 的 UTF-8 字节数 + 32)
 
 ## Linux 字体：随所有者回收
 
-`Face` 以 `Box<[u8]>` 持有字体文件字节，按需生成 `FontRef<'_>` 借用；删除了 `Box::leak`，
+`Face` 以 `Box<[u8]>` 持有字体文件字节，按需生成 `FontRef<'_>` 借用，
 不新增 unsafe、自引用结构或依赖。度量在移动主 face 前计算，渲染、栅格化、整形的借用不能超出字体生命周期。
 同一 face 保留初次解析的 swash `CacheKey`；移动所有者不改变 key，重新加载得到新 key。
 
@@ -91,14 +90,10 @@ Ubuntu GTK CI 已安装 `fonts-dejavu-core`；Arch 对应 `ttf-dejavu`。缺少 
 release 样本是本机 GNU/Linux 动态链接 ELF，**不是 musl 静态发布产物的验证**。
 未运行 macOS `cargo test` / `swift build && swift test`、Ubuntu CI 或 GTK 实际 DPI 切换 GUI 验收。
 
-## 剩余限制与整合事项
+## 剩余限制
 
 - **密集整屏仍可超 8 MiB**：64×40、每格 4095 字节的既有测试仍应收到 `Overflow`。
   没有新增分片、协议协商或静默删除可见文本，不能把历史分配修复写成整屏传输问题已解决。
 - **引擎内部零宽码点增长仍未受完整预算约束**：4096 字节只限制导出/接收边界。
   Alacritty 内部 `push_zerowidth` 仍可增长；未改引擎、未重写解析器。滚动缓冲行数上限不能替代组合码点内存预算。
 - 跨 cell ZWJ emoji 整簇宽度、hostile-font / 整形总耗时预算与长期 soak 仍未验收。
-- 已核对 README、AGENTS 当前状态、`plan.md` §11、`text-followup.md` 与优化计划。
-  父线程整合时应把共享文档中的“历史转换临时内存未受预算限制”替换为本页的精确范围，
-  将字体进程生命周期泄漏的说明改为所有者释放，保留整屏、引擎内部及平台验证限制；
-  历史验收记录不改写为本次已验收。
