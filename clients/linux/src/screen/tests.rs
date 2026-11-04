@@ -119,3 +119,26 @@ fn a_later_plain_row_clears_the_previous_combining_text() {
     assert!(screen.apply_delta(&delta(6)));
     assert_eq!(screen.cell(2, 1).expect("cell").text(), "x");
 }
+
+#[test]
+fn screen_copy_preserves_cell_text_and_soft_wrap_but_excludes_history() {
+    let mut screen = screen();
+    screen.snapshot.screen[0][0].extra_text = Some("e\u{301}".into());
+    screen.snapshot.screen[0][1].codepoint = '中' as u32;
+    screen.snapshot.screen[0][1].width = 2;
+    screen.snapshot.screen[0][2].width = 0;
+    screen.snapshot.screen[0][2].attrs = pigeon_core::api::ATTR_WRAP;
+    screen.snapshot.screen[1][1].codepoint = ' ' as u32;
+    screen.snapshot.screen[1][2].codepoint = ' ' as u32;
+    screen.snapshot.history = vec![vec![pigeon_core::api::Cell::BLANK; 3]];
+    assert_eq!(screen.visible_text(), "e\u{301}中b");
+}
+
+#[test]
+fn screen_copy_keeps_hard_newlines_and_empty_rows() {
+    let mut screen = screen();
+    screen.snapshot.screen[1] = vec![pigeon_core::api::Cell::BLANK; 3];
+    assert_eq!(screen.visible_text(), "aaa\n");
+    screen.snapshot.screen.clear();
+    assert_eq!(screen.visible_text(), "");
+}

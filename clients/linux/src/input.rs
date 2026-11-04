@@ -5,6 +5,88 @@
 //! Source of the sequences: xterm's ctlseqs, as every readline/vim binding expects them.
 
 use gtk4::gdk::{Key, ModifierType};
+use pigeon_core::api::{Message, PaneId};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Action {
+    SplitVertical,
+    SplitHorizontal,
+    Close,
+    Zoom,
+    CopyScreen,
+    Paste,
+}
+
+pub fn action(key: Key, modifiers: ModifierType) -> Option<Action> {
+    if !modifiers.contains(ModifierType::CONTROL_MASK | ModifierType::SHIFT_MASK)
+        || modifiers
+            .intersects(ModifierType::ALT_MASK | ModifierType::SUPER_MASK | ModifierType::META_MASK)
+    {
+        return None;
+    }
+    match key.to_lower() {
+        Key::d => Some(Action::SplitVertical),
+        Key::e => Some(Action::SplitHorizontal),
+        Key::w => Some(Action::Close),
+        Key::z => Some(Action::Zoom),
+        Key::c => Some(Action::CopyScreen),
+        Key::v => Some(Action::Paste),
+        _ => None,
+    }
+}
+
+/// Only the unconsumed event may fall back to legacy encoding.
+pub fn fallback(
+    key: Key,
+    modifiers: ModifierType,
+    app_cursor: bool,
+    im_handled: bool,
+    im_committed: bool,
+) -> Option<Vec<u8>> {
+    if im_handled || im_committed {
+        return None;
+    }
+    encode(key, modifiers, app_cursor)
+}
+
+pub fn commit(pane_id: PaneId, text: &str) -> Option<Message> {
+    if text.is_empty() {
+        return None;
+    }
+    Some(Message::Keys {
+        pane_id,
+        bytes: text.as_bytes().to_vec(),
+    })
+}
+
+pub fn paste(pane_id: PaneId, text: &str) -> Option<Message> {
+    if text.is_empty() {
+        return None;
+    }
+    Some(Message::Paste {
+        pane_id,
+        text: text.to_owned(),
+    })
+}
+
+/// GTK IM coordinates are widget-local logical pixels; grid geometry uses device pixels.
+pub fn cursor_rect(
+    origin: [f32; 2],
+    size: [f32; 2],
+    cell: [f32; 2],
+    cursor: [u16; 2],
+    scale: f32,
+) -> [i32; 4] {
+    let scale = scale.max(1.0);
+    let x = (f32::from(cursor[0]) * cell[0]).min((size[0] - cell[0]).max(0.0));
+    let y = (f32::from(cursor[1]) * cell[1]).min((size[1] - cell[1]).max(0.0));
+    [
+        ((origin[0] + x) / scale).floor() as i32,
+        ((origin[1] + y) / scale).floor() as i32,
+        (cell[0] / scale).ceil().max(1.0) as i32,
+        (cell[1] / scale).ceil().max(1.0) as i32,
+    ]
+}
 
 /// The `CSI 1;<modifier>` parameter: 1 + shift + 2·alt + 4·ctrl, and 1 means "no modifier".
 fn modifier_parameter(modifiers: ModifierType) -> u8 {
@@ -118,36 +200,4 @@ fn control_byte(character: char) -> Option<u8> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn unmodified_arrows_follow_decckm() {
-        let none = ModifierType::empty();
-        assert_eq!(encode(Key::Up, none, false), Some(b"\x1b[A".to_vec()));
-        assert_eq!(encode(Key::Up, none, true), Some(b"\x1bOA".to_vec()));
-    }
-
-    #[test]
-    fn ctrl_arrow_carries_the_modifier() {
-        let ctrl = ModifierType::CONTROL_MASK;
-        assert_eq!(encode(Key::Right, ctrl, false), Some(b"\x1b[1;5C".to_vec()));
-    }
-
-    #[test]
-    fn ctrl_c_is_etx() {
-        let ctrl = ModifierType::CONTROL_MASK;
-        assert_eq!(encode(Key::c, ctrl, false), Some(vec![0x03]));
-    }
-
-    #[test]
-    fn alt_prefixes_escape() {
-        let alt = ModifierType::ALT_MASK;
-        assert_eq!(encode(Key::b, alt, false), Some(vec![0x1b, b'b']));
-    }
-
-    #[test]
-    fn bare_modifiers_produce_nothing() {
-        assert_eq!(encode(Key::Shift_L, ModifierType::SHIFT_MASK, false), None);
-    }
-}
+mod tests;

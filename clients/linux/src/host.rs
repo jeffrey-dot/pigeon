@@ -40,7 +40,7 @@ impl HostLink {
     pub fn send(&self, message: Message) {
         // The writer thread owns the socket; a dead thread means the reader has reported the
         // disconnect already, and the pump will stop on its own.
-        let _ = self.tx.send_blocking(message);
+        let _ = self.tx.try_send(message);
     }
 
     /// Blocking receive, used only during the handshake (before the GTK loop runs).

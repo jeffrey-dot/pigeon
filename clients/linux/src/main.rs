@@ -2,11 +2,13 @@
 //! through `pigeon_core::api`.
 //!
 //! Scope so far (`docs/renderer.md` §5): connect to the local host, draw every pane of the
-//! session at its rect, send keys, follow layout changes and window resizes.
+//! session at its rect, handle IME/keys/clipboard, follow layout changes and window resizes.
 //! The sidebar and scrollback come next.
 
 mod host;
 mod input;
+mod input_context;
+mod placement;
 mod render;
 mod screen;
 mod view;
@@ -52,7 +54,7 @@ fn start(application: &gtk::Application) {
     let window = gtk::ApplicationWindow::builder()
         .application(application)
         .title("pigeon")
-        .child(&workspace.borrow().area)
+        .child(&workspace.borrow().root)
         .build();
     // The application holds the window: without this the local goes out of scope when
     // `start` returns and GTK destroys the just-presented window.

@@ -86,4 +86,26 @@ impl Screen {
     pub fn cell(&self, x: usize, y: usize) -> Option<&pigeon_core::api::Cell> {
         self.snapshot.screen.get(y).and_then(|row| row.get(x))
     }
+
+    /// Only the visible screen; scrollback and other panes are excluded.
+    pub fn visible_text(&self) -> String {
+        let mut text = String::new();
+        for (index, row) in self.snapshot.screen.iter().enumerate() {
+            let start = text.len();
+            for cell in row {
+                text.push_str(&cell.text());
+            }
+            // The core supplies both continuation cells and logical line boundaries.
+            let wrapped = row
+                .last()
+                .is_some_and(|cell| cell.attrs & pigeon_core::api::ATTR_WRAP != 0);
+            if !wrapped {
+                text.truncate(start + text[start..].trim_end_matches(' ').len());
+                if index + 1 < self.snapshot.screen.len() {
+                    text.push('\n');
+                }
+            }
+        }
+        text
+    }
 }
