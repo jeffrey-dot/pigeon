@@ -18,10 +18,9 @@ pub struct GridMetrics {
     pub line_thickness: f32,
 }
 
-/// One loaded face. The bytes are leaked on purpose: `FontRef` borrows them and lives as
-/// long as the renderer does.
+/// Owning bytes and a stable identity; temporary swash views borrow this face.
 struct Face {
-    data: &'static [u8],
+    data: Box<[u8]>,
     offset: u32,
     key: CacheKey,
 }
@@ -31,15 +30,15 @@ impl Face {
         let face = FontRef::from_index(&data, index as usize)?;
         let (offset, key) = (face.offset, face.key);
         Some(Self {
-            data: Box::leak(data.into_boxed_slice()),
+            data: data.into_boxed_slice(),
             offset,
             key,
         })
     }
 
-    fn font_ref(&self) -> FontRef<'static> {
+    fn font_ref(&self) -> FontRef<'_> {
         FontRef {
-            data: self.data,
+            data: &self.data,
             offset: self.offset,
             key: self.key,
         }
@@ -81,7 +80,7 @@ impl Font {
         let (data, index) = monospace()?;
         let primary =
             Face::load(data, index).ok_or_else(|| "font face does not parse".to_owned())?;
-        let font_ref = primary.font_ref();
+        let metrics = measure_of(primary.font_ref(), size);
         let mut faces = vec![primary];
         for name in FALLBACKS {
             if let Some((bytes, index)) = by_name(name) {
@@ -93,12 +92,12 @@ impl Font {
         Ok(Self {
             faces,
             size,
-            metrics: measure_of(font_ref, size),
+            metrics,
         })
     }
 
     /// The validated face with its stable swash cache key; `None` for an unknown index.
-    pub fn face(&self, index: u8) -> Option<FontRef<'static>> {
+    pub fn face(&self, index: u8) -> Option<FontRef<'_>> {
         Some(self.faces.get(usize::from(index))?.font_ref())
     }
 
@@ -209,3 +208,7 @@ fn measure_of(font_ref: FontRef<'_>, size: f32) -> GridMetrics {
         line_thickness: metrics.stroke_size.round().max(1.0),
     }
 }
+
+#[cfg(test)]
+#[path = "font_tests.rs"]
+mod tests;

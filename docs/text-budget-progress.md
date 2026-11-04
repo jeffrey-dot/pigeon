@@ -44,6 +44,30 @@ cols × 20 + 16 + Σ(每个 extra_text 的 UTF-8 字节数 + 32)
 最新行过大、HT+组合符、CJK/variation selector、软换行、备用屏和原滚动缓冲不变。
 既有 [text_followup 回归](../core/tests/text_followup.rs) 继续覆盖密集整屏帧超限、文本边界和 backlog 计费。
 
+## Linux 字体：随所有者回收
+
+`Face` 以 `Box<[u8]>` 持有字体文件字节，按需生成 `FontRef<'_>` 借用；删除了 `Box::leak`，
+不新增 unsafe、自引用结构或依赖。度量在移动主 face 前计算，渲染、栅格化、整形的借用不能超出字体生命周期。
+同一 face 保留初次解析的 swash `CacheKey`；移动所有者不改变 key，重新加载得到新 key。
+
+现有 `ShapedCell` 的字体 key/字号失效逻辑保持原样；字体变化时清空条目并重建 `ShapeContext`。
+结果缓存仍最多 1024 项 / 1 MiB 计费（UTF-8 key、glyph 数组、每项 64 字节估算开销），
+不是整个字体库、swash 缓冲或 RSS 上限。单个超限整形结果仍仅临时返回。
+本片解决重新加载后已释放字体的持续留存，不添加系统字体文件大小、字体发现或整形耗时限制。
+
+[字体回归](../clients/linux/src/render/font_tests.rs) 在独立子进程中使用真实 DejaVu Sans Mono，
+先预热 16 次，再执行 256 次加载/整形/释放，交替 13/26 px，每次包含主 face 与 fallback face。
+跨轮保留同一 `ShapedCell`，覆盖字体 key 变化导致的失效和旧 context 释放。
+使用 `/proc/self/status` 测量 RSS，允许最多 32 份字体字节的分配器保留/噪声，不依赖计数器模拟释放。
+
+- 初始失败用例仅加载/释放一个 face：每份 343,140 bytes，256 次 RSS 增长 **88,080,384 bytes**。
+- 最终两个 face 加整形的完整用例：256 次 RSS 增长 **0 bytes**。
+- 另验证同一 face 移动后 key 稳定、释放再加载 key 不同；已有字号/字体变化失效与有界缓存测试继续通过。
+
+测试明确要求发行版提供的 DejaVu 字体，不使用用户配置的字体名，也不提交字体二进制或新增许可证负担。
+Ubuntu GTK CI 已安装 `fonts-dejavu-core`；Arch 对应 `ttf-dejavu`。缺少 fixture 时测试明确失败，不静默跳过。
+字体发现只在测量前运行一次；测量针对真实 face 数据所有权和整形生命周期，不含字体发现扫描成本。
+
 ## 验证
 
 环境：Arch Linux x86_64、Linux 7.2.14、Intel i5-12400F、Rust 1.99.1、GTK 4.24.1、swash 0.2.10。
@@ -59,6 +83,10 @@ cols × 20 + 16 + Σ(每个 extra_text 的 UTF-8 字节数 + 32)
 | `cargo fmt --all -- --check` | 通过；宏声明下的新核心模块另用 `rustfmt --edition 2021` 格式化 |
 | `tools/vt-parity/run.sh` | 8 条已提交 golden 全通过 |
 | `cargo build --release --bin pigeon-server` | 通过；1,789,520 bytes，小于 8,388,608 bytes 上限 |
+| `PIGEON_FONT='DejaVu Sans Mono' cargo test -p pigeon-linux --locked -- --nocapture` | 33 passed，1 ignored；本片新增 2 项，字体子进程结果不重复计数 |
+| `cargo clippy -p pigeon-linux --all-targets --locked -- -D warnings` | 通过 |
+| `cargo build -p pigeon-linux --locked` | 通过 |
+| 相对文档链接检查、`git diff --check` | 通过 |
 
 release 样本是本机 GNU/Linux 动态链接 ELF，**不是 musl 静态发布产物的验证**。
 未运行 macOS `cargo test` / `swift build && swift test`、Ubuntu CI 或 GTK 实际 DPI 切换 GUI 验收。
@@ -72,4 +100,5 @@ release 样本是本机 GNU/Linux 动态链接 ELF，**不是 musl 静态发布�
 - 跨 cell ZWJ emoji 整簇宽度、hostile-font / 整形总耗时预算与长期 soak 仍未验收。
 - 已核对 README、AGENTS 当前状态、`plan.md` §11、`text-followup.md` 与优化计划。
   父线程整合时应把共享文档中的“历史转换临时内存未受预算限制”替换为本页的精确范围，
-  保留整屏、引擎内部及平台验证限制；历史验收记录不改写为本次已验收。
+  将字体进程生命周期泄漏的说明改为所有者释放，保留整屏、引擎内部及平台验证限制；
+  历史验收记录不改写为本次已验收。
