@@ -26,6 +26,8 @@ struct StatusInspection {
         selection = records.first { $0.target == target }?.target
     }
 
+    mutating func clearSelection() { selection = nil }
+
     func matches(host: String, session: Int?, instance: String?, generation: UUID) -> Bool {
         self.session.host == host && self.session.session == session
             && self.instance == instance && self.generation == generation

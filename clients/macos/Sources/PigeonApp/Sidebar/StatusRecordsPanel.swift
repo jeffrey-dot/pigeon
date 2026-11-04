@@ -93,7 +93,11 @@ final class StatusRecordsPanel: NSPanel {
 
     @objc private func selectRecord() {
         let index = picker.indexOfSelectedItem - 1
-        guard inspection.records.indices.contains(index) else { return }
+        guard inspection.records.indices.contains(index) else {
+            inspection.clearSelection()
+            update(records: inspection.records, visiblePanes: [])
+            return
+        }
         let target = inspection.records[index].target
         inspection.select(target)
         // Paint the selected text before enabling any confirmation through the app.

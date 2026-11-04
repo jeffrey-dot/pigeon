@@ -170,6 +170,19 @@ final class StatusSnapshotTests: XCTestCase {
         XCTAssertFalse(inspection.matches(host: "local", session: 1, instance: "a", generation: generation))
     }
 
+    func testChoosingThePlaceholderClearsThePreviousConfirmationTarget() throws {
+        var rows = rows()
+        apply([record("done", 1, .done)], to: &rows)
+        var inspection = StatusInspection(session: .init(host: "devbox", session: 1),
+                                          instance: "a", generation: UUID())
+        let items = SessionReducer.pendingRecords(in: try XCTUnwrap(rows[1]))
+        inspection.update(items)
+        inspection.select(items[0].target)
+        XCTAssertNotNil(inspection.selected)
+        inspection.clearSelection()
+        XCTAssertNil(inspection.selected)
+    }
+
     func testEmptyPaneDoesNotHideAnotherPanesExplicitIdleRecord() {
         var rows = rows()
         apply([], to: &rows)
