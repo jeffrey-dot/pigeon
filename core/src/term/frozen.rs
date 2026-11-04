@@ -5,7 +5,7 @@
 //! snapshot back. Nothing here re-derives grid state from bytes, which is exactly
 //! the point: the snapshot must be complete.
 
-use super::{Snapshot, Term};
+use super::{history_budget::HistoryBudget, Cell, Snapshot, Term};
 
 pub struct FrozenTerm {
     snapshot: Snapshot,
@@ -14,6 +14,18 @@ pub struct FrozenTerm {
 impl FrozenTerm {
     pub fn new(snapshot: Snapshot) -> Self {
         Self { snapshot }
+    }
+
+    fn picture(&self, history: &[Vec<Cell>]) -> Snapshot {
+        Snapshot {
+            cols: self.snapshot.cols,
+            rows: self.snapshot.rows,
+            alt: self.snapshot.alt,
+            cursor: self.snapshot.cursor,
+            scroll: self.snapshot.scroll,
+            screen: self.snapshot.screen.clone(),
+            history: history.to_vec(),
+        }
     }
 }
 
@@ -34,6 +46,14 @@ impl Term for FrozenTerm {
 
     fn snapshot(&self) -> Snapshot {
         self.snapshot.clone()
+    }
+
+    fn screen_snapshot(&self) -> Snapshot {
+        self.picture(&[])
+    }
+
+    fn snapshot_with_history_budget(&self, bytes: usize) -> Snapshot {
+        self.picture(HistoryBudget::new(bytes).window(&self.snapshot.history, self.snapshot.cols))
     }
 
     fn take_damage(&mut self) -> Vec<u16> {

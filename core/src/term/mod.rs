@@ -6,6 +6,7 @@
 
 pub mod alacritty;
 pub mod frozen;
+pub(crate) mod history_budget;
 pub mod sync_timeout;
 
 /// Attribute bits, mirrored by `PG_ATTR_*` in the C ABI and by the protocol's
@@ -235,14 +236,11 @@ pub trait Term {
         snapshot.history.clear();
         snapshot
     }
-    /// The screen plus only the newest `max_history` scrollback rows (oldest first): what
-    /// a history `attach` can fit in one frame, without converting the rows it would drop.
-    fn snapshot_with_recent_history(&self, max_history: usize) -> Snapshot {
-        let mut snapshot = self.snapshot();
-        let drop = snapshot.history.len().saturating_sub(max_history);
-        snapshot.history.drain(..drop);
-        snapshot
-    }
+    /// The screen plus the newest contiguous history suffix fitting an estimated wire
+    /// byte budget (20 per cell, 16 per row, text UTF-8 bytes + 32 per text entry).
+    /// Implementations must charge before converting/cloning history, preserve whole
+    /// rows and leave the screen untouched. This does not cap engine or screen memory.
+    fn snapshot_with_history_budget(&self, bytes: usize) -> Snapshot;
     /// The given screen rows (out-of-range ones skipped) and a picture without `screen` or
     /// `history` for the cursor/alt/scroll fields. A delta converts one row, not the grid.
     fn screen_rows(&self, rows: &[u16]) -> (Vec<(u16, Vec<Cell>)>, Snapshot) {

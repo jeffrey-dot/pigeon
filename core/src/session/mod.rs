@@ -12,6 +12,9 @@ mod session_state;
 mod size_policy;
 mod size_vote;
 
+#[cfg(test)]
+mod history_tests;
+
 pub use backlog::Backlog;
 pub use delta_rows::DeltaRows;
 // Host-side session bookkeeping: only `pigeon-server` uses these, so without `internals`
@@ -217,10 +220,7 @@ impl PaneState {
     /// `scrollback` capability.
     pub fn snapshot_message(&mut self, with_history: bool) -> Message {
         let snapshot = if with_history {
-            // Only the rows that fit the frame budget are converted at all.
-            let (cols, _) = self.size();
-            self.term
-                .snapshot_with_recent_history(history_rows_that_fit(cols))
+            self.term.snapshot_with_history_budget(HISTORY_BUDGET)
         } else {
             self.term.screen_snapshot()
         };
@@ -316,25 +316,10 @@ fn message_from_snapshot(
     }
 }
 
-/// One frame is capped at 8 MB (`proto::MAX_FRAME`); a whole history on a wide pane would
-/// blow past it and turn `attach` into a hard failure. Keep the newest rows that fit,
-/// dropping the oldest — an incomplete history beats no snapshot.
+/// Reserve part of the frame for a contiguous suffix of whole history rows. The live
+/// screen is independent: dense screen text can still exceed `proto::MAX_FRAME`.
 fn history_window(history: &[Vec<crate::term::Cell>], cols: u16) -> &[Vec<crate::term::Cell>] {
-    let mut bytes = 0usize;
-    let keep = history.iter().rev().take_while(|row| {
-        bytes = bytes.saturating_add(usize::from(cols) * 20 + 16);
-        bytes = bytes.saturating_add(row.iter().filter_map(|cell| cell.extra_text.as_ref())
-            .map(|text| text.len() + 32).sum::<usize>());
-        bytes <= HISTORY_BUDGET
-    }).count();
-    &history[history.len() - keep..]
-}
-
-/// How many history rows of a `cols`-wide pane fit in [`HISTORY_BUDGET`].
-fn history_rows_that_fit(cols: u16) -> usize {
-    // ~20 bytes per cell on the wire (uint32 fields plus CBOR headers), plus a row header.
-    let per_row = usize::from(cols).saturating_mul(20).saturating_add(16);
-    HISTORY_BUDGET / per_row.max(1)
+    crate::term::history_budget::HistoryBudget::new(HISTORY_BUDGET).window(history, cols)
 }
 
 fn cursor_of(snapshot: &Snapshot) -> ProtoCursor {

@@ -10,16 +10,20 @@ use crate::term::Palette;
 use alacritty_terminal::event::{Event, EventListener, WindowSize};
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column, Line, Point};
-use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::term::color::Colors;
 use alacritty_terminal::term::{Config, Term as VtTerm, TermDamage, TermMode};
-use alacritty_terminal::vte::ansi::{Color, CursorShape, NamedColor, Processor, Rgb};
+use alacritty_terminal::vte::ansi::{CursorShape, Processor, Rgb};
 
 use super::sync_timeout::SyncTimeout;
-use super::{
-    Cell, Cursor, Snapshot, Term, ATTR_BOLD, ATTR_DIM, ATTR_ITALIC, ATTR_REVERSE,
-    ATTR_STRIKETHROUGH, ATTR_UNDERLINE, ATTR_WRAP,
-};
+use super::{Cell, Cursor, Snapshot, Term};
+
+#[path = "alacritty_cell.rs"]
+mod cell;
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static CONVERTED_HISTORY_ROWS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 /// Grid geometry handed to alacritty. `history` is the scrollback capacity.
 #[derive(Clone, Copy)]
@@ -154,33 +158,15 @@ impl AlacrittyTerm {
     /// `cols` comes from the caller, which reads the size once per picture rather than
     /// locking it for every row.
     fn convert_row(&self, line: Line, colors: &Colors, cols: u16) -> Vec<Cell> {
+        #[cfg(test)]
+        if line.0 < 0 {
+            CONVERTED_HISTORY_ROWS.update(|count| count + 1);
+        }
         let grid = self.term.grid();
         (0..usize::from(cols))
             .map(|col| {
                 let cell = &grid[Point::new(line, Column(col))];
-                let (attrs, width) = attributes(cell.flags);
-                let base = if cell.c < ' ' { ' ' } else { cell.c };
-                Cell {
-                    // alacritty stores a tab in the first blank cell of a tab stop (its own
-                    // renderer reads that as "blank"). A client would try to draw the tab
-                    // glyph, so the boundary hands out a plain space instead.
-                    codepoint: base as u32,
-                    fg: color_to_u32(cell.fg, colors),
-                    bg: color_to_u32(cell.bg, colors),
-                    attrs,
-                    // shortcut: OSC 8 links need a per-snapshot uri table that the
-                    // protocol does not carry yet, so M0 reports "no link".
-                    link: 0,
-                    width,
-                    extra_text: cell.zerowidth().filter(|marks| !marks.is_empty()).map(|marks| {
-                        let mut text = base.to_string();
-                        for mark in marks {
-                            if text.len() + mark.len_utf8() > crate::proto::MAX_CELL_TEXT_BYTES { break; }
-                            text.push(*mark);
-                        }
-                        Arc::from(text)
-                    }),
-                }
+                cell::convert(cell, colors)
             })
             .collect()
     }
@@ -272,8 +258,16 @@ impl Term for AlacrittyTerm {
         self.picture(0)
     }
 
-    fn snapshot_with_recent_history(&self, max_history: usize) -> Snapshot {
-        self.picture(max_history)
+    fn snapshot_with_history_budget(&self, bytes: usize) -> Snapshot {
+        let grid = self.term.grid();
+        let cols = self.size().cols;
+        let mut budget = super::history_budget::HistoryBudget::new(bytes);
+        let keep = (grid.topmost_line().0..0).rev().take_while(|line| {
+            budget.take_row(cols, (0..usize::from(cols)).filter_map(|col| {
+                cell::ExportedText::new(&grid[Point::new(Line(*line), Column(col))]).extra_len()
+            }))
+        }).count();
+        self.picture(keep)
     }
 
     fn screen_rows(&self, rows: &[u16]) -> (Vec<(u16, Vec<Cell>)>, Snapshot) {
@@ -378,99 +372,6 @@ fn cursor_of(shape: CursorShape, point: Point) -> Cursor {
             CursorShape::Underline => 1,
             CursorShape::Beam => 2,
             _ => 0,
-        },
-    }
-}
-
-fn attributes(flags: Flags) -> (u32, u8) {
-    let mut attrs = 0;
-    if flags.contains(Flags::BOLD) {
-        attrs |= ATTR_BOLD;
-    }
-    if flags.contains(Flags::ITALIC) {
-        attrs |= ATTR_ITALIC;
-    }
-    if flags.intersects(Flags::ALL_UNDERLINES) {
-        attrs |= ATTR_UNDERLINE;
-    }
-    if flags.contains(Flags::INVERSE) {
-        attrs |= ATTR_REVERSE;
-    }
-    if flags.contains(Flags::STRIKEOUT) {
-        attrs |= ATTR_STRIKETHROUGH;
-    }
-    if flags.contains(Flags::DIM) {
-        attrs |= ATTR_DIM;
-    }
-    if flags.contains(Flags::WRAPLINE) {
-        attrs |= ATTR_WRAP;
-    }
-    let width = if flags.contains(Flags::WIDE_CHAR) {
-        2
-    } else if flags.contains(Flags::WIDE_CHAR_SPACER) {
-        0
-    } else {
-        1
-    };
-    (attrs, width)
-}
-
-fn rgb_to_u32(rgb: Rgb) -> u32 {
-    (u32::from(rgb.r) << 16) | (u32::from(rgb.g) << 8) | u32::from(rgb.b)
-}
-
-fn color_to_u32(color: Color, colors: &Colors) -> u32 {
-    match color {
-        Color::Spec(rgb) => rgb_to_u32(rgb),
-        Color::Indexed(index) => 0x0100_0000 | u32::from(index),
-        // Named colours follow the theme; resolve them to RGB for the snapshot.
-        // `Colors` only stores overrides, so fall back to xterm's defaults.
-        Color::Named(named) => rgb_to_u32(colors[named].unwrap_or_else(|| default_rgb(named))),
-    }
-}
-
-/// xterm's defaults for the colours a theme may not override.
-fn default_rgb(named: NamedColor) -> Rgb {
-    const ANSI: [(u8, u8, u8); 16] = [
-        (0, 0, 0),
-        (205, 0, 0),
-        (0, 205, 0),
-        (205, 205, 0),
-        (0, 0, 238),
-        (205, 0, 205),
-        (0, 205, 205),
-        (229, 229, 229),
-        (127, 127, 127),
-        (255, 0, 0),
-        (0, 255, 0),
-        (255, 255, 0),
-        (92, 92, 255),
-        (255, 0, 255),
-        (0, 255, 255),
-        (255, 255, 255),
-    ];
-    let index = named as usize;
-    match index {
-        0..=15 => {
-            let (r, g, b) = ANSI[index];
-            Rgb { r, g, b }
-        }
-        // Dim variants follow Cursor (258): 259..=266 are the ANSI colours at 2/3.
-        259..=266 => {
-            let (r, g, b) = ANSI[index - 259];
-            Rgb {
-                r: r * 2 / 3,
-                g: g * 2 / 3,
-                b: b * 2 / 3,
-            }
-        }
-        // Background and its dim variant are black, not light grey.
-        257 | 268 => Rgb { r: 0, g: 0, b: 0 },
-        // Foreground, Cursor and BrightForeground.
-        _ => Rgb {
-            r: 229,
-            g: 229,
-            b: 229,
         },
     }
 }
