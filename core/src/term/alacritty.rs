@@ -160,7 +160,7 @@ impl AlacrittyTerm {
     fn convert_row(&self, line: Line, colors: &Colors, cols: u16) -> Vec<Cell> {
         #[cfg(test)]
         if line.0 < 0 {
-            CONVERTED_HISTORY_ROWS.update(|count| count + 1);
+            CONVERTED_HISTORY_ROWS.set(CONVERTED_HISTORY_ROWS.get() + 1);
         }
         let grid = self.term.grid();
         (0..usize::from(cols))
