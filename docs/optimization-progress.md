@@ -27,7 +27,7 @@
 | `c7c1ec0` | [41843748579](https://github.com/jeffrey-dot/pigeon/actions/runs/41843748579) | 全部通过，含组合字符与文本资源收尾 |
 | `7a4a71e` | [41845716261](https://github.com/jeffrey-dot/pigeon/actions/runs/41845716261) | 全部通过，含 Linux 输入整合 |
 
-文本预算提交 `ba4be01` 的 [CI 41867405175](https://github.com/jeffrey-dot/pigeon/actions/runs/41867405175) 已通过 Swift 完整构建/测试、Ubuntu Rust、GTK、header 和 docs；macOS Rust 被取消，整体未全绿。该提交包含状态确认复审修复，尚不包含本轮完整状态集合接口。
+文本预算提交 `ba4be01` 的 [CI 41867405175](https://github.com/jeffrey-dot/pigeon/actions/runs/41867405175) 已通过 Swift 完整构建/测试、Ubuntu Rust、GTK、header 和 docs；macOS Rust 被取消后已重排，仍待结果，整体未全绿。该提交包含状态确认复审修复，尚不包含本轮完整状态集合接口。
 
 ## 主线程本地验证
 
@@ -38,7 +38,7 @@
 - 状态复审：新增 pending 快照与合法低 seq 回退测试先失败，再修复；Foundation-only 86 tests 通过。AppDelegate 语法检查不等于 AppKit 类型检查或 GPU 呈现验收。
 - Linux 回看整合：GTK 40 passed / 1 ignored，fmt/clippy/build 通过；主线程复跑输入与回看隔离桌面脚本，10,000 行、80ms 延迟、快速翻页、回底部 delta、输入/IME/粘贴、resize/zoom/备用屏/分屏全部通过。47s 阅读/ping 和能力退化另有子任务验收记录。
 - 文本预算/字体回收整合：主线程复验核心 262 passed / 2 ignored、无默认 feature 175 passed / 1 ignored、GTK 42 passed / 1 ignored；fmt、三组 clippy、VT 8/8 通过。合并后的独立回看桌面脚本全通过；256 次双 face 加载/整形/释放的 RSS 样本增长为 0 bytes，仅代表该测试环境。
-- 宿主完整状态接口：整合核心 278 passed / 2 ignored；借用式 wire 校验调整后状态专题 7/7、C ABI 专题 3/3 和默认/无默认 feature clippy 通过。规范复审的集中缺口表已同步；行为复审和 macOS 完整集合接入仍在进行。
+- 宿主完整状态接口：整合核心 278 passed / 2 ignored；借用式 wire 校验调整后状态专题 7/7、C ABI 专题 3/3 和默认/无默认 feature clippy 通过。无默认 feature 整合回归 187 passed / 1 ignored，头文件 diff 与 GTK clippy 通过。两轴复审已结束：规范轴的缺口表同步与借用校验建议已落实，行为轴无新增可确认缺陷；macOS 完整集合接入仍在进行。
 - 验证脚本在 `tools/checks/`；本机测试不修改用户 shell/tmux 配置或操作用户已有终端。
 
 ## 尚未完成的验收与能力
