@@ -1,14 +1,13 @@
 //! GTK input-method and clipboard lifecycle, independent of the terminal renderer.
 
 use std::cell::{Cell, RefCell};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use gtk::prelude::*;
 use gtk::{gdk, glib};
 use gtk4 as gtk;
-use pigeon_core::api::PaneId;
+use pigeon_core::api::{Message, PaneId};
 
-use crate::host::HostLink;
 use crate::input::{self, Action};
 use crate::view::Workspace;
 
@@ -16,7 +15,7 @@ pub struct InputContext {
     context: gtk::IMMulticontext,
     preedit: gtk::Label,
     area: gtk::GLArea,
-    host: HostLink,
+    workspace: RefCell<Weak<RefCell<Workspace>>>,
     target: Cell<Option<PaneId>>,
     focused: Cell<bool>,
     generation: Cell<u64>,
@@ -25,7 +24,7 @@ pub struct InputContext {
 }
 
 impl InputContext {
-    pub fn new(area: &gtk::GLArea, root: &gtk::Overlay, host: HostLink) -> Rc<Self> {
+    pub fn new(area: &gtk::GLArea, root: &gtk::Overlay) -> Rc<Self> {
         let context = gtk::IMMulticontext::new();
         context.set_client_widget(Some(area));
         context.set_use_preedit(true);
@@ -56,7 +55,7 @@ impl InputContext {
             context,
             preedit,
             area: area.clone(),
-            host,
+            workspace: RefCell::new(Weak::new()),
             target: Cell::new(None),
             focused: Cell::new(false),
             generation: Cell::new(0),
@@ -70,7 +69,7 @@ impl InputContext {
                 input.preedit.set_visible(false);
                 if let Some(pane) = input.target.get().filter(|_| input.focused.get()) {
                     if let Some(message) = input::commit(pane, text) {
-                        input.host.send(message);
+                        input.send(message);
                     }
                 }
             }
@@ -93,6 +92,19 @@ impl InputContext {
             }
         });
         input
+    }
+
+    fn send(&self, message: Message) {
+        if let Some(workspace) = self.workspace.borrow().upgrade() {
+            workspace.borrow_mut().send_input(message);
+        }
+    }
+
+    pub fn cancel_preedit(&self) {
+        let target = self.target.replace(None);
+        self.context.reset();
+        self.preedit.set_visible(false);
+        self.target.set(target);
     }
 
     pub fn set_target(&self, pane: Option<PaneId>) {
@@ -164,7 +176,7 @@ impl InputContext {
                 match result {
                     Ok(Some(text)) => {
                         if let Some(message) = input::paste(pane, &text) {
-                            input.host.send(message);
+                            input.send(message);
                         }
                     }
                     Ok(None) => input.area.error_bell(),
@@ -189,9 +201,10 @@ impl InputContext {
 }
 
 pub fn install(workspace: &Rc<RefCell<Workspace>>) {
+    *workspace.borrow().input.workspace.borrow_mut() = Rc::downgrade(workspace);
     let area = workspace.borrow().area.clone();
     area.set_tooltip_text(Some(
-        "Ctrl+Shift+C: Copy current pane screen\nCtrl+Shift+V: Paste",
+        "Ctrl+Shift+C: Copy visible pane screen (including scrollback)\nCtrl+Shift+V: Paste\nShift+PageUp/PageDown: Scroll\nShift+Home/End: Oldest / live",
     ));
     let weak = Rc::downgrade(&workspace.borrow().input);
     area.connect_has_focus_notify(move |area| {
@@ -226,11 +239,20 @@ pub fn install(workspace: &Rc<RefCell<Workspace>>) {
             }
             return glib::Propagation::Stop;
         }
+        if !input.preedit.is_visible() && workspace.borrow_mut().scroll_key(key, modifiers) {
+            input.cancel_preedit();
+            return glib::Propagation::Stop;
+        }
+        if input::encode(key, modifiers, false).is_some() {
+            workspace.borrow_mut().prepare_input();
+        }
         // filter_keypress may synchronously emit commit/preedit: no Workspace borrow here.
         let before = input.commits.get();
         let handled = input.filter(controller);
         let committed = input.commits.get() != before;
-        let result = workspace.borrow().key(key, modifiers, handled, committed);
+        let result = workspace
+            .borrow_mut()
+            .key(key, modifiers, handled, committed);
         result
     });
     let weak = Rc::downgrade(&workspace.borrow().input);

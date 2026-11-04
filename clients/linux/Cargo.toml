@@ -14,7 +14,7 @@ path = "src/main.rs"
 [dependencies]
 # Clients only ever see `api`; the internal modules stay out of reach (AGENTS.md §3).
 pigeon-core = { path = "../../core", default-features = false }
-gtk4 = "0.11"
+gtk4 = { version = "0.11", features = ["v4_8"] }
 glow = "0.18"
 libloading = "0.8"
 fontdb = "0.24"

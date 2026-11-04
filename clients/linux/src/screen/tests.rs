@@ -11,8 +11,8 @@ fn cell(ch: char) -> WireCell {
     }
 }
 
-fn screen() -> Screen {
-    Screen::from_message(&Message::Snapshot {
+fn snapshot_message() -> Message {
+    Message::Snapshot {
         text: Vec::new(),
         pane_id: 7,
         seq: 4,
@@ -32,8 +32,11 @@ fn screen() -> Screen {
         offset: None,
         modes: Some(0),
         links: None,
-    })
-    .expect("screen")
+    }
+}
+
+fn screen() -> Screen {
+    Screen::from_message(&snapshot_message()).expect("screen")
 }
 
 fn delta(seq: u32) -> Message {
@@ -141,4 +144,118 @@ fn screen_copy_keeps_hard_newlines_and_empty_rows() {
     assert_eq!(screen.visible_text(), "aaa\n");
     screen.snapshot.screen.clear();
     assert_eq!(screen.visible_text(), "");
+}
+
+#[test]
+fn live_delta_cannot_tear_a_history_snapshot() {
+    let mut message = snapshot_message();
+    if let Message::Snapshot {
+        history_len,
+        offset,
+        ..
+    } = &mut message
+    {
+        *history_len = Some(100);
+        *offset = Some(20);
+    }
+    let mut screen = Screen::from_message(&message).expect("history screen");
+    let before = screen.snapshot.clone();
+    assert!(screen.apply_delta(&delta(5)));
+    assert_eq!(
+        screen.snapshot, before,
+        "history must remain a complete host slice"
+    );
+}
+
+fn scroll_reply(seq_value: u32, position: u32, marker: char) -> Message {
+    let mut message = snapshot_message();
+    if let Message::Snapshot {
+        seq,
+        history_len,
+        offset,
+        screen,
+        ..
+    } = &mut message
+    {
+        *seq = seq_value;
+        *history_len = Some(100);
+        *offset = Some(position);
+        *screen = vec![vec![cell(marker); 3]; 2];
+    }
+    message
+}
+
+#[test]
+fn rapid_requests_ignore_intermediate_and_live_snapshots_then_resume_delta_seq() {
+    let mut screen = screen();
+    screen.scroll.request(-10);
+    screen.scroll.request(-10);
+    let before = screen.snapshot.clone();
+    assert!(screen.apply_delta(&delta(20)));
+    assert!(screen.apply_snapshot(&scroll_reply(21, 10, 'x')));
+    assert_eq!(screen.snapshot, before);
+    assert!(screen.apply_snapshot(&snapshot_message()));
+    assert_eq!(screen.snapshot, before);
+    assert!(screen.apply_snapshot(&scroll_reply(22, 20, 'h')));
+    assert_eq!(screen.visible_text(), "hhh\nhhh");
+    assert_eq!(screen.scroll.offset, 20);
+    screen.scroll.request(0);
+    assert!(screen.apply_delta(&delta(25)));
+    assert_eq!(screen.visible_text(), "hhh\nhhh");
+    assert!(screen.apply_snapshot(&scroll_reply(25, 0, 'l')));
+    assert!(screen.apply_delta(&delta(26)));
+    assert_eq!(screen.snapshot.screen[0][0].codepoint, u32::from('l'));
+    assert_eq!(screen.snapshot.screen[1][2].codepoint, u32::from('x'));
+    assert!(!screen.scroll.active());
+    assert!(
+        !screen.apply_delta(&delta(28)),
+        "normal seq validation resumes"
+    );
+}
+
+#[test]
+fn resize_and_exit_do_not_lose_pending_scroll_or_exit_state() {
+    let mut screen = screen();
+    screen.exited = Some(0);
+    screen.scroll.request(-10);
+    screen.scroll.request(0);
+    assert!(screen.apply_snapshot(&scroll_reply(4, 10, 'h')));
+    let mut resized = scroll_reply(4, 0, 'r');
+    if let Message::Snapshot { cols, screen, .. } = &mut resized {
+        *cols = 4;
+        *screen = vec![vec![cell('r'); 4]; 2];
+    }
+    assert!(screen.apply_snapshot(&resized));
+    assert_eq!(screen.cols(), 4);
+    assert_eq!(screen.exited, Some(0));
+    assert!(!screen.scroll.active());
+}
+
+#[test]
+fn malformed_scroll_metadata_cannot_consume_the_pending_answer() {
+    let mut screen = screen();
+    screen.scroll.request(-10);
+    assert!(!screen.apply_snapshot(&scroll_reply(5, 101, 'x')));
+    let mut half_metadata = scroll_reply(5, 10, 'x');
+    if let Message::Snapshot { history_len, .. } = &mut half_metadata {
+        *history_len = None;
+    }
+    assert!(!screen.apply_snapshot(&half_metadata));
+    assert!(screen.scroll.active());
+    assert!(screen.apply_snapshot(&scroll_reply(6, 10, 'h')));
+    assert_eq!(screen.scroll.offset, 10);
+}
+
+#[test]
+fn late_live_snapshot_cannot_roll_back_a_resumed_delta_base() {
+    let mut screen = screen();
+    screen.scroll.request(-10);
+    assert!(screen.apply_snapshot(&scroll_reply(10, 10, 'h')));
+    screen.scroll.request(0);
+    assert!(screen.apply_snapshot(&scroll_reply(20, 0, 'l')));
+    assert!(screen.apply_delta(&delta(21)));
+    let before = screen.snapshot.clone();
+    assert!(screen.apply_snapshot(&snapshot_message()));
+    assert_eq!(screen.snapshot, before);
+    assert!(screen.apply_delta(&delta(22)));
 }

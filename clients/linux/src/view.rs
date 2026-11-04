@@ -22,6 +22,7 @@ use crate::render::{self, GridMetrics, PaneFrame, Renderer};
 use crate::screen::Screen;
 
 mod input;
+mod scroll;
 
 pub struct Workspace {
     pub area: gtk::GLArea,
@@ -41,6 +42,11 @@ pub struct Workspace {
     sized: HashMap<PaneId, (u16, u16)>,
     request: u32,
     reported_failure: bool,
+    wheel: crate::scroll_input::Wheel,
+    wheel_target: Option<(PaneId, bool)>,
+    scroll_label: gtk::Label,
+    scroll_controls: gtk::Box,
+    scroll_bar: gtk::DrawingArea,
 }
 
 impl Workspace {
@@ -58,7 +64,28 @@ impl Workspace {
 
         let root = gtk::Overlay::new();
         root.set_child(Some(&area));
-        let input = InputContext::new(&area, &root, host.clone());
+        let input = InputContext::new(&area, &root);
+        let scroll_label = gtk::Label::new(None);
+        let attrs = gtk::pango::AttrList::new();
+        attrs.insert(gtk::pango::AttrColor::new_foreground(
+            0xeeee, 0xeeee, 0xeeee,
+        ));
+        attrs.insert(gtk::pango::AttrColor::new_background(
+            0x2222, 0x2222, 0x2222,
+        ));
+        scroll_label.set_attributes(Some(&attrs));
+        let scroll_controls = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        scroll_controls.set_halign(gtk::Align::End);
+        scroll_controls.set_valign(gtk::Align::Start);
+        scroll_controls.set_visible(false);
+        scroll_controls.append(&scroll_label);
+        let bottom = gtk::Button::with_label("Return to live");
+        bottom.set_focusable(false);
+        scroll_controls.append(&bottom);
+        let scroll_bar = gtk::DrawingArea::new();
+        scroll_bar.set_can_target(false);
+        root.add_overlay(&scroll_bar);
+        root.add_overlay(&scroll_controls);
         input.set_target(Some(first.pane_id));
         let focus = Some(first.pane_id);
         let workspace = Rc::new(RefCell::new(Self {
@@ -76,6 +103,11 @@ impl Workspace {
             sized: HashMap::new(),
             request: 10,
             reported_failure: false,
+            wheel: Default::default(),
+            wheel_target: None,
+            scroll_label,
+            scroll_controls,
+            scroll_bar,
         }));
 
         let weak = Rc::downgrade(&workspace);
@@ -95,6 +127,7 @@ impl Workspace {
         });
 
         crate::input_context::install(&workspace);
+        scroll::install(&workspace, &bottom);
 
         let click = gtk::GestureClick::new();
         click.set_button(gtk::gdk::BUTTON_PRIMARY);
@@ -124,14 +157,34 @@ impl Workspace {
                 self.adopt_layout(message);
                 true
             }
-            Message::Snapshot { .. } => match Screen::from_message(message) {
-                Some(screen) => {
-                    self.panes.insert(screen.pane_id, screen);
-                    self.area.queue_render();
+            Message::Snapshot { pane_id, .. } => {
+                let applied = if let Some(screen) = self.panes.get_mut(pane_id) {
+                    screen.apply_snapshot(message)
+                } else if let Some(screen) = Screen::from_message(message) {
+                    // A late reply from a closed pane must not resurrect its input target.
+                    if self.layout.iter().any(|(id, _)| id == pane_id) {
+                        self.panes.insert(*pane_id, screen);
+                    }
                     true
+                } else {
+                    false
+                };
+                self.area.queue_render();
+                applied
+            }
+            Message::SizeState {
+                pane_id,
+                cols,
+                rows,
+                ..
+            } => {
+                if self.panes.get(pane_id).is_some_and(|screen| {
+                    screen.cols() != usize::from(*cols) || screen.rows() != usize::from(*rows)
+                }) {
+                    self.return_live(*pane_id);
                 }
-                None => false,
-            },
+                true
+            }
             Message::PaneExited { pane_id, code } => {
                 if let Some(screen) = self.panes.get_mut(pane_id) {
                     screen.exited = Some(*code);
@@ -154,12 +207,14 @@ impl Workspace {
             _ => true,
         };
         self.update_input();
+        self.update_scroll();
         applied
     }
 
     /// Asks the host for a pane's screen. Called for every leaf of a new layout, so a split
     /// (`Ctrl+Shift+D`) only needs the `layout` message to appear.
     fn attach(&mut self, pane_id: PaneId) {
+        self.return_live(pane_id);
         self.request += 1;
         self.host.send(Message::Attach {
             id: self.request,
@@ -171,6 +226,7 @@ impl Workspace {
     }
 
     fn adopt_layout(&mut self, message: &Message) {
+        let old_focus = self.focus;
         if let Ok(rects) = layout_rects(message) {
             self.layout = rects;
         }
@@ -181,6 +237,9 @@ impl Workspace {
             self.focus = Some(focus);
         } else if self.focus.is_none() {
             self.focus = self.layout.first().map(|(pane, _)| *pane);
+        }
+        if old_focus != self.focus {
+            self.wheel.reset();
         }
         self.zoom = match message {
             Message::Layout { zoom, .. } => *zoom,
@@ -234,6 +293,7 @@ impl Workspace {
         };
         self.sync_sizes(&metrics, width, height);
         self.update_input();
+        self.update_scroll();
 
         let ordered = self.frames(width, height);
         let focused = self.focus();
@@ -291,6 +351,7 @@ impl Workspace {
                 cols,
                 rows,
             });
+            self.return_live(pane);
         }
     }
 
@@ -313,12 +374,14 @@ impl Workspace {
             .map(|(pane, _, _)| pane);
         if let Some(pane) = hit {
             if self.focus != Some(pane) {
+                self.wheel.reset();
                 self.focus = Some(pane);
                 self.host.send(Message::Focus { pane_id: pane });
                 self.area.queue_render();
             }
         }
         self.update_input();
+        self.update_scroll();
     }
 }
 

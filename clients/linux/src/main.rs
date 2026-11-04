@@ -3,7 +3,7 @@
 //!
 //! Scope so far (`docs/renderer.md` §5): connect to the local host, draw every pane of the
 //! session at its rect, handle IME/keys/clipboard, follow layout changes and window resizes.
-//! The sidebar and scrollback come next.
+//! Scrollback slices come from the host; the sidebar remains a later step.
 
 mod host;
 mod input;
@@ -11,6 +11,8 @@ mod input_context;
 mod placement;
 mod render;
 mod screen;
+mod scroll;
+mod scroll_input;
 mod view;
 
 use gtk::prelude::*;

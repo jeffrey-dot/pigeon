@@ -3,6 +3,8 @@
 //! Snapshots establish the grid and sequence; contiguous deltas patch it. The core
 //! derives cell widths for both paths (`docs/protocol.md` §3.3).
 
+use crate::scroll::ScrollState;
+
 use pigeon_core::api::{delta_of, snapshot_of, Message, PaneId, Snapshot};
 
 #[cfg(test)]
@@ -12,7 +14,8 @@ pub struct Screen {
     pub pane_id: PaneId,
     pub snapshot: Snapshot,
     seq: u32,
-    /// `term::MODE_*` bits from the message; only the app-cursor bit is used so far.
+    pub scroll: ScrollState,
+    /// Mode bits from docs/protocol.md §3.3.
     pub modes: u32,
     /// Set once the program in the pane exited; the screen stays as it was.
     pub exited: Option<i32>,
@@ -26,17 +29,71 @@ impl Screen {
             Message::Snapshot { seq, modes, .. } => (*seq, modes.unwrap_or(0)),
             _ => return None,
         };
+        if let Message::Snapshot {
+            history_len,
+            offset,
+            ..
+        } = message
+        {
+            if history_len.is_some() != offset.is_some() {
+                return None;
+            }
+        }
+        let mut scroll = ScrollState::default();
+        if let Message::Snapshot {
+            history_len: Some(total),
+            offset: Some(offset),
+            ..
+        } = message
+        {
+            if offset > total || (snapshot.alt && *offset != 0) {
+                return None;
+            }
+            scroll.history_len = *total;
+            scroll.offset = *offset;
+        }
         Some(Self {
             pane_id,
             snapshot,
             seq,
+            scroll,
             modes,
             exited: None,
         })
     }
 
+    /// A live snapshot cannot overwrite a pending or displayed history slice.
+    pub fn apply_snapshot(&mut self, message: &Message) -> bool {
+        let Some(next) = Self::from_message(message) else {
+            return false;
+        };
+        if next.pane_id != self.pane_id {
+            return false;
+        }
+        match message {
+            Message::Snapshot {
+                history_len: Some(total),
+                offset: Some(offset),
+                ..
+            } => {
+                if !self.scroll.reply(*total, *offset) {
+                    return true;
+                }
+            }
+            _ if self.scroll.active() || next.seq < self.seq => return true,
+            _ => {}
+        }
+        self.snapshot = next.snapshot;
+        self.seq = next.seq;
+        self.modes = next.modes;
+        true
+    }
+
     /// False requests a fresh snapshot; validation never leaves a partially patched grid.
     pub fn apply_delta(&mut self, message: &Message) -> bool {
+        if self.scroll.active() {
+            return true;
+        }
         let Ok(delta) = delta_of(message) else {
             return false;
         };
@@ -87,7 +144,7 @@ impl Screen {
         self.snapshot.screen.get(y).and_then(|row| row.get(x))
     }
 
-    /// Only the visible screen; scrollback and other panes are excluded.
+    /// Only the visible live or scrolled screen; other history rows and panes are excluded.
     pub fn visible_text(&self) -> String {
         let mut text = String::new();
         for (index, row) in self.snapshot.screen.iter().enumerate() {

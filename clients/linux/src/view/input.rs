@@ -42,6 +42,22 @@ impl Workspace {
         }
     }
 
+    pub fn prepare_input(&mut self) {
+        if let Some(pane) = self.focus() {
+            self.return_live(pane);
+        }
+    }
+
+    pub fn send_input(&mut self, message: Message) {
+        match &message {
+            Message::Keys { pane_id, .. } | Message::Paste { pane_id, .. } => {
+                self.return_live(*pane_id)
+            }
+            _ => return,
+        }
+        self.host.send(message);
+    }
+
     pub fn copy_screen(&self) -> Option<String> {
         self.focus()
             .and_then(|pane| self.panes.get(&pane))
@@ -74,7 +90,7 @@ impl Workspace {
     }
 
     pub fn key(
-        &self,
+        &mut self,
         key: gtk4::gdk::Key,
         modifiers: gtk4::gdk::ModifierType,
         handled: bool,
@@ -93,7 +109,7 @@ impl Workspace {
         if let Some(bytes) =
             input::fallback(key, modifiers, screen.app_cursor(), handled, committed)
         {
-            self.host.send(Message::Keys {
+            self.send_input(Message::Keys {
                 pane_id: pane,
                 bytes,
             });

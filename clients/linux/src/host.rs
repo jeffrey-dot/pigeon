@@ -1,5 +1,5 @@
-//! The connection to `pigeon-server`: where the socket is, how to start a host, and the two
-//! threads that carry frames.
+//! The connection to `pigeon-server`: socket discovery, host startup,
+//! frame pumps and idle keepalive.
 //!
 //! The client never computes the socket path itself — it asks the server for it
 //! (`pigeon-server --socket-path`, protocol §1), so the rule lives in one place.
@@ -24,6 +24,7 @@ const CLIENT_NAME: &str = concat!("pigeon-linux ", env!("CARGO_PKG_VERSION"));
 pub struct HostLink {
     tx: Sender<Message>,
     rx: Receiver<Message>,
+    scrollback: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl HostLink {
@@ -35,6 +36,10 @@ impl HostLink {
         let stream =
             UnixStream::connect(&socket).map_err(|error| format!("{socket:?}: {error}"))?;
         Ok(Self::spawn_threads(stream))
+    }
+
+    pub fn scrollback(&self) -> bool {
+        self.scrollback.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn send(&self, message: Message) {
@@ -52,6 +57,21 @@ impl HostLink {
         self.rx.clone()
     }
 
+    fn keep_alive(&self) {
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            let started = Instant::now();
+            loop {
+                thread::sleep(Duration::from_secs(15));
+                // Reading history may produce no input for longer than the host's 45s limit.
+                let ts = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+                if tx.try_send(Message::Ping { ts }).is_err() {
+                    break;
+                }
+            }
+        });
+    }
+
     fn spawn_threads(stream: UnixStream) -> Self {
         let (tx, writer_rx) = async_channel::unbounded::<Message>();
         let (reader_tx, rx) = async_channel::unbounded::<Message>();
@@ -60,7 +80,11 @@ impl HostLink {
             Ok(writer) => writer,
             Err(error) => {
                 eprintln!("pigeon: socket clone failed: {error}");
-                return Self { tx, rx };
+                return Self {
+                    tx,
+                    rx,
+                    scrollback: Default::default(),
+                };
             }
         };
         thread::spawn(move || {
@@ -110,7 +134,11 @@ impl HostLink {
             }
         });
 
-        Self { tx, rx }
+        Self {
+            tx,
+            rx,
+            scrollback: Default::default(),
+        }
     }
 }
 
@@ -123,14 +151,23 @@ pub fn handshake(link: &HostLink) -> Result<Screen, String> {
         proto: PROTO_VERSION,
         client: CLIENT_NAME.to_owned(),
         // Both snapshots and deltas use the core's safe cell conversion.
-        features: vec!["delta".to_owned()],
+        features: vec!["delta".to_owned(), "scrollback".to_owned()],
     });
     loop {
         match link.recv().ok_or("host closed during the handshake")? {
-            Message::HelloAck { proto, server, .. } => {
+            Message::HelloAck {
+                proto,
+                server,
+                features,
+                ..
+            } => {
                 if proto >> 8 != PROTO_VERSION >> 8 {
                     return Err(format!("host speaks {proto:#06x}: {server}"));
                 }
+                link.scrollback.store(
+                    features.iter().any(|feature| feature == "scrollback"),
+                    std::sync::atomic::Ordering::Relaxed,
+                );
                 break;
             }
             Message::HelloError { reason, detail, .. } => {
@@ -141,6 +178,7 @@ pub fn handshake(link: &HostLink) -> Result<Screen, String> {
         }
     }
 
+    link.keep_alive();
     link.send(Message::Sessions { items: Vec::new() });
     let existing = loop {
         match link.recv().ok_or("host closed before sending sessions")? {
@@ -184,7 +222,7 @@ fn attach(link: &HostLink, pane_id: PaneId) -> Result<Screen, String> {
         id: 2,
         pane_id,
         size_policy: None,
-        // The scope has no scrollback UI yet; asking for it would move up to 2 MB per attach.
+        // Scrolling requests one host slice; attach never transfers the entire history.
         history: Some(false),
         since: None,
     });
