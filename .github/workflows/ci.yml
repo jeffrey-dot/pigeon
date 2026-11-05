@@ -83,6 +83,18 @@ jobs:
           size=$(stat -f%z "$bin" 2>/dev/null || stat -c%s "$bin")
           echo "pigeon-server: $size bytes"
           test "$size" -le 8388608
+      - name: Host benchmark client checks
+        run: |
+          cargo fmt --manifest-path tools/bench/host/Cargo.toml --check
+          cargo clippy --manifest-path tools/bench/host/Cargo.toml --all-targets --locked -- -D warnings
+      - name: Isolated host benchmark smoke (no timing threshold)
+        run: python3 tools/bench/host-bench.py --samples 10 --panes 2 --bytes-per-pane 65536 --out /tmp/pigeon-host-bench
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: host-bench-${{ matrix.os }}
+          path: /tmp/pigeon-host-bench
+          if-no-files-found: ignore
 
   # include/pigeon_core.h is generated from core/src/ffi/; a hand-edited
   # header fails here. Linux only: the output is platform independent.

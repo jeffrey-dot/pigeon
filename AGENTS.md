@@ -39,6 +39,7 @@ tools/vt-parity/run.sh          # 8 条 VT 语料与已提交的 tmux golden 对
 
 新增功能须先确定模块归属，不要为了跑通而把逻辑塞进 `main.rs` 或 `PigeonApp.swift`。
 宿主为新 pane 固定声明 `TERM=xterm-256color` 与 `COLORTERM=truecolor`；真实 PTY 测试使用独立 HOME/配置目录，不继承用户 rc。`tools/checks/swift-logic.sh` 可在有 Swift 的 Linux/macOS 上复跑侧栏和选择纯逻辑，但不替代 macOS AppKit 验收。
+`tools/bench/host-bench.py --out /tmp/pigeon-bench-result` 记录隔离 release 宿主的协议回显、快照重连和短时输出样本，不代表 GUI 显示延迟；见 `docs/host-benchmark.md`。
 `swift test` 需要完整 Xcode（`xcode-select` 指向 CommandLineTools 时用 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`）。
 
 ## 3. 模块划分（强制）

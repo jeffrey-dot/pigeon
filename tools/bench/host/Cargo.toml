@@ -1,0 +1,24 @@
+[package]
+name = "pigeon-host-bench"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+publish = false
+
+# Development-only: never linked into a product or a GUI workspace build.
+[workspace]
+
+[dependencies]
+pigeon-core = { path = "../../../core", default-features = false }
+
+[profile.release]
+lto = true
+codegen-units = 1
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
