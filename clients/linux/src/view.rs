@@ -267,6 +267,13 @@ impl Workspace {
     }
 
     fn draw(&mut self, area: &gtk::GLArea) {
+        if self
+            .renderer
+            .as_ref()
+            .is_some_and(|renderer| !renderer.owns_current_context())
+        {
+            self.renderer = None;
+        }
         if self.renderer.is_none() {
             match Renderer::new(self.scale) {
                 Ok(renderer) => self.renderer = Some(renderer),

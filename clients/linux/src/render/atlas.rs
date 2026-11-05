@@ -7,11 +7,12 @@
 
 use std::collections::HashMap;
 
-use glow::HasContext;
+use std::rc::Rc;
 use swash::scale::{Render, ScaleContext, Source, StrikeWith};
 use swash::zeno::Format;
 
 use super::font::Font;
+use super::gl::{Gl, Texture};
 
 /// Atlas edge in device pixels. 2048² of 8-bit coverage is 4 MiB and holds a screen's worth
 /// of glyphs many times over; the colour atlas is the same size at 4 bytes per texel.
@@ -78,8 +79,8 @@ struct Pack {
 }
 
 pub struct Atlas {
-    pub mask: glow::Texture,
-    pub color: glow::Texture,
+    pub mask: Texture,
+    pub color: Texture,
     context: ScaleContext,
     /// `None` remembers a glyph that rasterizes to nothing, so it is not retried per frame.
     slots: HashMap<Key, Option<Slot>>,
@@ -90,9 +91,9 @@ pub struct Atlas {
 }
 
 impl Atlas {
-    pub fn new(gl: &glow::Context) -> Result<Self, String> {
-        let mask = texture(gl, glow::R8, glow::RED)?;
-        let color = texture(gl, glow::RGBA8, glow::RGBA)?;
+    pub fn new(gl: &Rc<Gl>) -> Result<Self, String> {
+        let mask = Texture::new(gl, SIDE, false)?;
+        let color = Texture::new(gl, SIDE, true)?;
         Ok(Self {
             mask,
             color,
@@ -106,7 +107,7 @@ impl Atlas {
 
     /// The slot for `key`, rasterizing and uploading it on first use. `None` means "draw
     /// nothing here" (a blank glyph, or a full atlas that was just cleared).
-    pub fn slot(&mut self, gl: &glow::Context, font: &Font, key: Key) -> Option<Slot> {
+    pub fn slot(&mut self, font: &Font, key: Key) -> Option<Slot> {
         if let Some(hit) = self.slots.get(&key) {
             return *hit;
         }
@@ -116,10 +117,10 @@ impl Atlas {
             self.slots.insert(key, None);
             return None;
         };
-        let Some(slot) = self.intern(gl, key, &image) else {
+        let Some(slot) = self.intern(key, &image) else {
             // Full: start over. The caller rebuilds the frame against the empty atlas.
             self.clear();
-            let slot = self.intern(gl, key, &image)?;
+            let slot = self.intern(key, &image)?;
             return Some(slot);
         };
         Some(slot)
@@ -133,35 +134,18 @@ impl Atlas {
         self.generation = self.generation.wrapping_add(1);
     }
 
-    fn intern(&mut self, gl: &glow::Context, key: Key, image: &Raster) -> Option<Slot> {
+    fn intern(&mut self, key: Key, image: &Raster) -> Option<Slot> {
         let pack = match image.layer {
             Layer::Mask => &mut self.mask_pack,
             Layer::Color => &mut self.color_pack,
         };
         let (x, y) = allocate(pack, image.width, image.height)?;
         let texture = match image.layer {
-            Layer::Mask => self.mask,
-            Layer::Color => self.color,
+            Layer::Mask => &self.mask,
+            Layer::Color => &self.color,
         };
-        let format = match image.layer {
-            Layer::Mask => glow::RED,
-            Layer::Color => glow::RGBA,
-        };
-        unsafe {
-            gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-            gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
-            gl.tex_sub_image_2d(
-                glow::TEXTURE_2D,
-                0,
-                x,
-                y,
-                image.width,
-                image.height,
-                format,
-                glow::UNSIGNED_BYTE,
-                glow::PixelUnpackData::Slice(Some(&image.data)),
-            );
-            gl.bind_texture(glow::TEXTURE_2D, None);
+        if !texture.upload(x, y, image.width, image.height, &image.data) {
+            return None;
         }
         let slot = Slot {
             x,
@@ -205,46 +189,6 @@ impl Atlas {
             },
         })
     }
-}
-
-fn texture(gl: &glow::Context, internal: u32, format: u32) -> Result<glow::Texture, String> {
-    let texture = unsafe { gl.create_texture() }.map_err(|error| format!("texture: {error}"))?;
-    unsafe {
-        gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-        gl.tex_parameter_i32(
-            glow::TEXTURE_2D,
-            glow::TEXTURE_MIN_FILTER,
-            glow::LINEAR as i32,
-        );
-        gl.tex_parameter_i32(
-            glow::TEXTURE_2D,
-            glow::TEXTURE_MAG_FILTER,
-            glow::LINEAR as i32,
-        );
-        gl.tex_parameter_i32(
-            glow::TEXTURE_2D,
-            glow::TEXTURE_WRAP_S,
-            glow::CLAMP_TO_EDGE as i32,
-        );
-        gl.tex_parameter_i32(
-            glow::TEXTURE_2D,
-            glow::TEXTURE_WRAP_T,
-            glow::CLAMP_TO_EDGE as i32,
-        );
-        gl.tex_image_2d(
-            glow::TEXTURE_2D,
-            0,
-            internal as i32,
-            SIDE,
-            SIDE,
-            0,
-            format,
-            glow::UNSIGNED_BYTE,
-            glow::PixelUnpackData::Slice(None),
-        );
-        gl.bind_texture(glow::TEXTURE_2D, None);
-    }
-    Ok(texture)
 }
 
 /// Shelf packing: fill a row left to right, then start the next row under the tallest one.

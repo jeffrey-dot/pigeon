@@ -6,13 +6,19 @@
 
 mod atlas;
 mod boxdraw;
+mod current_context;
+mod device;
 mod font;
+#[allow(unsafe_code)]
 mod gl;
 mod instances;
 mod palette;
+mod pipeline;
+mod shaders;
 mod shaped_cell;
+mod texture;
 
-use glow::HasContext;
+use std::rc::Rc;
 
 pub use self::font::GridMetrics;
 pub use self::palette::Palette;
@@ -40,7 +46,7 @@ pub struct PaneFrame<'a> {
 }
 
 pub struct Renderer {
-    gl: gl::Gl,
+    gl: Rc<gl::Gl>,
     rects: gl::Pipeline,
     glyphs: gl::Pipeline,
     atlas: Atlas,
@@ -58,8 +64,7 @@ impl Renderer {
     /// Needs the GLArea's context to be current.
     pub fn new(scale: f32) -> Result<Self, String> {
         let gl = gl::Gl::load()?;
-        let context = &gl.context;
-        let dialect = gl::Dialect::detect(context);
+        let dialect = shaders::Dialect::detect(&gl.version());
         if std::env::var_os("PIGEON_FRAME_STATS").is_some() {
             eprintln!(
                 "pigeon: renderer on {} ({})",
@@ -67,27 +72,23 @@ impl Renderer {
                 dialect.describe()
             );
         }
-        let [rect_vs, rect_fs, glyph_vs, glyph_fs] = gl::sources(dialect);
+        let [rect_vs, rect_fs, glyph_vs, glyph_fs] = shaders::sources(dialect);
         let rects = gl::pipeline(
-            context,
+            &gl,
             &rect_vs,
             &rect_fs,
             &[(0, 2, 0), (1, 2, 8), (2, 4, 16)],
             instances::RectInstance::STRIDE,
         )?;
         let glyphs = gl::pipeline(
-            context,
+            &gl,
             &glyph_vs,
             &glyph_fs,
             &[(0, 2, 0), (1, 2, 8), (2, 4, 16), (3, 4, 32)],
             instances::GlyphInstance::STRIDE,
         )?;
-        let atlas = Atlas::new(context)?;
+        let atlas = Atlas::new(&gl)?;
         let font = Font::load(FONT_POINTS * scale)?;
-        unsafe {
-            context.enable(glow::BLEND);
-            context.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
-        }
         Ok(Self {
             gl,
             rects,
@@ -100,6 +101,10 @@ impl Renderer {
             frame: 0,
             stats_at: std::time::Instant::now(),
         })
+    }
+
+    pub fn owns_current_context(&self) -> bool {
+        self.gl.owns_current_context()
     }
 
     pub fn metrics(&self) -> GridMetrics {
@@ -134,31 +139,15 @@ impl Renderer {
         width: i32,
         height: i32,
     ) {
-        let context = &self.gl.context;
         if width <= 0 || height <= 0 {
             return;
         }
         let started = std::time::Instant::now();
         let (mut rects, mut glyphs, mut colour_glyphs) = (0, 0, 0);
-        unsafe {
-            context.viewport(0, 0, width, height);
-            let clear = self.background();
-            context.clear_color(clear[0], clear[1], clear[2], clear[3]);
-            context.clear(glow::COLOR_BUFFER_BIT);
-            // A pane's grid can be a few pixels taller than its rect (whole cells only), so
-            // clip to the rect instead of letting the last row spill into its neighbour.
-            context.enable(glow::SCISSOR_TEST);
-            // The atlas handles never change once created, so the units are bound once.
-            context.active_texture(glow::TEXTURE0);
-            context.bind_texture(glow::TEXTURE_2D, Some(self.atlas.mask));
-            context.active_texture(glow::TEXTURE1);
-            context.bind_texture(glow::TEXTURE_2D, Some(self.atlas.color));
-            self.glyphs.bind_atlases(context);
-        }
+        self.gl.begin((width, height), self.background());
 
         {
             let mut draw = instances::Draw {
-                gl: context,
                 font: &self.font,
                 metrics: self.font.metrics,
                 palette: &self.palette,
@@ -169,20 +158,21 @@ impl Renderer {
                 let [x, y] = pane.origin;
                 let [w, h] = pane.size;
                 let batch = instances::build(&mut draw, pane.screen, pane.origin, pane.focused);
-                unsafe {
-                    context.scissor(x as i32, height - y as i32 - h as i32, w as i32, h as i32);
-                    self.rects.draw(context, &batch.rects, (width, height));
-                    // Text is straight alpha, emoji are premultiplied (swash composites the
-                    // layers before handing over the image).
-                    self.glyphs.set_kind(context, 0);
-                    context.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
-                    self.glyphs.draw(context, &batch.glyphs, (width, height));
-                    self.glyphs.set_kind(context, 1);
-                    context.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
-                    self.glyphs
-                        .draw(context, &batch.color_glyphs, (width, height));
-                    context.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
-                }
+                // Uploading a new glyph changes texture bindings; bind the finished atlases.
+                self.glyphs
+                    .bind_atlases(&draw.atlas.mask, &draw.atlas.color);
+                self.gl.scissor(Some([
+                    x as i32,
+                    height - y as i32 - h as i32,
+                    w as i32,
+                    h as i32,
+                ]));
+                self.rects.draw(&batch.rects, (width, height));
+                self.glyphs.set_kind(0);
+                self.glyphs.draw(&batch.glyphs, (width, height));
+                self.glyphs.set_kind(1);
+                self.glyphs.draw(&batch.color_glyphs, (width, height));
+                self.glyphs.set_kind(0);
                 rects += batch.rects.len();
                 glyphs += batch.glyphs.len();
                 colour_glyphs += batch.color_glyphs.len();
@@ -200,17 +190,10 @@ impl Renderer {
                     color: colour,
                 })
                 .collect();
-            unsafe {
-                context.disable(glow::SCISSOR_TEST);
-                self.rects.draw(context, &lines, (width, height));
-            }
+            self.gl.scissor(None);
+            self.rects.draw(&lines, (width, height));
         }
-        unsafe {
-            context.active_texture(glow::TEXTURE1);
-            context.bind_texture(glow::TEXTURE_2D, None);
-            context.active_texture(glow::TEXTURE0);
-            context.bind_texture(glow::TEXTURE_2D, None);
-        }
+        self.gl.finish();
         self.record(started, rects, glyphs + colour_glyphs);
     }
 

@@ -47,7 +47,6 @@ pub struct Batch {
 /// Everything a frame needs besides the screens themselves; one value is built per frame so
 /// the per-pane call stays short.
 pub struct Draw<'a> {
-    pub gl: &'a glow::Context,
     pub font: &'a Font,
     pub metrics: GridMetrics,
     pub palette: &'a Palette,
@@ -61,7 +60,6 @@ pub struct Draw<'a> {
 /// is worth doing only once `PIGEON_FRAME_STATS=1` says it matters (`docs/renderer.md` §5.4).
 pub fn build(draw: &mut Draw<'_>, screen: &Screen, origin: [f32; 2], cursor_on: bool) -> Batch {
     let Draw {
-        gl,
         font,
         metrics,
         palette,
@@ -132,7 +130,7 @@ pub fn build(draw: &mut Draw<'_>, screen: &Screen, origin: [f32; 2], cursor_on: 
                         glyph: shaped.glyph,
                         bold: attrs & pigeon_core::api::ATTR_BOLD != 0,
                     };
-                    if let Some(slot) = atlas.slot(gl, font, key) {
+                    if let Some(slot) = atlas.slot(font, key) {
                         let instance = GlyphInstance {
                             pos: [
                                 left + shaped.x + slot.left as f32,
@@ -156,7 +154,7 @@ pub fn build(draw: &mut Draw<'_>, screen: &Screen, origin: [f32; 2], cursor_on: 
                             glyph,
                             bold: attrs & pigeon_core::api::ATTR_BOLD != 0,
                         };
-                        if let Some(slot) = atlas.slot(gl, font, key) {
+                        if let Some(slot) = atlas.slot(font, key) {
                             let baseline = top + metrics.baseline;
                             // A wide cell is two cells; a fallback face's glyph is often
                             // narrower than that, so centre it instead of stretching it.
@@ -234,3 +232,15 @@ mod tests {
         );
     }
 }
+
+mod sealed {
+    pub trait Instance {}
+}
+/// Only the two padding-free repr(C) float layouts can be uploaded as raw bytes.
+pub trait Instance: sealed::Instance {}
+impl sealed::Instance for RectInstance {}
+impl Instance for RectInstance {}
+impl sealed::Instance for GlyphInstance {}
+impl Instance for GlyphInstance {}
+const _: [(); 32] = [(); std::mem::size_of::<RectInstance>()];
+const _: [(); 48] = [(); std::mem::size_of::<GlyphInstance>()];

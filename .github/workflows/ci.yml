@@ -114,7 +114,7 @@ jobs:
       - name: Install GTK development libraries
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libgtk-4-dev pkg-config fonts-dejavu-core
+          sudo apt-get install -y --no-install-recommends libgtk-4-dev pkg-config fonts-dejavu-core xvfb xauth libgl1-mesa-dri
       - name: Record build environment
         run: python3 tools/bench/environment.py
       - run: cargo fmt -p pigeon-linux --check
@@ -122,6 +122,7 @@ jobs:
       - run: cargo build -p pigeon-linux --locked
       # Shaping tests use the installed reference font but need no display server.
       - run: cargo test -p pigeon-linux --locked
+      - run: tools/checks/linux-gl-check.sh
 
   # The explicit Intel label avoids the capacity-constrained latest arm64 pool.
   # workflow_dispatch can run the same checks on Apple Silicon via macos-latest.
