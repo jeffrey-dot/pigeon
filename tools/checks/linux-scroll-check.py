@@ -169,9 +169,14 @@ while True:
         window = run("xdotool", "search", "--sync", "--onlyvisible", "--pid", str(app.pid), "--name", "pigeon").splitlines()[0]
         run("xdotool", "windowfocus", "--sync", window)
         settle(0.5)
-        assert "C hello delta,scrollback" in messages()
+        key("ctrl+shift+b")
+        run("xdotool", "windowsize", window, "640", "408")
+        settle(0.3)
+        assert any(line.startswith("C hello delta,scrollback") for line in messages())
+        pump(lambda: any(line.startswith("C resize 1 ") for line in messages()))
+        settle(0.3)
         if os.environ.get("PIGEON_TEST_NO_SCROLLBACK"):
-            assert "S hello delta" in messages()
+            assert any(line.startswith("S hello delta,") and "scrollback" not in line for line in messages())
             key("shift+Page_Up", "shift+End")
             run("xdotool", "mousemove", "--window", window, "100", "100", "click", "4")
             settle()
@@ -179,7 +184,9 @@ while True:
             assert pane.read_bytes() == b"\x1b[5;2~\x1b[1;2F", pane.read_bytes()
             print("PASS missing scrollback capability disables local page/wheel interception", flush=True)
             return
-        assert "S hello delta,scrollback" in messages()
+        assert any(line.startswith("S hello delta,scrollback") for line in messages())
+        pump(lambda: any(line.startswith("C resize 1 ") for line in messages()))
+        settle(0.3)
         assert "LINE-11049" in copy()
         key("Page_Up", "ctrl+Page_Up", "alt+Page_Down")
         assert pane.read_bytes() == b"\x1b[5~\x1b[5;5~\x1b[6;3~", pane.read_bytes()

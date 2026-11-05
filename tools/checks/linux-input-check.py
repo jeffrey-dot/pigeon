@@ -134,7 +134,20 @@ while True:
             time.sleep(0.1)
             assert pane.read_bytes() == data, pane.read_bytes()
 
+        key("ctrl+shift+b")
+        run("xdotool", "windowsize", window, "640", "480")
         run("fcitx5-remote", "-c")
+        # The sidebar starts the UI before its asynchronous first screen arrives.
+        ready = []
+        clipboard.set("waiting-for-first-screen")
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline:
+            key("ctrl+shift+c")
+            clipboard.read_text_async(None, lambda clip, task: ready.append(clip.read_text_finish(task)))
+            pump_until(lambda: bool(ready))
+            text = ready.pop() or ""
+            if text.lstrip("\n").startswith("SCREEN-"): break
+        else: raise AssertionError("initial screen not ready")
         key("a", "b", "c", "ctrl+c", "alt+b", "Up")
         expected = b"abc\x03\x1bb\x1b[A"
         expect(expected)
@@ -173,7 +186,7 @@ while True:
         result = []
         clipboard.read_text_async(None, lambda clip, task: result.append(clip.read_text_finish(task)))
         pump_until(lambda: bool(result))
-        assert result[0].startswith("SCREEN-e\u0301-中\n"), repr(result[0])
+        assert result[0].lstrip("\n").startswith("SCREEN-e\u0301-中\n"), repr(result[0])
         assert pane.read_bytes() == expected
         print("PASS copy current screen preserves combining text and CJK", flush=True)
 
@@ -227,6 +240,29 @@ while True:
         expect(expected)
         focus_window.destroy()
         print("PASS window blur cancels preedit and refocus restores keys", flush=True)
+        # A separate session uses the same IM context but must not inherit a pending commit/paste.
+        key("ctrl+shift+t")
+        pump_until(lambda: len(list(temporary.glob("bytes-*"))) == 3)
+        third = next(path for path in temporary.glob("bytes-*") if path not in (pane, other))
+        until = time.monotonic() + 0.6
+        pump_until(lambda: time.monotonic() >= until)
+        run("fcitx5-remote", "-c")
+        key("s")
+        pump_until(lambda: third.read_bytes() == b"s")
+        run("fcitx5-remote", "-o")
+        key("n", "i")
+        clipboard.set("must-not-cross-session")
+        run("xdotool", "key", "--clearmodifiers", "ctrl+shift+v")
+        time.sleep(0.1)
+        run("xdotool", "key", "--clearmodifiers", "ctrl+shift+bracketleft")
+        until = time.monotonic() + 0.7
+        pump_until(lambda: time.monotonic() >= until)
+        run("fcitx5-remote", "-c")
+        key("u")
+        expected += b"u"
+        expect(expected)
+        assert third.read_bytes() == b"s", third.read_bytes()
+        print("PASS session switch cancels preedit and pending asynchronous paste", flush=True)
         assert app.poll() is None
         for log in logs:
             log.flush()
