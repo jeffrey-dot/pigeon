@@ -69,6 +69,17 @@ TRANSCRIPT = (
 )
 
 
+def capture_window(helper, app, path, attempts=20):
+    for _ in range(attempts):
+        window_id = run(str(helper), str(app.pid), capture_output=True, text=True).stdout.strip()
+        if window_id and subprocess.run(
+                ["screencapture", "-x", "-o", "-l", window_id, str(path)],
+                stderr=subprocess.DEVNULL).returncode == 0 and path.exists():
+            return
+        time.sleep(0.5)
+    raise RuntimeError(f"could not capture the window into {path}")
+
+
 def capture(out):
     env = dict(os.environ, TERM="xterm-256color")
     with tempfile.TemporaryDirectory(prefix="pigeon-gpui-ui-", dir="/tmp") as temporary:
@@ -133,10 +144,11 @@ def capture(out):
                     window_id = run(str(helper), str(app.pid),
                                     capture_output=True, text=True).stdout.strip()
                     time.sleep(0.1)
-                # The window id can resolve a beat before the window is composited; capturing
-                # too early returns "could not create image from window". Settle, then grab.
+                # Let the first frames (sessions, status, snapshot) land, then capture. The window
+                # id can resolve before the window is composited, which makes screencapture fail
+                # with "could not create image from window", so re-resolve and retry.
                 time.sleep(4.0)
-                run("screencapture", "-x", "-o", "-l", window_id, str(out / f"{appearance}.png"))
+                capture_window(helper, app, out / f"{appearance}.png")
                 stop(app)
                 app = None
         finally:

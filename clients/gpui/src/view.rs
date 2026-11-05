@@ -33,25 +33,30 @@ fn shadow(color: Rgba, y: f32, blur: f32) -> BoxShadow {
     BoxShadow {
         color: Hsla::from(color),
         offset: point(px(0.), px(y)),
-        blur_radius: px(blur),
+        // Harp's `css_shadow` takes a CSS blur and draws sigma = blur / 2; GPUI's blur_radius is
+        // that sigma.
+        blur_radius: px(blur / 2.),
         spread_radius: px(0.),
         inset: false,
     }
 }
 
-/// `Working · 1m`, the macOS `SidebarModel.subtitle` wording.
+/// The card header state (`Working · 1m`), worded as Harp's `card_info`.
 fn status_line(summary: &Summary) -> Option<String> {
-    let label = match summary.state? {
-        State::Blocked => "Needs you",
-        State::Error => "Error",
-        State::Done => "Done",
-        State::Working => "Working",
-        State::Idle => "Idle",
-    };
-    Some(format!(
-        "{label} · {}",
-        sidebar::age(summary.age_ms.unwrap_or(0))
-    ))
+    let time = summary.age_ms.map(sidebar::age);
+    let time = time.as_deref();
+    Some(match (summary.state?, time) {
+        (State::Blocked, _) => "Needs you".to_owned(),
+        (State::Error, None | Some("now")) => "Error".to_owned(),
+        (State::Error, Some(time)) => format!("Error · {time} ago"),
+        (State::Working, None | Some("now")) => "Working".to_owned(),
+        (State::Working, Some(time)) => format!("Working · {time}"),
+        (State::Done, None) => "Done".to_owned(),
+        (State::Done, Some("now")) => "Done · just now".to_owned(),
+        (State::Done, Some(time)) => format!("Done · {time} ago"),
+        (State::Idle, None) => "Inactive".to_owned(),
+        (State::Idle, Some(time)) => format!("Inactive · {time}"),
+    })
 }
 
 /// The cwd as the header shows it: `$HOME` folded to `~`; the element truncates from the start.
@@ -207,19 +212,21 @@ impl Workspace {
             .h(px(metrics::SECTION_HEADER_HEIGHT))
             .when(!first, |d| d.mt(px(metrics::SECTION_GAP)))
             .pl(px(metrics::ROW_PAD_LEFT))
-            .pr(px(metrics::ROW_PAD_RIGHT))
+            .pr(px(metrics::SECTION_PAD_RIGHT))
             .flex()
             .items_center()
+            .gap(px(metrics::SECTION_SPACING))
             .text_size(px(metrics::SECTION_TITLE_SIZE))
             .child(
                 div()
-                    .font_weight(FontWeight::MEDIUM)
+                    .min_w_0()
+                    .truncate()
+                    .font_weight(FontWeight::SEMIBOLD)
                     .text_color(palette.section_name)
                     .child(name),
             )
             .child(
                 div()
-                    .ml(px(6.))
                     .text_color(palette.section_count)
                     .child(count.to_string()),
             )
@@ -227,7 +234,7 @@ impl Workspace {
             .when(needs > 0, |d| {
                 d.child(
                     div()
-                        .font_weight(FontWeight::MEDIUM)
+                        .text_size(px(metrics::NEEDS_SIZE))
                         .text_color(palette.needs_text)
                         .child(sidebar::needs_label(needs)),
                 )
@@ -273,7 +280,11 @@ impl Workspace {
                     .min_w_0()
                     .truncate()
                     .text_size(px(metrics::ROW_TITLE_SIZE))
-                    .text_color(palette.ink)
+                    .text_color(if glyph == Some(icons::StatusGlyph::Idle) {
+                        palette.sub
+                    } else {
+                        palette.ink
+                    })
                     .when(unread, |n| n.font_weight(FontWeight::SEMIBOLD))
                     .child(name),
             )
@@ -283,7 +294,7 @@ impl Workspace {
                         .flex_shrink_0()
                         .text_size(px(metrics::TIME_SIZE))
                         .font_features(fonts::tabular())
-                        .text_color(palette.gray)
+                        .text_color(palette.sub)
                         .child(age),
                 )
             })
@@ -347,10 +358,10 @@ impl Workspace {
             .pr(px(metrics::HEADER_PAD_RIGHT))
             .flex()
             .items_center()
-            .gap(px(8.))
+            .gap(px(metrics::CARD_TITLE_SPACING))
             .border_b(px(metrics::CARD_STROKE))
             .border_color(palette.divider)
-            .text_size(px(metrics::ROW_TITLE_SIZE))
+            .text_size(px(metrics::CARD_TITLE_SIZE))
             .child(
                 div()
                     .flex_shrink_0()
@@ -372,6 +383,7 @@ impl Workspace {
                 header.child(
                     div()
                         .flex_shrink_0()
+                        .ml(px(metrics::CARD_STATUS_MARGIN - metrics::CARD_TITLE_SPACING))
                         .max_w(relative(0.45))
                         .truncate()
                         .text_size(px(metrics::CARD_STATUS_SIZE))
@@ -433,19 +445,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn status_line_uses_the_macos_wording() {
-        let working = Summary {
-            state: Some(State::Working),
-            unread: 0,
-            age_ms: Some(61_000),
+    fn status_line_uses_the_harp_card_wording() {
+        let line = |state, age_ms| {
+            status_line(&Summary {
+                state: Some(state),
+                unread: 0,
+                age_ms,
+            })
         };
-        assert_eq!(status_line(&working).as_deref(), Some("Working · 1m"));
-        let blocked = Summary {
-            state: Some(State::Blocked),
-            unread: 0,
-            age_ms: Some(0),
-        };
-        assert_eq!(status_line(&blocked).as_deref(), Some("Needs you · now"));
+        assert_eq!(
+            line(State::Working, Some(61_000)).as_deref(),
+            Some("Working · 1m")
+        );
+        assert_eq!(line(State::Working, Some(0)).as_deref(), Some("Working"));
+        assert_eq!(line(State::Blocked, Some(0)).as_deref(), Some("Needs you"));
+        assert_eq!(
+            line(State::Done, Some(0)).as_deref(),
+            Some("Done · just now")
+        );
+        assert_eq!(
+            line(State::Done, Some(240_000)).as_deref(),
+            Some("Done · 4m ago")
+        );
+        assert_eq!(
+            line(State::Idle, Some(7_200_000)).as_deref(),
+            Some("Inactive · 2h")
+        );
         assert_eq!(status_line(&Summary::default()), None);
     }
 }

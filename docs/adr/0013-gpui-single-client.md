@@ -54,3 +54,9 @@ GPUI 的 macOS 渲染用 Metal，编译 shader 需要：
   的 GTK4/OpenGL 渲染方向；两份旧客户端在迁移对齐完成前并存，完成后删除（去留以 `docs/plan.md` §11 为准）。
 - 何时重开：若 GPUI 的 Linux/Wayland 或 IME 成熟度无法支撑 `docs/ui.md` 的输入法与无障碍要求，
   或其 pre-1.0 破坏性变更的维护成本超过收益，则重新评估是否回到按平台原生。
+
+## 视觉规格的来源与有意差异（2026-11-05）
+
+- 侧栏/卡片的尺寸、字号、色值与阴影取自 Harp `54c5286` 源码（`vertical_tabs.rs` 的 `sidebar` 常量与 `colors`、`card_header`、`row_time_text`、`css_shadow`；`default_themes.rs` 的终端前景/背景与 ANSI 表），绘制为本项目自写。
+- 侧栏没有实时窗口模糊：用 Harp `GLASS_TINT` 合成在 `SIDEBAR` 上的不透明色，截图确定可比。
+- needs-you 口径保持 [ui.md §3.1](../ui.md#31-项目和机器)（blocked + error + 未读 done），与参考图（只计 blocked）不同；这是有意保留的共享语义，见 [plan.md §11](../plan.md#11-当前能力与已知缺口)。

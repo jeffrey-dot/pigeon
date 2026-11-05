@@ -59,6 +59,8 @@ pub mod fonts {
 pub struct Palette {
     // Text.
     pub ink: Rgba,
+    /// Harp `SUB`: row time, idle row titles.
+    pub sub: Rgba,
     pub gray: Rgba,
     pub section_name: Rgba,
     pub section_count: Rgba,
@@ -90,6 +92,7 @@ impl Palette {
         if dark {
             Self {
                 ink: rgb(0xf5f5f7),
+                sub: rgb(0x98989f),
                 gray: rgb(0x8e8e93),
                 section_name: rgb(0x8e8e93),
                 section_count: rgb(0x636366),
@@ -114,6 +117,7 @@ impl Palette {
         } else {
             Self {
                 ink: rgb(0x1d1d1f),
+                sub: rgb(0x626269),
                 gray: rgb(0x6e6e73),
                 section_name: rgb(0x7c7c82),
                 section_count: rgb(0xa1a1a6),
@@ -155,8 +159,13 @@ pub mod metrics {
     pub const ROW_RADIUS: f32 = 8.0;
     pub const ROW_PAD_LEFT: f32 = 12.0;
     pub const ROW_PAD_RIGHT: f32 = 8.0;
+    /// Section header right padding (Harp `section_header_content`).
+    pub const SECTION_PAD_RIGHT: f32 = 9.0;
+    pub const SECTION_SPACING: f32 = 6.0;
+    pub const NEEDS_SIZE: f32 = 12.0;
     pub const ROW_GAP_INNER: f32 = 8.0;
-    pub const TIME_SIZE: f32 = 10.0;
+    /// Harp `row_time_text`; the reference image measures this size, not ui.md's former 10.
+    pub const TIME_SIZE: f32 = 11.5;
     pub const STATUS_SLOT: f32 = 16.0;
     pub const STATUS_GLYPH: f32 = 15.0;
     // Card.
@@ -167,13 +176,16 @@ pub mod metrics {
     pub const CARD_HEADER_PAD_OPEN: f32 = 32.0;
     pub const HEADER_PAD_RIGHT: f32 = 20.0;
     pub const CARD_STATUS_SIZE: f32 = 12.0;
+    pub const CARD_TITLE_SIZE: f32 = 12.5;
+    pub const CARD_TITLE_SPACING: f32 = 10.0;
+    pub const CARD_STATUS_MARGIN: f32 = 12.0;
     pub const TERMINAL_PAD_LEFT: f32 = 32.0;
     // Top-bar buttons.
     pub const TOP_BUTTON_SIZE: f32 = 28.0;
     pub const TOP_BUTTON_RADIUS: f32 = 7.0;
     pub const TOP_BUTTON_GLYPH: f32 = 17.0;
     pub const TOP_BUTTON_GAP: f32 = 2.0;
-    pub const TOP_BAR_PAD_RIGHT: f32 = 12.0;
+    pub const TOP_BAR_PAD_RIGHT: f32 = 14.0;
     /// Traffic-light origin, so their centre sits on the 56 pt top bar's centre line.
     pub const TRAFFIC_LIGHT_X: f32 = 18.0;
     pub const TRAFFIC_LIGHT_Y: f32 = 21.0;
