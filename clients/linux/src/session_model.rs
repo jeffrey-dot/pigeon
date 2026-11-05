@@ -121,13 +121,11 @@ impl SessionModel {
         self.zoom = None;
         self.focus = None;
         self.attached.clear();
-        // Replies queued before the barrier will be ignored, so their pending counters must go too.
+        // Cached history is not evidence for the newly selected live view.
         if let Some(session) = self.selected_session() {
             let panes = session.panes.clone();
             for pane in panes {
-                if let Some(screen) = self.panes.get_mut(&pane) {
-                    screen.scroll = Default::default();
-                }
+                self.panes.remove(&pane);
             }
         }
         let ts = u64::MAX - self.selection_generation;
@@ -254,7 +252,16 @@ impl SessionModel {
             }
             Message::Snapshot { pane_id, .. } if self.knows(*pane_id) && self.barrier.is_none() => {
                 let applied = if let Some(screen) = self.panes.get_mut(pane_id) {
-                    screen.apply_snapshot(message)
+                    let before = screen.revision;
+                    screen.apply_snapshot(message) && screen.revision != before
+                } else if matches!(
+                    message,
+                    Message::Snapshot {
+                        offset: Some(_),
+                        ..
+                    }
+                ) {
+                    false
                 } else if let Some(screen) = Screen::from_message(message) {
                     self.panes.insert(*pane_id, screen);
                     true

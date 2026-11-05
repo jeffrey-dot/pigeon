@@ -131,7 +131,85 @@ fn removed_pane_clears_records_and_old_inspection() {
     model.begin_connection("host", Some("one"), true);
     model.apply(&report(1, 1, vec![record("a", 1, "error")]));
     let old = model.records(&[1]).remove(0);
-    model.retain(&HashSet::new());
+    model.remove(&HashSet::from([1]));
     assert!(model.records(&[1]).is_empty());
     assert_eq!(model.ack(&old, true), None);
+}
+
+#[test]
+fn legacy_same_id_replacement_invalidates_selection_without_evicting_other_unread() {
+    let mut model = SidebarModel::default();
+    model.begin_connection("host", None, false);
+    let status = |id: String, seq, state: &str| Message::Status {
+        pane_id: 1,
+        state: state.into(),
+        seq,
+        kind: None,
+        msg: None,
+        app: None,
+        id: Some(id),
+        age_ms: None,
+    };
+    for seq in 1..=256 {
+        model.apply(&status(format!("r{seq}"), seq, "done"));
+    }
+    let old = model
+        .records(&[1])
+        .into_iter()
+        .find(|r| r.record.id == "r256")
+        .unwrap();
+    model.apply(&status("r256".into(), 257, "working"));
+    assert!(!model.current(&old));
+    assert_eq!(model.ack(&old, true), None);
+    assert_eq!(model.summary(&[1]).unread, 255);
+    assert!(model.records(&[1]).iter().any(|r| r.record.id == "r1"));
+}
+
+#[test]
+fn removing_confirmed_members_preserves_new_unknown_pane_status() {
+    let mut model = SidebarModel::default();
+    model.begin_connection("host", Some("one"), true);
+    model.apply(&report(99, 1, vec![record("new", 1, "done")]));
+    model.apply(&report(1, 1, vec![record("old", 2, "done")]));
+    model.remove(&HashSet::from([1]));
+    assert_eq!(model.summary(&[99]).unread, 1);
+    assert_eq!(model.summary(&[1]).unread, 0);
+}
+
+#[test]
+fn row_derivation_sorts_needs_you_and_keeps_distinct_project_paths() {
+    let session = |id, cwd: &str| pigeon_core::api::SessionInfo {
+        session_id: id,
+        title: format!("Session {id}"),
+        cwd: cwd.into(),
+        panes: vec![id],
+        active_pane: Some(id),
+        active_title: None,
+        active_program: None,
+    };
+    let sessions = vec![
+        session(1, "/a/proj"),
+        session(2, "/a/proj/sub"),
+        session(3, "/b/proj"),
+    ];
+    let projects = HashMap::from([
+        ("/a/proj".into(), grouping::project("/a/proj", None)),
+        (
+            "/a/proj/sub".into(),
+            grouping::project("/a/proj/sub", Some("/a/proj")),
+        ),
+    ]);
+    let mut model = SidebarModel::default();
+    model.begin_connection("host", Some("one"), true);
+    model.apply(&report(2, 1, vec![record("a", 1, "blocked")]));
+    let rows = model.rows(&sessions, &projects, &HashMap::new());
+    assert_eq!(
+        rows.iter().filter_map(|r| r.session).collect::<Vec<_>>(),
+        [2, 1, 3]
+    );
+    assert_eq!(rows.iter().filter(|r| r.session.is_none()).count(), 2);
+    assert!(rows[0].text.contains("1 needs you"));
+    assert_eq!(model.next_needed(&sessions, Some(3)), Some(2));
+    assert_eq!(rows::adjacent(&sessions, Some(1), true), Some(3));
+    assert_eq!(model.next_needed(&[], None), None);
 }

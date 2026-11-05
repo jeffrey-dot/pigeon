@@ -80,6 +80,37 @@ fn a_contiguous_delta_updates_only_its_rows_and_mode_state() {
 }
 
 #[test]
+fn history_draw_does_not_authorize_new_live_screen_before_draw() {
+    let mut screen = screen();
+    screen.scroll.request(-10);
+    let mut history = snapshot_message();
+    if let Message::Snapshot {
+        history_len,
+        offset,
+        ..
+    } = &mut history
+    {
+        *history_len = Some(20);
+        *offset = Some(10);
+    }
+    assert!(screen.apply_snapshot(&history));
+    let drawn = screen.revision;
+    screen.scroll.request(0);
+    if let Message::Snapshot { offset, .. } = &mut history {
+        *offset = Some(0);
+    }
+    assert!(screen.apply_snapshot(&history));
+    assert!(!screen.scroll.active());
+    assert_ne!(drawn, screen.revision);
+    let live = screen.revision;
+    assert!(screen.apply_snapshot(&history));
+    assert_eq!(
+        screen.revision, live,
+        "ignored duplicate cannot certify new content"
+    );
+}
+
+#[test]
 fn missing_or_malformed_frames_leave_the_previous_screen_intact() {
     let mut screen = screen();
     let before = screen.snapshot.clone();

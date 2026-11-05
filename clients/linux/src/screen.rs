@@ -14,6 +14,7 @@ pub struct Screen {
     pub pane_id: PaneId,
     pub snapshot: Snapshot,
     seq: u32,
+    pub revision: u64,
     pub scroll: ScrollState,
     /// Mode bits from docs/protocol.md §3.3.
     pub modes: u32,
@@ -56,6 +57,7 @@ impl Screen {
             pane_id,
             snapshot,
             seq,
+            revision: 1,
             scroll,
             modes,
             exited: None,
@@ -86,6 +88,7 @@ impl Screen {
         self.snapshot = next.snapshot;
         self.seq = next.seq;
         self.modes = next.modes;
+        self.revision = self.revision.saturating_add(1);
         true
     }
 
@@ -124,6 +127,7 @@ impl Screen {
             self.modes = modes;
         }
         self.seq = delta.seq;
+        self.revision = self.revision.saturating_add(1);
         true
     }
 

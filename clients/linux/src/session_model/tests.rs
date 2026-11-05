@@ -236,3 +236,29 @@ fn malformed_snapshot_cannot_enable_cached_pane_input_after_switch() {
     model.apply(&bad);
     assert_eq!(model.input_pane(), None);
 }
+
+#[test]
+fn ignored_scroll_reply_cannot_certify_cached_history_as_current_screen() {
+    let mut model = model();
+    list(&mut model);
+    model.apply(&snapshot(1));
+    model.apply(&layout(1, 1));
+    model.select(2);
+    model.select(1);
+    barrier(&mut model);
+    model.apply(&layout(1, 1));
+    let mut unsolicited = snapshot(1);
+    if let Message::Snapshot {
+        history_len,
+        offset,
+        ..
+    } = &mut unsolicited
+    {
+        *history_len = Some(30);
+        *offset = Some(0);
+    }
+    model.apply(&unsolicited);
+    assert_eq!(model.input_pane(), None);
+    model.apply(&snapshot(1));
+    assert_eq!(model.input_pane(), Some(1));
+}

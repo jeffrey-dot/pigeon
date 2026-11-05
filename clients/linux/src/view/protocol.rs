@@ -20,6 +20,12 @@ impl Workspace {
     pub fn apply(&mut self, message: &Message) {
         let previous = self.model.selected;
         let previous_focus = self.model.focus;
+        let previously_known: std::collections::HashSet<_> = self
+            .model
+            .sessions
+            .iter()
+            .flat_map(|s| s.panes.iter().copied())
+            .collect();
         if let Message::SizeState {
             pane_id,
             cols,
@@ -54,7 +60,8 @@ impl Workspace {
                 .iter()
                 .flat_map(|s| s.panes.iter().copied())
                 .collect();
-            self.status.retain(&known);
+            self.status
+                .remove(&previously_known.difference(&known).copied().collect());
             self.sizes.retain(|pane, _| known.contains(pane));
         }
         if matches!(message, Message::Layout { session_id, .. } if Some(*session_id) == self.model.selected)
@@ -128,14 +135,14 @@ impl Workspace {
         self.model.connected
             && self.renderer.is_some()
             && self.area.is_mapped()
-            && self.presented.contains(&pane)
             && self.model.received.contains(&pane)
             && self.model.layout.iter().any(|(id, _)| *id == pane)
             && self.model.zoom.is_none_or(|zoom| zoom == pane)
-            && self
-                .model
-                .panes
-                .get(&pane)
-                .is_some_and(|s| !s.scroll.active() && s.cols() > 0 && s.rows() > 0)
+            && self.model.panes.get(&pane).is_some_and(|s| {
+                !s.scroll.active()
+                    && s.cols() > 0
+                    && s.rows() > 0
+                    && self.presented.get(&pane) == Some(&s.revision)
+            })
     }
 }

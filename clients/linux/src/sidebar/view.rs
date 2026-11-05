@@ -1,9 +1,9 @@
 //! GTK native local session list. Project discovery is client-side filesystem I/O.
-use super::{grouping, priority, records::RecordsView};
+use super::{grouping, records::RecordsView, rows};
 use crate::view::Workspace;
 use gtk4::{self as gtk, prelude::*};
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::path::Path;
 use std::rc::{Rc, Weak};
 
@@ -134,10 +134,8 @@ impl SidebarView {
         self.projects
             .borrow_mut()
             .retain(|cwd, _| work.model.sessions.iter().any(|s| &s.cwd == cwd));
-        let mut groups: BTreeMap<String, (String, Vec<_>)> = BTreeMap::new();
         for session in &work.model.sessions {
-            let (key, name) = self
-                .projects
+            self.projects
                 .borrow_mut()
                 .entry(session.cwd.clone())
                 .or_insert_with(|| {
@@ -146,71 +144,12 @@ impl SidebarView {
                         .find(|path| path.join(".git").exists())
                         .and_then(Path::to_str);
                     grouping::project(&session.cwd, git)
-                })
-                .clone();
-            groups
-                .entry(key)
-                .or_insert_with(|| (name, vec![]))
-                .1
-                .push(session);
+                });
         }
-        let mut rows = vec![];
-        let mut signature = format!("{:?}", work.model.selected);
-        for (path, (name, mut sessions)) in groups {
-            sessions.sort_by_key(|s| {
-                (
-                    work.status
-                        .summary(&s.panes)
-                        .state
-                        .map(priority)
-                        .unwrap_or(5),
-                    s.session_id,
-                )
-            });
-            let needs = sessions
-                .iter()
-                .filter(|s| work.status.summary(&s.panes).needs_you)
-                .count();
-            let group = format!(
-                "{name} · {} · {needs} {}",
-                sessions.len(),
-                if needs == 1 { "needs you" } else { "need you" }
-            );
-            signature.push_str(&group);
-            rows.push((None, group, path));
-            for session in sessions {
-                let summary = work.status.summary(&session.panes);
-                let state = summary.state.map(|s| s.as_str()).unwrap_or("");
-                let age = summary.age_ms.map(age).unwrap_or_default();
-                let unread = if summary.unread > 0 {
-                    format!(" · {} unread", summary.unread)
-                } else {
-                    String::new()
-                };
-                let size = session
-                    .panes
-                    .iter()
-                    .find_map(|p| work.sizes.get(p))
-                    .map(|(source, clients)| format!(" · {clients}× {source}"))
-                    .unwrap_or_default();
-                let title = session
-                    .active_program
-                    .as_deref()
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or(&session.title);
-                let label = format!(
-                    "{title} · #{}  {age} {state}{unread}{size}",
-                    session.session_id
-                );
-                signature.push_str(&label);
-                signature.push_str(&session.cwd);
-                rows.push((
-                    Some(session.session_id),
-                    label,
-                    format!("{}\n{state}{unread}{size}", session.cwd),
-                ));
-            }
-        }
+        let rows = work
+            .status
+            .rows(&work.model.sessions, &self.projects.borrow(), &work.sizes);
+        let signature = format!("{:?}{rows:?}", work.model.selected);
         if *self.signature.borrow() == signature {
             return;
         }
@@ -218,7 +157,12 @@ impl SidebarView {
         while let Some(child) = self.list.first_child() {
             self.list.remove(&child);
         }
-        for (session, text, tooltip) in rows {
+        for rows::SidebarRow {
+            session,
+            text,
+            tooltip,
+        } in rows
+        {
             if let Some(session) = session {
                 let button = gtk::Button::new();
                 let label = gtk::Label::new(Some(&text));
@@ -274,15 +218,8 @@ impl SidebarView {
                 Key::j => {
                     let target = {
                         let work = work.borrow();
-                        let sessions = &work.model.sessions;
-                        let current = sessions
-                            .iter()
-                            .position(|s| Some(s.session_id) == work.model.selected)
-                            .unwrap_or(0);
-                        (1..=sessions.len())
-                            .map(|step| &sessions[(current + step) % sessions.len()])
-                            .find(|s| work.status.summary(&s.panes).needs_you)
-                            .map(|s| s.session_id)
+                        work.status
+                            .next_needed(&work.model.sessions, work.model.selected)
                     };
                     if let Some(target) = target {
                         work.borrow_mut().select(target);
@@ -293,22 +230,11 @@ impl SidebarView {
                 Key::bracketleft | Key::bracketright | Key::braceleft | Key::braceright => {
                     let target = {
                         let work = work.borrow();
-                        let sessions = &work.model.sessions;
-                        let current = sessions
-                            .iter()
-                            .position(|s| Some(s.session_id) == work.model.selected)
-                            .unwrap_or(0);
-                        if sessions.is_empty() {
-                            None
-                        } else {
-                            let next =
-                                if matches!(key.to_lower(), Key::bracketleft | Key::braceleft) {
-                                    (current + sessions.len() - 1) % sessions.len()
-                                } else {
-                                    (current + 1) % sessions.len()
-                                };
-                            Some(sessions[next].session_id)
-                        }
+                        rows::adjacent(
+                            &work.model.sessions,
+                            work.model.selected,
+                            matches!(key.to_lower(), Key::bracketleft | Key::braceleft),
+                        )
                     };
                     if let Some(target) = target {
                         work.borrow_mut().select(target);
@@ -320,18 +246,5 @@ impl SidebarView {
             gtk::glib::Propagation::Stop
         });
         window.add_controller(controller);
-    }
-}
-
-fn age(ms: u64) -> String {
-    let minutes = ms / 60_000;
-    if minutes == 0 {
-        "now".into()
-    } else if minutes < 60 {
-        format!("{minutes}m")
-    } else if minutes < 1440 {
-        format!("{}h", minutes / 60)
-    } else {
-        format!("{}d", minutes / 1440)
     }
 }

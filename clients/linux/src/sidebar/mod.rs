@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 
 pub mod grouping;
 pub mod records;
+pub mod rows;
 #[cfg(test)]
 mod tests;
 pub mod view;
@@ -67,12 +68,12 @@ impl SidebarModel {
             return;
         }
         if !self.complete {
-            // A legacy report only replaces the visible winner; it cannot prove old terminals were read.
+            // A same-id report supersedes its identity; other terminals need explicit viewing.
             if let Some(old) = self.reports.get(&pane) {
                 for record in &old.records {
                     if record.state.is_terminal()
-                        && !snapshot.records.iter().any(|r| r.seq == record.seq)
-                        && snapshot.records.len() < 256
+                        && !snapshot.records.iter().any(|r| r.id == record.id)
+                        && !self.seen.contains(&(pane, record.seq, record.id.clone()))
                     {
                         snapshot.records.push(record.clone());
                     }
@@ -89,9 +90,9 @@ impl SidebarModel {
         self.reports.insert(pane, snapshot);
     }
 
-    pub fn retain(&mut self, panes: &HashSet<u32>) {
-        self.reports.retain(|pane, _| panes.contains(pane));
-        self.seen.retain(|(pane, _, _)| panes.contains(pane));
+    pub fn remove(&mut self, panes: &HashSet<u32>) {
+        self.reports.retain(|pane, _| !panes.contains(pane));
+        self.seen.retain(|(pane, _, _)| !panes.contains(pane));
     }
 
     pub fn records(&self, panes: &[u32]) -> Vec<RecordRow> {

@@ -34,7 +34,7 @@ pub struct Workspace {
     pub model: SessionModel,
     pub status: SidebarModel,
     pub sizes: HashMap<PaneId, (String, u8)>,
-    presented: std::collections::HashSet<PaneId>,
+    presented: HashMap<PaneId, u64>,
     scale: f32,
     renderer: Option<Renderer>,
     /// The size each pane was last told, so a resize storm sends one message per change.
@@ -223,7 +223,12 @@ impl Workspace {
         if let Some(renderer) = self.renderer.as_mut() {
             renderer.draw(&panes, &dividers, width, height);
             self.presented
-                .extend(ordered.iter().map(|(pane, _, _)| *pane));
+                .extend(ordered.iter().filter_map(|(pane, _, _)| {
+                    self.model
+                        .panes
+                        .get(pane)
+                        .map(|screen| (*pane, screen.revision))
+                }));
         }
     }
 
