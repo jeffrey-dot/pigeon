@@ -133,6 +133,7 @@ impl Workspace {
     }
 
     pub fn disconnect(&mut self) {
+        self.disconnected_reason = self.host.reason();
         self.close_search(false);
         self.model.disconnect();
         self.cancel_input();
@@ -157,6 +158,7 @@ impl Workspace {
 
     pub fn record_visible(&self, pane: u32) -> bool {
         self.model.connected
+            && self.host.connected()
             && self.renderer.is_some()
             && self.area.is_mapped()
             && self.model.received.contains(&pane)

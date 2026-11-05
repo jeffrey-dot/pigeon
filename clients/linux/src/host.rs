@@ -4,15 +4,15 @@
 //! The client never computes the socket path itself — it asks the server for it
 //! (`pigeon-server --socket-path`, protocol §1), so the rule lives in one place.
 
-use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use async_channel::{Receiver, Sender};
-use pigeon_core::api::{decode_frame, encode_frame, Message, PROTO_VERSION};
+use pigeon_core::api::{Message, PROTO_VERSION};
+mod transport;
+use transport::Transport;
 
 const CLIENT_NAME: &str = concat!("pigeon-linux ", env!("CARGO_PKG_VERSION"));
 
@@ -20,8 +20,7 @@ const CLIENT_NAME: &str = concat!("pigeon-linux ", env!("CARGO_PKG_VERSION"));
 /// send while the pump holds the receiver.
 #[derive(Clone)]
 pub struct HostLink {
-    tx: Sender<Message>,
-    rx: Receiver<Message>,
+    transport: Transport,
     scrollback: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -33,7 +32,10 @@ impl HostLink {
         ensure_host(&server, &socket)?;
         let stream =
             UnixStream::connect(&socket).map_err(|error| format!("{socket:?}: {error}"))?;
-        Ok(Self::spawn_threads(stream))
+        Ok(Self {
+            transport: Transport::new(stream)?,
+            scrollback: Default::default(),
+        })
     }
 
     pub fn scrollback(&self) -> bool {
@@ -41,105 +43,19 @@ impl HostLink {
     }
 
     pub fn send(&self, message: Message) {
-        // The writer thread owns the socket; a dead thread means the reader has reported the
-        // disconnect already, and the pump will stop on its own.
-        let _ = self.tx.try_send(message);
+        self.transport.send(message);
     }
-
-    /// Blocking receive, used only during the handshake (before the GTK loop runs).
     pub fn recv(&self) -> Option<Message> {
-        self.rx.recv_blocking().ok()
+        self.transport.recv()
     }
-
-    pub fn receiver(&self) -> Receiver<Message> {
-        self.rx.clone()
+    pub async fn next(&self) -> Option<Message> {
+        self.transport.next().await
     }
-
-    fn keep_alive(&self) {
-        let tx = self.tx.clone();
-        thread::spawn(move || {
-            let started = Instant::now();
-            loop {
-                thread::sleep(Duration::from_secs(15));
-                // Reading history may produce no input for longer than the host's 45s limit.
-                let ts = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
-                if tx.try_send(Message::Ping { ts }).is_err() {
-                    break;
-                }
-            }
-        });
+    pub fn reason(&self) -> String {
+        self.transport.reason()
     }
-
-    fn spawn_threads(stream: UnixStream) -> Self {
-        let (tx, writer_rx) = async_channel::unbounded::<Message>();
-        let (reader_tx, rx) = async_channel::unbounded::<Message>();
-
-        let mut writer = match stream.try_clone() {
-            Ok(writer) => writer,
-            Err(error) => {
-                eprintln!("pigeon: socket clone failed: {error}");
-                return Self {
-                    tx,
-                    rx,
-                    scrollback: Default::default(),
-                };
-            }
-        };
-        thread::spawn(move || {
-            while let Ok(message) = writer_rx.recv_blocking() {
-                match encode_frame(&message) {
-                    Ok(frame) => {
-                        if writer.write_all(&frame).is_err() {
-                            break;
-                        }
-                    }
-                    Err(error) => eprintln!("pigeon: cannot encode {}: {error}", message.name()),
-                }
-            }
-            let _ = writer.flush();
-        });
-
-        let writer_tx = tx.clone();
-        let mut reader = stream;
-        thread::spawn(move || {
-            let mut buffer = Vec::with_capacity(64 * 1024);
-            let mut chunk = [0u8; 16 * 1024];
-            'read: loop {
-                match reader.read(&mut chunk) {
-                    Ok(0) => break,
-                    Ok(read) => {
-                        buffer.extend_from_slice(&chunk[..read]);
-                        loop {
-                            match decode_frame(&buffer) {
-                                Ok(Some((message, used))) => {
-                                    buffer.drain(..used);
-                                    if reader_tx.send_blocking(message).is_err() {
-                                        break 'read;
-                                    }
-                                }
-                                Ok(None) => break,
-                                Err(error) => {
-                                    eprintln!("pigeon: bad frame: {error}");
-                                    break 'read;
-                                }
-                            }
-                        }
-                    }
-                    Err(error) => {
-                        eprintln!("pigeon: socket read: {error}");
-                        break;
-                    }
-                }
-            }
-            writer_tx.close();
-            let _ = reader.shutdown(std::net::Shutdown::Both);
-        });
-
-        Self {
-            tx,
-            rx,
-            scrollback: Default::default(),
-        }
+    pub fn connected(&self) -> bool {
+        self.transport.connected()
     }
 }
 
@@ -160,7 +76,7 @@ pub fn handshake(link: &HostLink) -> Result<Message, String> {
         .map(str::to_owned)
         .collect(),
     });
-    match link.recv().ok_or("host closed during the handshake")? {
+    match link.recv().ok_or_else(|| link.reason())? {
         message @ Message::HelloAck { .. } => {
             if let Message::HelloAck {
                 proto, features, ..
@@ -174,7 +90,7 @@ pub fn handshake(link: &HostLink) -> Result<Message, String> {
                     std::sync::atomic::Ordering::Relaxed,
                 );
             }
-            link.keep_alive();
+            link.transport.ready();
             Ok(message)
         }
         Message::HelloError { reason, detail } => Err(format!("host refused: {reason} ({detail})")),

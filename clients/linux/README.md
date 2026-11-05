@@ -59,7 +59,7 @@ GTK 客户端已有 Ubuntu CI 作业（构建/clippy/逻辑测试），尚无 GU
 **回看**：握手协商 `scrollback`，通过宿主 `scroll` 获取一屏（不拉整段历史），显示回看位置与每 pane 位置条。
 实时 delta/快照不覆盖回看；快速滚动采用最后答复，回到底部后恢复 delta 序号校验。
 独立 Xvfb + 真实宿主通过 10,000 行回看、延迟答复、输入/IME/粘贴、resize、备用屏与分屏验收；
-真实触控板与 Wayland 未验；每 15 秒 ping 保持长时间阅读连接，自动断线恢复仍未实现。
+真实触控板与 Wayland 未验；每 15 秒 ping 保持长时间阅读连接，45 秒完整帧静默会关闭连接并显示原因；收发队列有界，自动断线恢复仍未实现。见 [传输边界](../../docs/linux-transport.md)。
 见 [回看验证记录](../../docs/linux-scroll-progress.md)，本切片不代表 S5 完成。
 
 依赖 GTK ≥4.8 开发库与 Rust ≥1.92（gtk4-rs 的最低工具链）；Ubuntu 可安装 `libgtk-4-dev pkg-config`。

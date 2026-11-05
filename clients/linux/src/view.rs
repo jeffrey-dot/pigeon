@@ -54,6 +54,7 @@ pub struct Workspace {
     link_press: crate::links::LinkPress,
     pub search: Option<crate::search::Search>,
     pub search_supported: bool,
+    pub disconnected_reason: String,
 }
 
 impl Workspace {
@@ -135,6 +136,7 @@ impl Workspace {
             pointer: Default::default(),
             link_press: Default::default(),
             search: None,
+            disconnected_reason: String::new(),
             search_supported: pigeon_core::api::offers_feature(hello, "text_query")
                 .unwrap_or(false)
                 && pigeon_core::api::offers_feature(hello, "text_viewport").unwrap_or(false),

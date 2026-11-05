@@ -81,11 +81,11 @@ fn start(application: &gtk::Application) {
     let area = workspace.borrow().area.clone();
     area.grab_focus();
 
-    let receiver = host.receiver();
+    let receiver = host.clone();
     let host_for_pump = host.clone();
     let workspace_for_pump = workspace.clone();
     gtk::glib::spawn_future_local(async move {
-        while let Ok(message) = receiver.recv().await {
+        while let Some(message) = receiver.next().await {
             match &message {
                 Message::Ping { ts } => host_for_pump.send(Message::Pong { ts: *ts }),
                 Message::Unsupported { t_of } => {
@@ -103,7 +103,7 @@ fn start(application: &gtk::Application) {
             }
         }
         workspace_for_pump.borrow_mut().disconnect();
-        eprintln!("pigeon: the host closed the connection");
+        eprintln!("pigeon: {}", receiver.reason());
     });
 }
 

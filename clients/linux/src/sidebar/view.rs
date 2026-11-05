@@ -125,8 +125,15 @@ impl SidebarView {
         self.connection.set_text(if work.model.connected {
             ""
         } else {
-            "Disconnected · restart to connect"
+            &work.disconnected_reason
         });
+        self.connection
+            .set_ellipsize(gtk::pango::EllipsizeMode::End);
+        self.connection.set_tooltip_text(
+            (!work.model.connected)
+                .then(|| format!("{} · restart to connect", work.disconnected_reason))
+                .as_deref(),
+        );
         self.projects
             .borrow_mut()
             .retain(|cwd, _| work.model.sessions.iter().any(|s| &s.cwd == cwd));

@@ -36,8 +36,9 @@
 | `03b1a41` | [41951970329](https://github.com/jeffrey-dot/pigeon/actions/runs/41951970329) | 全部通过，含 OSC 8 复审、文本查询、Linux 侧栏/订阅隔离与 Swift ABI 夹具修复 |
 | `61acd11` | [41953937127](https://github.com/jeffrey-dot/pigeon/actions/runs/41953937127) | 全部通过，含会话环境覆盖、分屏继承、API/C ABI 与真实 PTY 校验 |
 | `aad62a6` | [41992679920](https://github.com/jeffrey-dot/pigeon/actions/runs/41992679920) | 六作业全部通过，含 Linux Harp 外观、GL alpha、鼠标坐标和静默查询夹具 |
+| `a92a079` | [41999149991](https://github.com/jeffrey-dot/pigeon/actions/runs/41999149991) | 六作业全部通过，含 Linux 搜索/冻结画面/取消与定位 |
 
-已通过的平台 CI 对应 `aad62a6`，含 session env、OSC 8、文本查询、Linux 侧栏和宿主基线 smoke；Linux 搜索新 CI 待核对。`8ccaeb3` 的 macOS 15 Intel `swift build` 与 `swift test` 通过：执行 352 项、跳过 7 项、0 failures；独立 Foundation 测试 98 项通过。
+已通过的平台 CI 对应 `a92a079`，含 session env、OSC 8、文本查询、Linux 侧栏和宿主基线 smoke；Linux 传输边界新 CI 待核对。`8ccaeb3` 的 macOS 15 Intel `swift build` 与 `swift test` 通过：执行 352 项、跳过 7 项、0 failures；独立 Foundation 测试 98 项通过。
 Apple Silicon 的最终提交尚未完成验收；不能用 Intel 结果代替。CI 构建和测试也不等于真实状态面板/SSH/GPU 呈现验收。
 
 ## 主线程本地验证
@@ -90,3 +91,5 @@ OSC 7501 上报工具：pigeon-report/pigeon-run 与接入指南已整合。规�
 6489ca6 的 Swift 完整构建/测试、Ubuntu Rust、GTK、header/docs 已通过；macOS Rust 的真实文本查询测试在 READY 后收到交互 shell 启动序列而正确返回 stale_text。测试夹具改为 READY 后安静读取的非交互进程，专题本机通过，待新 CI。
 
 Linux 搜索：Ctrl+Shift+F/顶部放大镜、ASCII 大小写、分页/Stop、上下命中与冻结定位高亮已接。GTK 84 passed / 2 ignored，fmt/clippy/build 通过；真实 Xvfb/PTY 搜索与延迟答复、Unicode/跨会话隔离、旧能力退化及 input/sidebar/scroll/modern-input 回归通过。截图检查通过，见 [Linux 搜索](linux-search.md)。未改核心/ABI；新 CI 待验。
+
+Linux 传输边界：5 秒 socket 握手、45 秒合法完整帧静默期限、5 秒写超时；出站 8 MiB/256 帧、入站 16 MiB wire计费/256 帧，超量或失败关闭两端并显示原因。GTK 89 passed / 2 ignored，clippy/build 通过；socket pair 正反例、搜索/侧栏与 47 秒回看保活桌面回归通过。见 [Linux 传输](linux-transport.md)；自动重连尚未实现。
