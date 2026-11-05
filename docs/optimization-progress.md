@@ -96,3 +96,5 @@ Linux 搜索：Ctrl+Shift+F/顶部放大镜、ASCII 大小写、分页/Stop、�
 Linux 传输边界：5 秒 socket 握手、45 秒合法完整帧静默期限、5 秒写超时；出站 8 MiB/256 帧、入站 16 MiB wire计费/256 帧，超量或失败关闭两端并显示原因。GTK 89 passed / 2 ignored，clippy/build 通过；socket pair 正反例、搜索/侧栏与 47 秒回看保活桌面回归通过。见 [Linux 传输](linux-transport.md)；自动重连尚未实现。
 
 Linux 本地恢复：顺序连接泵、后台重试、完整快照恢复选中会话；旧消息/搜索/确认门控失效，同实例保留应用内 seen，新 instance 提示原任务未恢复且不自动创建。GTK 92 passed / 2 ignored；真实断链/延迟快照/宿主重启/关闭窗口、搜索及侧栏脚本通过，增量续传与 SSH 待补。见 [恢复说明](linux-reconnect.md)。
+
+Linux 增量续传：同实例实时屏保留 seq，attach.since 后用顺序 pong 标记追赶结束；该标记不授权状态已查看，显式记录面板需要新屏幕。缺序取消旧 pong 并取全量，历史/搜索/新实例不续传。GTK 95 passed / 2 ignored；静默无快照、漏帧 delta 补回、延迟历史全量恢复三种真实代理断链验收通过，侧栏/搜索回归通过。

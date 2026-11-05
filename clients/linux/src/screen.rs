@@ -145,6 +145,10 @@ impl Screen {
     pub fn cols(&self) -> usize {
         usize::from(self.snapshot.cols)
     }
+    pub fn resume_seq(&self) -> Option<u32> {
+        (!self.scroll.active() && self.search_picture.is_none() && !self.search_returning)
+            .then_some(self.seq)
+    }
 
     pub fn picture(&self) -> &Snapshot {
         self.search_picture.as_ref().unwrap_or(&self.snapshot)

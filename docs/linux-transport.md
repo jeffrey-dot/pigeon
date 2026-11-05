@@ -11,7 +11,7 @@
   产品既有单帧 8 MiB 限制仍由核心解码器执行。
 - `--socket-path`/拉起宿主的子进程执行尚未加独立超时；上面的握手期限从 socket 连接建立后开始。
 
-本地 socket 已接 [自动恢复](linux-reconnect.md)，按 instance 和连接代次重建屏幕与状态确认；SSH、多主机、已发送输入回执或 socket 对端身份的新检查尚未由本片实现。
+本地 socket 已接 [自动恢复与增量续传](linux-reconnect.md)，按 instance 和连接代次重建屏幕与状态确认；SSH、多主机、已发送输入回执或 socket 对端身份的新检查尚未由本片实现。
 
 ## 验证
 

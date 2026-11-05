@@ -126,6 +126,16 @@ fn forward(mut reader: UnixStream, mut writer: UnixStream, log: Arc<Mutex<File>>
                         std::thread::sleep(Duration::from_millis(150));
                     }
                     record(&log, direction, &message);
+                    if let Message::Attach {
+                        pane_id,
+                        since: Some(seq),
+                        ..
+                    } = &message
+                    {
+                        let mut log = log.lock().unwrap();
+                        writeln!(log, "{direction} resume {pane_id} {seq}").unwrap();
+                        log.flush().unwrap();
+                    }
                     if matches!(message, Message::Snapshot { .. })
                         && std::env::var_os("PIGEON_TEST_RECOVERY_DELAY").is_some()
                     {

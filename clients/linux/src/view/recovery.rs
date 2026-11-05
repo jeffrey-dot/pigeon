@@ -24,6 +24,9 @@ impl Workspace {
         self.host = host;
         self.connection_generation = self.connection_generation.wrapping_add(1);
         self.model.reconnect(same, self.host.scrollback());
+        if !features.iter().any(|f| f == "delta") {
+            self.model.disable_resume();
+        }
         self.status.begin_connection(
             host_id,
             instance.as_deref(),
@@ -34,7 +37,9 @@ impl Workspace {
         self.search_supported = features.iter().any(|f| f == "text_query")
             && features.iter().any(|f| f == "text_viewport");
         self.presented.clear();
-        self.sized.clear();
+        if !same {
+            self.sized.clear();
+        }
         self.sizes.clear();
         self.terminal_focus = None;
         self.wheel.reset();

@@ -28,9 +28,17 @@ pub struct SessionModel {
     creating: Option<u32>,
     initial_list: bool,
     restore_session: Option<u32>,
+    resume_selection: Option<u32>,
+    resume_candidates: HashSet<PaneId>,
+    resume_wait: HashMap<u64, PaneId>,
+    pub caught_up: HashSet<PaneId>,
 }
 
 impl SessionModel {
+    pub fn disable_resume(&mut self) {
+        self.resume_candidates.clear();
+        self.panes.clear();
+    }
     pub fn new(scrollback: bool) -> Self {
         Self {
             connected: true,
@@ -59,7 +67,7 @@ impl SessionModel {
         self.focus.filter(|pane| {
             self.connected
                 && self.barrier.is_none()
-                && self.received.contains(pane)
+                && (self.received.contains(pane) || self.caught_up.contains(pane))
                 && self.layout.iter().any(|(id, _)| id == pane)
                 && self.panes.contains_key(pane)
                 && self.zoom.is_none_or(|zoom| zoom == *pane)
@@ -74,11 +82,23 @@ impl SessionModel {
     pub fn disconnect(&mut self) {
         self.connected = false;
         self.received.clear();
+        self.caught_up.clear();
+        self.resume_candidates = self
+            .panes
+            .iter()
+            .filter_map(|(id, screen)| screen.resume_seq().map(|_| *id))
+            .collect();
     }
 
     /// A handshake is not a fresh picture. Keep selection intent only within one instance.
     pub fn reconnect(&mut self, same_instance: bool, scrollback: bool) {
         self.restore_session = if same_instance { self.selected } else { None };
+        self.resume_selection = self.restore_session;
+        if !same_instance {
+            self.resume_candidates.clear();
+        }
+        self.resume_wait.clear();
+        self.caught_up.clear();
         self.connected = true;
         self.scrollback = scrollback;
         self.selection_generation = self.selection_generation.wrapping_add(1);
@@ -92,7 +112,8 @@ impl SessionModel {
         self.zoom = None;
         self.layout.clear();
         self.splits.clear();
-        self.panes.clear();
+        self.panes
+            .retain(|id, _| self.resume_candidates.contains(id));
         self.sessions.clear();
     }
 
@@ -131,6 +152,13 @@ impl SessionModel {
         let Some(info) = self.sessions.iter().find(|info| info.session_id == session) else {
             return vec![];
         };
+        let resuming = self.resume_selection == Some(session);
+        self.resume_selection = None;
+        if !resuming {
+            self.resume_candidates.clear();
+            self.resume_wait.clear();
+        }
+        self.caught_up.clear();
         let pane = info
             .active_pane
             .filter(|pane| info.panes.contains(pane))
@@ -147,7 +175,9 @@ impl SessionModel {
         if let Some(session) = self.selected_session() {
             let panes = session.panes.clone();
             for pane in panes {
-                self.panes.remove(&pane);
+                if !self.resume_candidates.contains(&pane) {
+                    self.panes.remove(&pane);
+                }
             }
         }
         let ts = u64::MAX - self.selection_generation;
@@ -159,6 +189,23 @@ impl SessionModel {
 
     pub fn attach(&mut self, pane_id: PaneId) -> Vec<Message> {
         self.attached.insert(pane_id);
+        if self.resume_candidates.remove(&pane_id) {
+            if let Some(since) = self.panes.get(&pane_id).and_then(Screen::resume_seq) {
+                let id = self.request_id();
+                let ts = (1u64 << 63) | u64::from(id);
+                self.resume_wait.insert(ts, pane_id);
+                return vec![
+                    Message::Attach {
+                        id,
+                        pane_id,
+                        size_policy: None,
+                        history: Some(false),
+                        since: Some(since),
+                    },
+                    Message::Ping { ts },
+                ];
+            }
+        }
         let mut effects = vec![];
         if self.scrollback {
             if let Some(screen) = self.panes.get_mut(&pane_id) {
@@ -179,6 +226,13 @@ impl SessionModel {
     pub fn apply(&mut self, message: &Message) -> Vec<Message> {
         match message {
             Message::Pong { ts } if self.barrier == Some(*ts) => self.barrier = None,
+            Message::Pong { ts } => {
+                if let Some(pane) = self.resume_wait.remove(ts) {
+                    if self.panes.contains_key(&pane) {
+                        self.caught_up.insert(pane);
+                    }
+                }
+            }
             Message::Sessions { items } => {
                 self.sessions = items.clone();
                 self.sessions.sort_by_key(|s| s.session_id);
@@ -234,6 +288,9 @@ impl SessionModel {
             }
             Message::Error { id, .. } if id.is_some() && *id == self.creating => {
                 self.creating = None
+            }
+            Message::Error { id: Some(id), .. } => {
+                self.resume_wait.remove(&((1u64 << 63) | u64::from(*id)));
             }
             Message::Layout {
                 session_id, zoom, ..
@@ -302,11 +359,25 @@ impl SessionModel {
                 }
             }
             Message::Delta { pane_id, .. } if self.knows(*pane_id) => {
+                let before = self.panes.get(pane_id).map(|s| s.revision);
                 let applied = self
                     .panes
                     .get_mut(pane_id)
                     .is_some_and(|screen| screen.apply_delta(message));
-                if !applied && self.layout.iter().any(|(pane, _)| pane == pane_id) {
+                if applied
+                    && self
+                        .panes
+                        .get(pane_id)
+                        .is_some_and(|s| Some(s.revision) != before)
+                {
+                    self.received.insert(*pane_id);
+                }
+                if !applied
+                    && (self.layout.iter().any(|(pane, _)| pane == pane_id)
+                        || self.resume_wait.values().any(|pane| pane == pane_id))
+                {
+                    self.resume_wait.retain(|_, pane| pane != pane_id);
+                    self.caught_up.remove(pane_id);
                     return self.attach(*pane_id);
                 }
             }

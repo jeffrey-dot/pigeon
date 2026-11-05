@@ -69,11 +69,18 @@ tty.setraw(0)
 root=Path(os.environ['TEST_ROOT'])
 path=root/f'bytes-{os.getpid()}'
 path.touch()
-os.write(1,f'ALIVE-{os.getpid()}\\r\\n中文 é'.encode())
+os.write(1,(''.join(f'line-{i}\\r\\n' for i in range(100))+f'ALIVE-{os.getpid()}\\r\\n中文 é').encode())
+last=None
 while True:
-    data=os.read(0,4096)
-    if not data:break
-    with path.open('ab') as f:f.write(data)
+    if select.select([0],[],[],.01)[0]:
+        data=os.read(0,4096)
+        if not data:break
+        with path.open('ab') as f:f.write(data)
+        os.write(1,data)
+    trigger=root/('output-'+str(os.getpid()))
+    if trigger.exists() and trigger.stat().st_mtime_ns!=last:
+        last=trigger.stat().st_mtime_ns
+        os.write(1,trigger.read_bytes())
 ''')
         fixture.chmod(0o700)
         server = ROOT / "core/target/debug/pigeon-server"
@@ -97,19 +104,33 @@ while True:
         second = next(p for p in root.glob("bytes-*") if p != first)
         pump(lambda: f"ALIVE-{second.name[6:]}" in copied())
         key("b")
+        settle(.3)
         before = copied()
+        if os.environ.get("PIGEON_TEST_FULL_RECOVERY"):
+            key("shift+Page_Up")
+            settle(.4)
         stop(bridge); proxy.unlink(missing_ok=True)
         settle(.5)
         key("z")
         assert second.read_bytes() == b"b"
         assert host.poll() is None and app.poll() is None
+        missed = bool(os.environ.get("PIGEON_TEST_MISSED_DELTA"))
+        if missed:
+            (root / ("output-" + second.name[6:])).write_text("\r\nWHILE-DISCONNECTED")
+            settle(.3)
         bridge = spawn("proxy2", [str(proxy_binary), str(proxy), str(real), str(root / "wire2.log")],
                        dict(os.environ, PIGEON_TEST_RECOVERY_DELAY="1"))
         pump(lambda: (root / "wire2.log").exists())
         pump(lambda: "C attach 2" in (root / "wire2.log").read_text())
-        key("y")
-        assert second.read_bytes() == b"b", "handshake/layout cannot authorize stale-screen input"
-        pump(lambda: copied() == before)
+        if os.environ.get("PIGEON_TEST_FULL_RECOVERY"):
+            key("y")
+            assert second.read_bytes() == b"b", "handshake/layout cannot authorize stale-screen input"
+        pump(lambda: "WHILE-DISCONNECTED" in copied() if missed else copied() == before)
+        wire2 = (root / "wire2.log").read_text()
+        if not os.environ.get("PIGEON_TEST_FULL_RECOVERY"):
+            assert "C resume 2" in wire2, wire2
+            assert "S snapshot 2" not in wire2, wire2
+            if missed: assert "S delta 2" in wire2, wire2
         key("c")
         pump(lambda: second.read_bytes() == b"bc")
         assert first.read_bytes() == b"a"

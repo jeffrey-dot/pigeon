@@ -50,16 +50,16 @@ cargo test -p pigeon-linux                   # 纯逻辑单测（会话路由 / 
 不会自动退出回看。仅 done/error 可点 **Mark This Record as Read**；确认要求当前连接屏幕已绘制、目标 pane 可见且实时、窗口前台。
 后台/隐藏/回看不确认，working/blocked/idle 不 ack。切会话、断线、记录被替换/clear 后旧确认目标失效。
 旧宿主仅显示实际发来的单条报告，保留已收到的旧终态；同 id 新报告撤销旧身份，已确认记录可回收；不保证发现旧宿主未发送的记录，长期未确认集合的资源预算待补。
-无跨客户端重启 seen 持久化、无 SSH；本地 socket 已接自动重连和完整快照恢复，见 [恢复说明](../../docs/linux-reconnect.md)。详见 [侧栏验证记录](../../docs/linux-sidebar-progress.md)。
+无跨客户端重启 seen 持久化、无 SSH；本地 socket 已接自动重连、实时屏增量续传和全量退化，见 [恢复说明](../../docs/linux-reconnect.md)。详见 [侧栏验证记录](../../docs/linux-sidebar-progress.md)。
 
-**未做**：SSH 连接管理、增量续传、拖动分隔线改比例、拖选/选择复制、
+**未做**：SSH 连接管理、拖动分隔线改比例、拖选/选择复制、
 渲染脏行增量、DMABUF、emoji ZWJ 序列整形。
 GTK 客户端已有 Ubuntu CI 作业（构建/clippy/逻辑测试），尚无 GUI 发布产物。输入切片通过独立 Xvfb + fcitx5 拼音验收；Wayland、IBus、日文 IME、非美式键盘和混合 DPI 仍未验。见 [输入验证记录](../../docs/linux-input-progress.md)。
 
 **回看**：握手协商 `scrollback`，通过宿主 `scroll` 获取一屏（不拉整段历史），显示回看位置与每 pane 位置条。
 实时 delta/快照不覆盖回看；快速滚动采用最后答复，回到底部后恢复 delta 序号校验。
 独立 Xvfb + 真实宿主通过 10,000 行回看、延迟答复、输入/IME/粘贴、resize、备用屏与分屏验收；
-真实触控板与 Wayland 未验；每 15 秒 ping 保持长时间阅读连接，45 秒完整帧静默会关闭连接并显示原因；收发队列有界，本地自动断线恢复已接，增量续传仍待补。见 [传输边界](../../docs/linux-transport.md)。
+真实触控板与 Wayland 未验；每 15 秒 ping 保持长时间阅读连接，45 秒完整帧静默会关闭连接并显示原因；收发队列有界，本地自动断线恢复已接，同实例实时屏优先增量续传，历史/搜索/新实例走全量。见 [传输边界](../../docs/linux-transport.md)。
 见 [回看验证记录](../../docs/linux-scroll-progress.md)，本切片不代表 S5 完成。
 
 依赖 GTK ≥4.8 开发库与 Rust ≥1.92（gtk4-rs 的最低工具链）；Ubuntu 可安装 `libgtk-4-dev pkg-config`。

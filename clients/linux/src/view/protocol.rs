@@ -61,7 +61,7 @@ impl Workspace {
         }) {
             self.close_search(false);
         }
-        if previous != self.model.selected {
+        if previous != self.model.selected && previous.is_some() {
             self.reset_selection();
         }
         if previous_focus != self.model.focus {
@@ -134,8 +134,8 @@ impl Workspace {
 
     pub fn disconnect(&mut self) {
         self.disconnected_reason = self.host.reason();
-        self.close_search(false);
         self.model.disconnect();
+        self.close_search(false);
         self.cancel_input();
         self.input.set_target(None);
         self.presented.clear();
@@ -148,6 +148,10 @@ impl Workspace {
             .is_some_and(|s| s.panes.contains(&pane))
         {
             return;
+        }
+        if !self.model.received.contains(&pane) && self.model.caught_up.contains(&pane) {
+            let effects = self.model.attach(pane);
+            self.send_effects(effects);
         }
         if self.model.zoom.is_some_and(|zoom| zoom != pane) {
             let id = self.model.request_id();
