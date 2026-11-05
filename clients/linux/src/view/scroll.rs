@@ -11,6 +11,9 @@ use crate::{input, render::Renderer, scroll_input};
 
 impl Workspace {
     fn scroll(&mut self, pane: PaneId, offset: i32) {
+        if self.search.is_some() {
+            self.close_search(true);
+        }
         if !self.host.scrollback() {
             return;
         }

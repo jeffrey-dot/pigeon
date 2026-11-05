@@ -27,6 +27,7 @@ mod links;
 mod pointer;
 mod protocol;
 mod scroll;
+mod search;
 
 pub struct Workspace {
     pub area: gtk::GLArea,
@@ -51,6 +52,8 @@ pub struct Workspace {
     terminal_focus: Option<PaneId>,
     pointer: pointer::Pointer,
     link_press: crate::links::LinkPress,
+    pub search: Option<crate::search::Search>,
+    pub search_supported: bool,
 }
 
 impl Workspace {
@@ -131,6 +134,10 @@ impl Workspace {
             terminal_focus: None,
             pointer: Default::default(),
             link_press: Default::default(),
+            search: None,
+            search_supported: pigeon_core::api::offers_feature(hello, "text_query")
+                .unwrap_or(false)
+                && pigeon_core::api::offers_feature(hello, "text_viewport").unwrap_or(false),
         }));
 
         let weak = Rc::downgrade(&workspace);
@@ -314,6 +321,7 @@ impl Workspace {
             .map(|(pane, _, _)| pane);
         if let Some(pane) = hit {
             if self.model.focus != Some(pane) {
+                self.close_search(false);
                 self.cancel_input();
                 self.wheel.reset();
                 self.model.focus = Some(pane);

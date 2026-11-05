@@ -52,12 +52,14 @@ impl Workspace {
     }
 
     pub fn prepare_input(&mut self) {
+        self.close_search(true);
         if let Some(pane) = self.focus() {
             self.return_live(pane);
         }
     }
 
     pub fn send_input(&mut self, message: Message) {
+        self.close_search(true);
         match &message {
             Message::Keys { pane_id, .. } | Message::Paste { pane_id, .. } => {
                 if self.model.input_pane() != Some(*pane_id) {
@@ -130,7 +132,7 @@ impl Workspace {
                 .model
                 .panes
                 .get(&pane_id)
-                .is_some_and(|s| !s.scroll.active())
+                .is_some_and(|s| !s.scroll.active() && s.search_picture.is_none())
         {
             self.host.send(Message::Keys { pane_id, bytes });
         }
@@ -139,11 +141,9 @@ impl Workspace {
     pub fn update_terminal_focus(&mut self) {
         let next = self.model.input_pane().filter(|pane| {
             self.area.has_focus()
-                && self
-                    .model
-                    .panes
-                    .get(pane)
-                    .is_some_and(|s| !s.scroll.active() && s.modes & 64 != 0)
+                && self.model.panes.get(pane).is_some_and(|s| {
+                    !s.scroll.active() && s.search_picture.is_none() && s.modes & 64 != 0
+                })
         });
         if self.terminal_focus == next {
             return;

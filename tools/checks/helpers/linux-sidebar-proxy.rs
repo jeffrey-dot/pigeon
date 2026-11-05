@@ -6,7 +6,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use pigeon_core::api::{decode_frame, encode_frame, snapshot_of, Message};
+use pigeon_core::api::{Message, decode_frame, encode_frame, snapshot_of};
 
 fn record(log: &Arc<Mutex<File>>, direction: &str, message: &Message) {
     let summary = match message {
@@ -14,6 +14,13 @@ fn record(log: &Arc<Mutex<File>>, direction: &str, message: &Message) {
             format!("hello {}", features.join(","))
         }
         Message::Ping { ts } => format!("ping {ts}"),
+        Message::TextQuery { id, pane_id, query } => format!("query {id} {pane_id} {query:?}"),
+        Message::TextQueryResult {
+            id,
+            pane_id,
+            result,
+        } => format!("result {id} {pane_id} {:?}", result.info()),
+        Message::Error { id, code, .. } => format!("error {id:?} {code}"),
         Message::Pong { ts } => format!("pong {ts}"),
         Message::Scroll { pane_id, offset } => format!("scroll {pane_id} {offset}"),
         Message::Snapshot {
@@ -105,6 +112,18 @@ fn forward(mut reader: UnixStream, mut writer: UnixStream, log: Arc<Mutex<File>>
                         if let Message::HelloAck { features, .. } = &mut message {
                             features.retain(|feature| feature != "scrollback");
                         }
+                    }
+                    if std::env::var_os("PIGEON_TEST_NO_SEARCH").is_some() {
+                        if let Message::HelloAck { features, .. } = &mut message {
+                            features.retain(|feature| {
+                                !matches!(feature.as_str(), "text_query" | "text_viewport")
+                            });
+                        }
+                    }
+                    if matches!(message, Message::TextQueryResult { .. })
+                        && std::env::var_os("PIGEON_TEST_SEARCH_DELAY").is_some()
+                    {
+                        std::thread::sleep(Duration::from_millis(150));
                     }
                     record(&log, direction, &message);
                     // Exercise several GTK gestures before the first answer arrives.

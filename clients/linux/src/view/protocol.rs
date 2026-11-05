@@ -18,6 +18,9 @@ impl Workspace {
     }
 
     pub fn apply(&mut self, message: &Message) {
+        if self.search_message(message) {
+            return;
+        }
         let previous = self.model.selected;
         let previous_focus = self.model.focus;
         let previously_known: std::collections::HashSet<_> = self
@@ -34,6 +37,13 @@ impl Workspace {
             clients,
         } = message
         {
+            if self.search.as_ref().is_some_and(|s| s.pane == *pane_id)
+                && self.model.panes.get(pane_id).is_some_and(|s| {
+                    s.cols() != usize::from(*cols) || s.rows() != usize::from(*rows)
+                })
+            {
+                self.close_search(true);
+            }
             self.sizes.insert(*pane_id, (source.clone(), *clients));
             if self.model.layout.iter().any(|(pane, _)| pane == pane_id)
                 && self.model.panes.get(pane_id).is_some_and(|s| {
@@ -44,6 +54,13 @@ impl Workspace {
             }
         }
         let effects = self.model.apply(message);
+        if self.search.as_ref().is_some_and(|s| {
+            self.model.selection_generation != s.selection
+                || self.model.focus != Some(s.pane)
+                || !self.model.connected
+        }) {
+            self.close_search(false);
+        }
         if previous != self.model.selected {
             self.reset_selection();
         }
@@ -86,6 +103,7 @@ impl Workspace {
         if self.model.selected == Some(session) {
             return;
         }
+        self.close_search(false);
         self.cancel_input();
         let effects = self.model.select(session);
         self.reset_selection();
@@ -115,6 +133,7 @@ impl Workspace {
     }
 
     pub fn disconnect(&mut self) {
+        self.close_search(false);
         self.model.disconnect();
         self.cancel_input();
         self.input.set_target(None);
@@ -145,6 +164,7 @@ impl Workspace {
             && self.model.zoom.is_none_or(|zoom| zoom == pane)
             && self.model.panes.get(&pane).is_some_and(|s| {
                 !s.scroll.active()
+                    && s.search_picture.is_none()
                     && s.cols() > 0
                     && s.rows() > 0
                     && self.presented.get(&pane) == Some(&s.revision)

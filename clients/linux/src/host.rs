@@ -148,10 +148,17 @@ pub fn handshake(link: &HostLink) -> Result<Message, String> {
     link.send(Message::Hello {
         proto: PROTO_VERSION,
         client: CLIENT_NAME.to_owned(),
-        features: ["delta", "scrollback", "status_all", "status_snapshot"]
-            .into_iter()
-            .map(str::to_owned)
-            .collect(),
+        features: [
+            "delta",
+            "scrollback",
+            "status_all",
+            "status_snapshot",
+            "text_query",
+            "text_viewport",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect(),
     });
     match link.recv().ok_or("host closed during the handshake")? {
         message @ Message::HelloAck { .. } => {

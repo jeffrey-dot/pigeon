@@ -71,7 +71,7 @@ pub fn build(draw: &mut Draw<'_>, screen: &Screen, origin: [f32; 2], cursor_on: 
     let cols = screen.cols();
     let rows = screen.rows();
     let mut batch = Batch::default();
-    let cursor = &screen.snapshot.cursor;
+    let cursor = &screen.picture().cursor;
     let cursor_cell = (usize::from(cursor.x), usize::from(cursor.y));
 
     for y in 0..rows {
@@ -85,7 +85,15 @@ pub fn build(draw: &mut Draw<'_>, screen: &Screen, origin: [f32; 2], cursor_on: 
                 continue;
             }
             let attrs = cell.attrs;
-            let (fg, bg) = palette.colors(cell.fg, cell.bg, attrs);
+            let (mut fg, mut bg) = palette.colors(cell.fg, cell.bg, attrs);
+            if screen
+                .search_highlight
+                .iter()
+                .any(|&(row, first, end)| row == y && x >= first && x < end)
+            {
+                bg = 0xf2d07a;
+                fg = 0x1d1d1f;
+            }
             let left = origin_x + x as f32 * metrics.cell_w;
             let width = metrics.cell_w * f32::from(cell.width.max(1));
 

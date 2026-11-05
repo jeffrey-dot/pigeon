@@ -111,6 +111,25 @@ fn history_draw_does_not_authorize_new_live_screen_before_draw() {
 }
 
 #[test]
+fn search_picture_survives_live_deltas_until_recovery_snapshot() {
+    let mut screen = screen();
+    let frozen = screen.snapshot.clone();
+    screen.search_picture = Some(frozen.clone());
+    assert!(screen.apply_delta(&delta(5)));
+    assert_eq!(screen.picture(), &frozen);
+    screen.search_returning = true;
+    assert!(screen.apply_delta(&delta(6)));
+    assert!(screen.search_picture.is_some());
+    let mut live = snapshot_message();
+    if let Message::Snapshot { seq, .. } = &mut live {
+        *seq = 6;
+    }
+    assert!(screen.apply_snapshot(&live));
+    assert!(screen.search_picture.is_none());
+    assert!(!screen.search_returning);
+}
+
+#[test]
 fn missing_or_malformed_frames_leave_the_previous_screen_intact() {
     let mut screen = screen();
     let before = screen.snapshot.clone();

@@ -7,6 +7,7 @@ impl Workspace {
     pub(super) fn link_at(&self, pane: u32, point: [u16; 2]) -> Option<LinkTarget> {
         let screen = self.model.panes.get(&pane)?;
         if self.focus().is_none()
+            || screen.search_picture.is_some()
             || !self.model.received.contains(&pane)
             || self.presented.get(&pane) != Some(&screen.revision)
         {

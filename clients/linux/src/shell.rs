@@ -66,6 +66,7 @@ pub fn window(
     bar.set_title_widget(Some(&gtk::Box::new(gtk::Orientation::Horizontal, 0)));
     window.set_titlebar(Some(&bar));
     theme::apply(&window, theme::dark());
+    header.append(&crate::search::view::install(workspace, &window));
     let work = Rc::downgrade(workspace);
     let side = sidebar.root.clone();
     gtk::glib::timeout_add_local(std::time::Duration::from_millis(200), move || {

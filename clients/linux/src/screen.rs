@@ -15,6 +15,9 @@ pub struct Screen {
     pub snapshot: Snapshot,
     seq: u32,
     pub revision: u64,
+    pub search_picture: Option<Snapshot>,
+    pub search_highlight: Vec<(usize, usize, usize)>,
+    pub search_returning: bool,
     pub scroll: ScrollState,
     /// Mode bits from docs/protocol.md §3.3.
     pub modes: u32,
@@ -58,6 +61,9 @@ impl Screen {
             snapshot,
             seq,
             revision: 1,
+            search_picture: None,
+            search_highlight: vec![],
+            search_returning: false,
             scroll,
             modes,
             exited: None,
@@ -88,6 +94,11 @@ impl Screen {
         self.snapshot = next.snapshot;
         self.seq = next.seq;
         self.modes = next.modes;
+        if self.search_returning && !self.scroll.active() {
+            self.search_picture = None;
+            self.search_highlight.clear();
+            self.search_returning = false;
+        }
         self.revision = self.revision.saturating_add(1);
         true
     }
@@ -135,6 +146,10 @@ impl Screen {
         usize::from(self.snapshot.cols)
     }
 
+    pub fn picture(&self) -> &Snapshot {
+        self.search_picture.as_ref().unwrap_or(&self.snapshot)
+    }
+
     pub fn rows(&self) -> usize {
         usize::from(self.snapshot.rows)
     }
@@ -145,13 +160,13 @@ impl Screen {
     }
 
     pub fn cell(&self, x: usize, y: usize) -> Option<&pigeon_core::api::Cell> {
-        self.snapshot.screen.get(y).and_then(|row| row.get(x))
+        self.picture().screen.get(y).and_then(|row| row.get(x))
     }
 
     /// Only the visible live or scrolled screen; other history rows and panes are excluded.
     pub fn visible_text(&self) -> String {
         let mut text = String::new();
-        for (index, row) in self.snapshot.screen.iter().enumerate() {
+        for (index, row) in self.picture().screen.iter().enumerate() {
             let start = text.len();
             for cell in row {
                 text.push_str(&cell.text());

@@ -64,7 +64,7 @@ impl Workspace {
         self.model
             .panes
             .get(&pane)
-            .filter(|s| !s.scroll.active())
+            .filter(|s| !s.scroll.active() && s.search_picture.is_none())
             .map(|s| s.modes)
     }
     pub(super) fn cancel_pointer(&mut self) {
