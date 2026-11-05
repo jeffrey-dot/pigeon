@@ -16,6 +16,8 @@ use std::ptr;
 use crate::api::{self, Axis, Core, PgError, PgResult, StatusKind, StatusState};
 
 mod cell_text;
+mod selection;
+pub use selection::*;
 mod links;
 pub use links::PgLink;
 mod text_query;

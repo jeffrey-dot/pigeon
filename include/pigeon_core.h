@@ -34,6 +34,7 @@ typedef struct PgCore PgCore;
 typedef struct PgMsg PgMsg;
 typedef struct PgStatusSnapshot PgStatusSnapshot;
 typedef struct PgTextResult PgTextResult;
+typedef struct PgSelection PgSelection;
 
 
 #ifndef PIGEON_CORE_H
@@ -324,6 +325,27 @@ typedef struct PgRect {
     float w;
     float h;
 } PgRect;
+
+typedef struct PgGridSelection {
+    uint32_t size;
+    uint32_t version;
+    uint16_t anchor_row;
+    uint16_t anchor_col;
+    uint16_t head_row;
+    uint16_t head_col;
+    /**
+     * 0 cell, 1 word, 2 line. Points are inclusive visible-grid coordinates.
+     */
+    uint8_t unit;
+    bool rectangle;
+} PgGridSelection;
+
+typedef struct PgSelectionSpan {
+    uint32_t size;
+    uint16_t row;
+    uint16_t first;
+    uint16_t end;
+} PgSelectionSpan;
 
 typedef struct PgTextRange {
     uint32_t size;
@@ -632,6 +654,17 @@ uint32_t pg_layout_split_of(PgCore *core, uint32_t pane_id);
 bool pg_layout_focus(PgCore *core, uint32_t pane_id);
 
 uint32_t pg_layout_focused(PgCore *core);
+
+PgSelection *pg_select_grid(const struct PgSnapshot *snapshot, const struct PgGridSelection *request);
+
+/**
+ * Returned text borrows this selection until pg_selection_free, not the source snapshot.
+ */
+struct PgStr pg_selection_text(const PgSelection *selection);
+
+size_t pg_selection_spans(const PgSelection *selection, struct PgSelectionSpan *out, size_t cap);
+
+void pg_selection_free(PgSelection *selection);
 
 /**
  * Runs one bounded query on an embedded pane. NULL means failure; read last_error_code.

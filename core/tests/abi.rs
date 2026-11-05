@@ -620,3 +620,6 @@ mod text_query;
 
 #[path = "abi/session_environment.rs"]
 mod session_environment;
+
+#[path = "abi/selection.rs"]
+mod selection;

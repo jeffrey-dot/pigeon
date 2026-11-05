@@ -13,6 +13,7 @@ pub(crate) mod history_budget;
 pub mod sync_timeout;
 pub(crate) mod hyperlink;
 mod osc8_filter;
+pub mod selection;
 
 /// Attribute bits, mirrored by `PG_ATTR_*` in the C ABI and by the protocol's
 /// `cell[1]`.
