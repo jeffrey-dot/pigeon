@@ -56,6 +56,7 @@ extension PaneView {
         let chrome = OverlayColors.resolve(for: appearance)
         var shown = (cells: cells, cursor: cursor)
         shown.cursor.hollow = !hasKeyboardFocus
+        if searchFrozen { shown.cursor.visible = false }
         if blinkTimer != nil, !blink.isLit(at: Date()) { shown.cursor.visible = false }
         var overlayRow: Int?
         if let preedit, let overlay = preedit.overlay(cells: cells, cursor: cursor, cols: cols, rows: rows) {
@@ -81,7 +82,7 @@ extension PaneView {
             thumb: thumb.map { (origin: $0.0, size: $0.1) },
             thumbColor: chrome.thumb,
             dirty: dirty,
-            selection: selectionSpans(),
+            selection: selectionSpans() + searchHighlight,
             selectionColor: chrome.selection))
         dirty = .none
     }

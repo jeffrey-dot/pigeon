@@ -29,6 +29,7 @@ struct HostConnection<Row> {
     /// The host sends every pane's `status` without an attach (`status_all`, protocol §5).
     var statusAll = false
     var statusSnapshot = false
+    var textSearch = false
     var heartbeat: Heartbeat?
 
     /// A new connection to the same host: screens stay on display and become stale (they
@@ -38,6 +39,7 @@ struct HostConnection<Row> {
         ready = false
         statusAll = false
         statusSnapshot = false
+        textSearch = false
         receivedScreen = []
         stale = seen
         requested = []
@@ -75,6 +77,7 @@ struct HostConnection<Row> {
         ready = false
         statusAll = false
         statusSnapshot = false
+        textSearch = false
         receivedScreen = []
     }
 }

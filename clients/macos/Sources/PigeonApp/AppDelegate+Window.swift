@@ -81,8 +81,9 @@ extension AppDelegate {
                 equalTo: contentBox.leadingAnchor, constant: SidebarMetrics.cardContentLeftPadding),
             container.topAnchor.constraint(equalTo: contentBox.topAnchor),
             container.trailingAnchor.constraint(equalTo: contentBox.trailingAnchor),
-            container.bottomAnchor.constraint(equalTo: contentBox.bottomAnchor),
         ])
+        installSearch(in: contentBox)
+        container.preservesKeyboardFocus = { [weak self] in self?.searchModel != nil }
         // Explicit constraints instead of a stack view: the content box has no intrinsic
         // height, so a vertical stack gave it zero and the terminal never got a size.
         hostStatus = HostStatusView()
@@ -178,6 +179,9 @@ extension AppDelegate {
         editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        let find = NSMenuItem(title: "Find in Pane…", action: #selector(findInPane(_:)), keyEquivalent: "f")
+        find.target = self
+        editMenu.addItem(find)
         editItem.submenu = editMenu
 
         let viewItem = NSMenuItem()

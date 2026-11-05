@@ -107,6 +107,7 @@ extension AppDelegate {
     /// Points the window at a live client: the local socket and a remote bridge look the same
     /// from here on (that is the point of mode A/B).
     private func wire(_ client: HostClient, host: String) {
+        if searchModel?.context.host == host { closeSearch(focus: false) }
         clients[host]?.close()
         connections[host, default: HostConnection()].reconnected(now: Date())
         if var rows = connections[host]?.rows {
@@ -184,6 +185,7 @@ extension AppDelegate {
 
     /// One host dropped: retry *that* host on its own budget, without touching the others.
     func hostLost(host: String, _ reason: String) {
+        if searchModel?.context.host == host { closeSearch(focus: false) }
         clients[host] = nil
         connections[host]?.disconnected()
         refreshStatusPanel()

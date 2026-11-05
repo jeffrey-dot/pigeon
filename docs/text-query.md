@@ -1,6 +1,6 @@
 # 文本查询纵向切片
 
-> 2026-11-05 设计及实现说明。S3 的核心/宿主切片；客户端搜索、选择和高亮尚未接入，不代表 S3 产品操作完成。
+> 2026-11-05 设计及实现说明。S3 的核心/宿主查询与原子定位接口；macOS 搜索/同画面高亮接入见 [搜索进展](search-progress.md)，AppKit/GUI 待验；完整选择尚未接入。
 
 ## 坐标与生命周期
 
@@ -20,13 +20,21 @@
 
 沿用 [ADR-0006](adr/0006-length-prefixed-cbor-protocol.md) 的 CBOR 和协议 1.0 可选扩展，不改变旧字段。握手显式协商 `text_query`；未协商时新请求返回带 id 的 `unsupported` error。旧宿主没有该能力，客户端禁用该入口，不发送未知请求。
 
-`text_query {id,pane_id,query}` / `text_query_result {id,pane_id,result}`。query 的 `kind` 为 `info`、`search` 或 `range`；result 对应 `info`、`search`、`range`。错误使用现有 `error {id,code,detail}`，含 `invalid_arg`、`stale_text`、`limit`、`no_such_pane`。
+`text_query {id,pane_id,query}` / `text_query_result {id,pane_id,result}`。query 的 `kind` 为 `info`、`search`、`range` 或 `viewport`；result kind 与请求对应。`viewport` 额外需要协商 `text_viewport`。错误使用现有 `error {id,code,detail}`，含 `invalid_arg`、`stale_text`、`limit`、`no_such_pane`。
 
 Rust API 与 C ABI 共用语义，见 [ADR-0003](adr/0003-one-semantics-two-shapes.md)。新 C 请求/结果元数据结构带 size/version，范围结构带 size；新增 opaque 结果 handle 管理独立拥有的结果和借用字符串。未来客户端通过 typed builder/结果访问器使用协议，无需自己编码 CBOR。
 
 ## 明确未完成
 
-regex、Unicode case folding、稳定行锚点、反向扫描、上下一个命中的 UI、跨历史拖选/自动滚动/矩形选择及两端真实交互均未完成。当前位置在 generation 内可精确提取历史片段；不能拿结果直接调用无 generation 校验的旧 scroll 并声称高亮仍准确。客户端可先呈现范围文本，后续定位视图需同样带 generation 的原子查询。
+regex、Unicode case folding、稳定行锚点、反向扫描、跨历史拖选/自动滚动/矩形选择及 Linux 搜索 UI 未完成。macOS 已接上下命中、分页、取消及高亮，AppKit 类型检查和真实 GUI 由 macOS 验证，不能把 Linux Foundation 测试当成端到端验收。
+
+`TextQuery::Viewport {generation,range}` / C kind=3 在同一次串行 pane 查询内校验代次和范围后生成一屏画面。
+结果 `TextResult::Viewport {info,range,viewport}` 不包含全历史；历史起点位于顶行，实时命中保持实时屏几何。
+`text_viewport_snapshot` / `pg_text_result_snapshot` 返回独立拥有的 snapshot；
+`text_viewport_of` / `pg_text_result_viewport` 提供同画面的 modes、offset 和 history_len。
+`pg_text_result_hit(0)` 取返回范围，快照用 `pg_snapshot_free` 释放。
+此读取不改宿主连接 scroll offset、不消费 damage、不改变屏幕 seq；位置不能传给无 generation 的旧 scroll 作为定位。
+客户端必须冻结结果画面，收到新输出后标记过期；只有新的定位答复才能为另一命中画高亮。
 
 ## 客户端接入顺序
 

@@ -55,7 +55,7 @@ extension PaneView {
     /// Whether this event is the program's: it turned mouse reporting on, and shift (the
     /// "I want to select text" override) is not held.
     func reportsMouse(_ event: NSEvent) -> Bool {
-        modes & TerminalModes.anyMouse != 0 && !event.modifierFlags.contains(.shift)
+        !searchFrozen && modes & TerminalModes.anyMouse != 0 && !event.modifierFlags.contains(.shift)
     }
 
     func modifiers(of event: NSEvent) -> MouseEncoder.Modifiers {

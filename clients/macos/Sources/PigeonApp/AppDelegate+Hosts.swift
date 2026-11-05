@@ -94,6 +94,7 @@ extension AppDelegate {
 
     /// Shows `host`'s terminal, connecting it if it is not up yet.
     func activate(host: String) {
+        closeSearch(focus: false)
         debugLog("activate host=\(host) from=\(activeHost)")
         if host != activeHost {
             activeHost = host

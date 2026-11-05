@@ -62,7 +62,7 @@ extension AppDelegate {
             Wire.set(message, str: "client", "pigeon-mac")
             // `delta` sends only the rows that changed: a keystroke costs ~2 KB instead of a
             // full screen (~100 KB on a large pane), which is what makes ssh feel slow.
-            Wire.set(message, strings: "features", ["scrollback", "delta", "status_all", "status_snapshot"])
+            Wire.set(message, strings: "features", ["scrollback", "delta", "status_all", "status_snapshot", "text_query", "text_viewport"])
         }, type: PG_MSG_HELLO)
     }
 
@@ -119,6 +119,7 @@ extension AppDelegate {
 
     /// `scroll` takes a delta: negative looks back, `0` is the live screen (protocol §3.3).
     func sendScroll(_ pane: UInt32, lines: Int) {
+        if searchModel?.context.pane == pane, searchModel?.context.host == activeHost { closeSearch(focus: false) }
         send({ message in
             Wire.set(message, u32: "pane_id", pane)
             Wire.set(message, i32: "offset", -Int32(lines))
@@ -126,6 +127,7 @@ extension AppDelegate {
     }
 
     func sendPaste(_ pane: UInt32, _ text: String) {
+        if searchModel?.context.pane == pane, searchModel?.context.host == activeHost { closeSearch(focus: false) }
         send({ message in
             Wire.set(message, u32: "pane_id", pane)
             Wire.set(message, str: "text", text)
@@ -133,6 +135,7 @@ extension AppDelegate {
     }
 
     func sendKeys(_ pane: UInt32, _ bytes: [UInt8]) {
+        if searchModel?.context.pane == pane, searchModel?.context.host == activeHost { closeSearch(focus: false) }
         send({ message in
             Wire.set(message, u32: "pane_id", pane)
             Wire.set(message, bytes: "bytes", bytes)
@@ -140,6 +143,9 @@ extension AppDelegate {
     }
 
     func sendResize(_ pane: UInt32, cols: UInt16, rows: UInt16) {
+        if searchModel?.context.pane == pane, searchModel?.context.host == activeHost {
+            searchModel?.expire(); clearSearchHighlight(); refreshSearch()
+        }
         send({ message in
             Wire.set(message, u32: "pane_id", pane)
             Wire.set(message, u32: "cols", UInt32(cols))
@@ -170,6 +176,7 @@ extension AppDelegate {
     }
 
     func focus(_ pane: UInt32) {
+        if searchModel?.context.pane != pane { closeSearch(focus: false) }
         focusedPane = pane
         container.focusPane(pane)
         send({ message in Wire.set(message, u32: "pane_id", pane) }, type: PG_MSG_FOCUS)

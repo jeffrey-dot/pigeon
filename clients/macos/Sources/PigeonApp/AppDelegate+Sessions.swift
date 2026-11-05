@@ -5,6 +5,7 @@ import PigeonCore
 
 extension AppDelegate {
     func select(_ id: Int) {
+        closeSearch(focus: false)
         lastSelectedId = id
         guard let (host, session) = splitRowId(id) else { return }
         if host != activeHost {

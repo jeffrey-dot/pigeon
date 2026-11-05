@@ -188,7 +188,7 @@
 
 ### 3.6 文本查询（2026-11-05 核对）
 
-仅协商 `text_query` 后使用；不要求 attach、不改变尺寸或滚动视口。新能力尚未接入两端 UI。
+仅协商 `text_query` 后使用；不要求 attach、不改变尺寸或滚动视口。macOS 搜索另需协商 `text_viewport`，见 [搜索接入](search-progress.md)。
 
 | 方向 | t | 字段 | 说明 |
 |---|---|---|---|
@@ -200,6 +200,7 @@
 | `info` | 无 | `info` |
 | `search` | `generation:u64`, `pattern:str`, `case_sensitive:bool`, `max_results:u16`, 可选 `start:text_point` | `info`, `hits:[text_range]`, 可选 `next:text_point` |
 | `range` | `generation:u64`, `range:text_range` | `info`, `text:str`, 可选 `next:text_point` |
+| `viewport` | `generation:u64`, `range:text_range` | `info`, `range:text_range`, `viewport:map`；须同时协商 `text_viewport` |
 
 `info = {generation:u64, first_row:i32, last_row:i32, cols:u16, alt:bool}`；历史为负行，屏幕从 0 开始。
 `text_point = {row:i32,col:u16,byte:u16}`；`text_range = {start:text_point,end:text_point}` 半开区间。
@@ -209,6 +210,17 @@ search 的 generation=0 且省略 start 表示新查询；续页传返回的 gen
 range 必须使用非零 generation；续页把 range.start 替换成 next，end 保持原值。
 feed（包括 pending output）、resize、同步输出 flush 都使旧 generation 失效，返回 `stale_text` 后整次重查。
 旧位置还必须与宿主 instance、pane_id 绑定，不能跨宿主重启复用。
+
+`viewport` 必须带非零 generation。在 pane actor 的同一次串行操作内校验 generation 与两端坐标、
+读取一屏；任何已 feed 的 pending output、resize、历史淘汰、备用屏切换都会使旧位置被拒绝。
+`viewport = {rows:u16,cursor,scroll,screen,text?,links?,modes:u32,offset:u32,history_len:u32}`；
+格子、稀疏文本和链接表沿用 snapshot 的编码/验证规则，没有 `history` 或实时 `seq`。
+画面顶行对应 `-offset`，offset=`max(-range.start.row,0)`；info.cols/alt/last_row 与画面一致。
+命中在实时屏时 offset=0，历史命中起点在画面顶行；跨屏范围只展示这一屏。
+请求 id、pane_id、generation、range 和画面作为同一答复返回。客户端只能把该 range 高亮在这份画面上，
+不能把旧 scroll 答复或后续实时 delta 混入。查询不修改连接的旧 scroll offset；关闭/输入返回实时屏仍发
+`scroll{offset:0}`，以其普通 snapshot 恢复实时 seq 基准。
+该结果是不可变的查询画面，持续输出后不能继续用于定位其它命中；重新定位/分页必须再次校验 generation。
 
 literal 允许 LF、拒绝其它控制字符，长度 1–256 UTF-8 字节；大小写选项只折叠 ASCII，不归一化 Unicode。
 每页最多 128 个命中、128 行/131072 格计费、64 KiB 文本，KMP 线性扫描；无法在预算内向前推进返回 `limit`。
@@ -241,6 +253,7 @@ literal 允许 LF、拒绝其它控制字符，长度 1–256 UTF-8 字节；大
 |---|---|---|---|
 | `session_env` | c→s | 宿主应用会话 env 覆盖并由后续分屏继承；限制与保留变量见 §3.2 | 旧宿主可能忽略 env，依赖覆盖效果时应禁用入口 |
 | `text_query` | 双向 | 有界 literal 搜索和范围提取；独立 generation、请求 id、分页 | 新客户端禁用入口；新宿主拒绝未协商请求 |
+| `text_viewport` | 双向 | 与 `text_query` 一起允许 `kind:viewport`，同代次原子定位画面 | 保持 info/search/range；拒绝未协商的 viewport，错误携带 id |
 | `delta` | s→c | 快照之后发 `delta` | 只发 `snapshot`；客户端按需重新 `attach` |
 | `scrollback` | s→c | `snapshot.history` 与 `scroll` 可用 | 不下发历史，客户端隐藏滚动条 |
 | `zstd` | 双向 | 帧 payload 带 1 字节 tag，`0x01` 为 zstd | payload 必须是不带 tag 的裸 CBOR |
@@ -297,6 +310,7 @@ literal 允许 LF、拒绝其它控制字符，长度 1–256 UTF-8 字节；大
 | `PgStatus.state/kind/msg/seq` | `status.state/kind/msg/seq`（旧 focused-pane 接口包含已确认存储记录） |
 | `pg_msg_set_session_env` | 与 Rust `api::set_session_env` 共用有界校验、失败不修改消息；先设置 new_session.id，再逐项设置 env |
 | `pg_text_query` / `pg_msg_text_query` / `pg_msg_text_result` + `pg_text_result_info/hit/text/free` | 同一 TextQuery 语义用于嵌入 Core 与宿主请求；结果 handle 独立拥有文本，Rust 为 `Core::text_query` / `text_query_message` / `text_result_of` |
+| `pg_text_result_snapshot` / `pg_text_result_viewport` | viewport 结果的独立快照与 offset/history_len/modes；Rust 为 `text_viewport_snapshot` / `text_viewport_of`；kind=3，`pg_text_result_hit(0)` 读取同画面范围 |
 | `pg_status_snapshot_new` / `pg_msg_status_snapshot` + `pg_status_snapshot_info/at/free` | `status_snapshot` 的完整未确认集合；Rust 为 `Core::status_snapshot` / `api::status_snapshot_of`，独立所有权、读取不消费 |
 | `PgRect` | `layout.tree` 的展开结果，不上线 |
 | `pg_pane_dirty_rows` | `delta.rows[].y` |

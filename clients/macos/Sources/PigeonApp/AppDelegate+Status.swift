@@ -10,7 +10,7 @@ extension AppDelegate {
                   connection.receivedScreen.contains(pane.id),
                   let view = container.paneView(pane.id), !view.cells.isEmpty,
                   view.metal != nil, view.bounds.width > 0, view.bounds.height > 0,
-                  view.scrollOffset == 0, !view.isHiddenOrHasHiddenAncestor,
+                  view.scrollOffset == 0, !view.searchFrozen, !view.isHiddenOrHasHiddenAncestor,
                   !SplitContainerView.hides(pane: pane.id, zoom: container.model.zoom)
             else { return nil }
             return pane.id

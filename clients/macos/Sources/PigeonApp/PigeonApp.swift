@@ -110,6 +110,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var sidebarDirty = false
     var statusReadScheduled = false
     var statusPanel: StatusRecordsPanel?
+    var searchBar: SearchBarView!
+    var searchHeight: NSLayoutConstraint!
+    var searchModel: TerminalSearch?
+    var searchDebounce = UUID()
     /// "Jeffrey's MacBook Air"; looked up once because the lookup can touch the resolver.
     lazy var localMachineName: String = Host.current().localizedName ?? ""
 

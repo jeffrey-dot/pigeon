@@ -123,6 +123,7 @@
 | 跳到下一个需要处理的会话 | `⌘J` |
 | 左右 / 上下分屏 | `⌘D` / `⌘⇧D` |
 | 放大 / 还原 pane | `⌘⇧Return` |
+| 搜索当前 pane 的历史和屏幕 | `⌘F`；Return/Shift-Return 上下命中，Escape 关闭回实时屏 |
 | 切换 pane | `⌘[` / `⌘]` |
 | 关闭 pane / 会话 | `⌘W` / `⌘⇧W` |
 | 重命名、标记已读、关闭 | 会话右键菜单 |
@@ -143,7 +144,7 @@
 - 确认要求前台 key window、非遮挡、对应 host/session 布局已显示且 pane 有当前连接屏幕、位于实时屏；隐藏 pane 不确认。旧宿主的单条状态路径保留可见终态自动确认。
 - 未读/已查看身份按 host、instance、pane、seq、record 持久化，跨重启重播去重；已查看记录重播可重发原来源 ack。
 - legacy 单条路径中，更高 seq 或新的 live 状态不能证明旧终态已被查看，因此保留旧未读。完整集合路径按 revision 原子替换当前集合：同 id 更新、clear 或其它客户端确认使旧记录缺失时，撤下对应活动项和未读，但不写入本客户端 seen，也不因此发送 ack。
-- 复制利用核心软换行标志合并自动折行、保留真实换行；macOS OSC 8 纯文本悬停和 Cmd+click 已接入，只允许 http/https，拖动或期间目标变化取消，见 [OSC 8](osc8.md)。搜索、OSC 52、跨历史选择仍未实现。
+- 复制利用核心软换行标志合并自动折行、保留真实换行；macOS OSC 8 纯文本悬停和 Cmd+click 已接入，只允许 http/https，拖动或期间目标变化取消，见 [OSC 8](osc8.md)。macOS 已接搜索条与同代次定位高亮（AppKit/GUI 待验），见 [搜索进展](search-progress.md)。OSC 52、跨历史选择仍未实现。
 - macOS 已接 Kitty keyboard protocol、应用小键盘与编程连字；Linux 完整操作对齐见 [Linux README](../clients/linux/README.md)。
 
 本轮合并后的代码/测试结果见 [优化执行记录](optimization-progress.md)；旧截图不作为新行为的验收证据。

@@ -8,6 +8,7 @@ extension AppDelegate {
     /// host" state; the window itself only follows the visible host.
     func handle(_ message: OpaquePointer, host: String) {
         connections[host]?.heartbeat?.heard(at: Date())
+        if handleSearch(message, host: host) { return }
         let visible = host == activeHost
         onHost(host) { handleActive(message, visible: visible) }
     }
@@ -28,6 +29,7 @@ extension AppDelegate {
                 displayedHost = nil
                 displayedSession = nil
             }
+            connection.textSearch = Wire.contains(message, strings: "features", "text_query") && Wire.contains(message, strings: "features", "text_viewport")
             connection.statusSnapshot = Wire.contains(message, strings: "features", "status_snapshot")
             connection.statusAll = Wire.contains(message, strings: "features", "status_all")
             // Tell the host what we are drawing with, so programs inside the panes can pick
@@ -48,6 +50,10 @@ extension AppDelegate {
                 rows[sessionID] = row
             }
             guard sessionID == selectedSession else { break }
+            if visible, let search = searchModel,
+               model.focus != search.context.pane || !model.panes.contains(where: { $0.id == search.context.pane }) {
+                closeSearch(focus: false)
+            }
             if model.focus != 0 { focusedPane = model.focus }
             guard visible else { break }
             container.apply(model)

@@ -56,12 +56,15 @@ final class PaneView: NSView {
     /// Last occlusion state logged under `PIGEON_FRAME_STATS`.
     var reportedVisible: Bool?
 
+    var onCancelSearch: (() -> Bool)?
     var onInput: (([UInt8]) -> Void)?
     /// Clipboard text for the host's `paste` (it adds bracketed-paste markers when asked).
     var onPaste: ((String) -> Void)?
     /// The drag in progress or last made; `selectionActive` once it covers any text.
     var selection: TerminalSelection?
     var selectionActive = false
+    var searchFrozen = false
+    var searchHighlight: [SelectionSpan] = []
     var linkTracking: NSTrackingArea?
     var linkGesture = false
     var pressedLink: TerminalLinkPress?
@@ -247,6 +250,7 @@ final class PaneView: NSView {
     }
 
     func apply(snapshot: UnsafePointer<PgSnapshot>) {
+        searchHighlight = []
         let view = snapshot.pointee
         let links = TerminalLinks.read(view.links, count: view.link_count)
         cols = Int(view.cols)
@@ -309,6 +313,7 @@ final class PaneView: NSView {
     /// the grid this view holds (a resize raced it); the caller then re-attaches for a
     /// snapshot instead of drawing a torn screen.
     func apply(delta: UnsafePointer<PgDelta>) -> Bool {
+        searchHighlight = []
         let frame = delta.pointee
         let links = TerminalLinks.read(frame.links, count: frame.link_count)
         guard cols > 0, cells.count == cols * rows else { return false }
@@ -353,6 +358,7 @@ final class PaneView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53, !hasMarkedText(), onCancelSearch?() == true { return }
         if event.keyCode == 116, !hasMarkedText(), page(1) { return }
         if event.keyCode == 121, !hasMarkedText(), page(-1) { return }
         guard let stroke = KeyStroke(event) else {

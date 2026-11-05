@@ -8,10 +8,13 @@ final class SplitContainerView: NSView {
     private var panes: [UInt32: PaneView] = [:]
     private var draggingSplit: UInt32?
 
+    var preservesKeyboardFocus: (() -> Bool)?
+
     var onSplit: ((PgAxis) -> Void)?
     var onClose: (() -> Void)?
     var onFocus: ((UInt32) -> Void)?
     var onResizeSplit: ((UInt32, Double) -> Void)?
+    var onCancelSearch: (() -> Bool)?
     var onPaneInput: ((UInt32, [UInt8]) -> Void)?
     var onPanePaste: ((UInt32, String) -> Void)?
     var onPaneResize: ((UInt32, UInt16, UInt16) -> Void)?
@@ -48,7 +51,7 @@ final class SplitContainerView: NSView {
             view.isHidden = Self.hides(pane: pane.id, zoom: model.zoom)
             panes[pane.id] = view
         }
-        if let focused = panes[model.focus], window?.firstResponder !== focused {
+        if preservesKeyboardFocus?() != true, let focused = panes[model.focus], window?.firstResponder !== focused {
             window?.makeFirstResponder(focused)
         }
         needsDisplay = true
@@ -63,6 +66,7 @@ final class SplitContainerView: NSView {
         let view = PaneView(frame: .zero)
         view.paneID = id
         view.optionAsMeta = optionAsMeta
+        view.onCancelSearch = { [weak self] in self?.onCancelSearch?() ?? false }
         view.onInput = { [weak self] bytes in self?.onPaneInput?(id, bytes) }
         view.onPaste = { [weak self] text in self?.onPanePaste?(id, text) }
         view.onResize = { [weak self] cols, rows in self?.onPaneResize?(id, cols, rows) }
