@@ -3,6 +3,7 @@
 
 pub mod layout;
 pub mod pane;
+mod text_query;
 
 use pigeon_core::proto::Message;
 use pigeon_core::term::Palette;
@@ -28,6 +29,9 @@ pub async fn dispatch(
         Message::Hello {
             proto, features, ..
         } => Some(handshake::hello(proto, &features, state)),
+        Message::TextQuery { id, pane_id, query } => {
+            Some(text_query::query(host, state, id, pane_id, query).await)
+        }
         Message::Sessions { .. } => Some(handshake::sessions(host).await),
         Message::Appearance { fg, bg, ansi } => {
             appearance(host, fg, bg, &ansi).await;

@@ -18,6 +18,7 @@ use crate::error::{PgError, PgResult};
 
 pub(crate) mod links;
 mod message;
+pub(crate) mod text_query;
 pub use message::Message;
 mod status_snapshot;
 #[cfg(feature = "internals")]
@@ -187,6 +188,9 @@ impl Node {
 pub fn encode(message: &Message) -> PgResult<Vec<u8>> {
     status_snapshot::validate(message)?;
     links::validate(message)?;
+    if let Message::TextQueryResult { result, .. } = message {
+        text_query::validate_result(result)?;
+    }
     let mut payload = Vec::new();
     ciborium::into_writer(message, &mut payload).map_err(|_| PgError::InvalidArg)?;
     Ok(payload)
@@ -215,6 +219,9 @@ pub fn decode(payload: &[u8]) -> PgResult<Message> {
         .map_err(|_| PgError::InvalidArg)?;
     status_snapshot::validate(&message)?;
     links::validate(&message)?;
+    if let Message::TextQueryResult { result, .. } = &message {
+        text_query::validate_result(result)?;
+    }
     Ok(message)
 }
 
@@ -283,6 +290,8 @@ fn is_known(tag: &str) -> bool {
             | "pane_exited"
             | "status"
             | "status_snapshot"
+            | "text_query"
+            | "text_query_result"
             | "ack_status"
             | "ping"
             | "shutdown"

@@ -18,6 +18,10 @@ pub enum PgError {
     Panic,
     /// Valid request, not implemented in this build.
     Unsupported,
+    /// Text coordinates refer to a superseded generation.
+    StaleText,
+    /// A bounded query cannot make progress or its generation is exhausted.
+    Limit,
 }
 
 pub type PgResult<T> = Result<T, PgError>;
@@ -31,6 +35,8 @@ impl std::fmt::Display for PgError {
             Self::NoMemory => "out of memory",
             Self::Overflow => "output buffer too small",
             Self::Panic => "panic caught at the FFI boundary",
+            Self::StaleText => "stale text generation",
+            Self::Limit => "query limit exceeded",
             Self::Unsupported => "unsupported in this build",
         };
         f.write_str(text)

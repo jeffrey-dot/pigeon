@@ -32,7 +32,7 @@ pub struct PgMsg {
 }
 
 impl PgMsg {
-    fn from_message(message: &Message) -> PgResult<Self> {
+    pub(super) fn from_message(message: &Message) -> PgResult<Self> {
         let payload = api::encode(message)?;
         let Value::Map(entries) =
             ciborium::from_reader::<Value, _>(&payload[..]).map_err(|_| PgError::InvalidArg)?

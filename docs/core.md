@@ -137,3 +137,11 @@ PgSnapshot {            // 字段以 include/pigeon_core.h 为准，此处只写
 | M2 | 协议版本协商、多窗口同看一个会话、后台进程崩溃提示 |
 | M3 | 状态记录（OSC 7501）从核心里读；侧栏只做展示与排序 |
 | M5 | Linux 客户端（GTK）复用同一内核与协议，不重写语义；Rust 写就经 `pigeon_core::api`（§4.1） |
+
+## 文本查询（2026-11-05）
+
+`term/text_scan.rs` 统一 literal 搜索、UTF-8 格内坐标与逻辑换行范围提取；引擎提供有界格子访问，不转换整个历史。
+`session/text_query.rs` 校验 pane 的独立文本 generation；feed/resize/同步输出落地均失效，不能用 delta seq 代替。
+`api::Core::text_query` 与 C `pg_text_query` 同语义；`text_query_message` / `text_result_of` 对应 C 消息 builder / 结果 handle，FFI 只转换所有权与指针。
+宿主 pane actor 每次执行一页有界请求，页间处理输出/输入；客户端不再取下一页就是取消。
+坐标、预算、协议及 regex/稳定锚点/UI 尚未完成的限制见 [文本查询](text-query.md)。

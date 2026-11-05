@@ -21,6 +21,8 @@ use super::{Cell, Cursor, Snapshot, Term};
 
 #[path = "alacritty_cell.rs"]
 mod cell;
+#[path = "alacritty_text.rs"]
+mod text;
 
 #[cfg(test)]
 thread_local! {
@@ -228,6 +230,9 @@ impl AlacrittyTerm {
 }
 
 impl Term for AlacrittyTerm {
+    fn text_info(&self) -> crate::PgResult<super::text_query::TextInfo> { Ok(self.query_info()) }
+    fn text_row(&self, row: i32) -> (u16, bool) { self.query_row(row) }
+    fn text_cell(&self, row: i32, col: u16) -> (String, u8) { self.query_cell(row, col) }
     fn feed(&mut self, bytes: &[u8]) {
         self.parser.advance(&mut self.term, &self.links.filter(bytes));
     }

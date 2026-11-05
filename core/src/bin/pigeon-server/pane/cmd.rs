@@ -6,6 +6,10 @@ use pigeon_core::proto::Message;
 use pigeon_core::term::Palette;
 
 pub enum Cmd {
+    TextQuery {
+        query: pigeon_core::api::TextQuery,
+        reply: oneshot::Sender<pigeon_core::api::PgResult<pigeon_core::api::TextResult>>,
+    },
     Input(Vec<u8>),
     /// Clipboard text; the pane decides on bracketing because only it knows the mode.
     Paste(String),

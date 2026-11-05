@@ -254,6 +254,12 @@ impl PaneActor {
     fn handle(&mut self, command: Cmd) {
         let pane = &mut self.pane;
         match command {
+            Cmd::TextQuery { query, reply } => {
+                if !reply.is_closed() {
+                    let _ = reply.send(pane.text_query(&query));
+                }
+            }
+
             Cmd::Input(bytes) => {
                 self.echo_due = true;
                 self.write_input(bytes);

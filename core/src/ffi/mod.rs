@@ -18,6 +18,8 @@ use crate::api::{self, Axis, Core, PgError, PgResult, StatusKind, StatusState};
 mod cell_text;
 mod links;
 pub use links::PgLink;
+mod text_query;
+pub use text_query::*;
 mod status;
 mod status_snapshot;
 pub use status::*;
@@ -53,6 +55,8 @@ pub enum PgErrorCode {
     PG_ERR_PANIC = 6,
     /// Valid request, not implemented in this build.
     PG_ERR_UNSUPPORTED = 7,
+    PG_ERR_STALE_TEXT = 8,
+    PG_ERR_LIMIT = 9,
 }
 
 impl From<PgError> for PgErrorCode {
@@ -64,6 +68,8 @@ impl From<PgError> for PgErrorCode {
             PgError::NoMemory => Self::PG_ERR_NO_MEMORY,
             PgError::Overflow => Self::PG_ERR_OVERFLOW,
             PgError::Panic => Self::PG_ERR_PANIC,
+            PgError::StaleText => Self::PG_ERR_STALE_TEXT,
+            PgError::Limit => Self::PG_ERR_LIMIT,
             PgError::Unsupported => Self::PG_ERR_UNSUPPORTED,
         }
     }

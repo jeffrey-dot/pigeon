@@ -6,6 +6,9 @@
 
 pub mod alacritty;
 pub mod frozen;
+pub mod text_query;
+mod text_scan;
+pub(crate) use text_scan::query as query_text;
 pub(crate) mod history_budget;
 pub mod sync_timeout;
 pub(crate) mod hyperlink;
@@ -231,6 +234,11 @@ impl Palette {
 }
 
 pub trait Term {
+    fn text_info(&self) -> crate::PgResult<text_query::TextInfo>;
+    /// Trimmed length and soft-wrap marker; never allocates a history copy.
+    fn text_row(&self, row: i32) -> (u16, bool);
+    /// Bounded exported cell text and width. Caller validates coordinates first.
+    fn text_cell(&self, row: i32, col: u16) -> (String, u8);
     /// Parses bytes; replies (DA/DSR/…) are queued for [`Term::take_replies`].
     fn feed(&mut self, bytes: &[u8]);
     fn resize(&mut self, cols: u16, rows: u16);

@@ -615,3 +615,5 @@ mod status_sync;
 
 #[path = "abi/osc8.rs"]
 mod osc8;
+#[path = "abi/text_query.rs"]
+mod text_query;

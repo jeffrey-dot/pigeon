@@ -20,8 +20,10 @@ pub use links::cell_links;
 mod msg;
 mod outbox;
 mod status;
+mod text_query;
 pub use crate::status::{StatusSnapshot, StatusSnapshotRecord};
 pub use status::status_snapshot_of;
+pub use text_query::*;
 
 pub use self::core::{Config, Core};
 pub use self::msg::{

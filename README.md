@@ -8,7 +8,7 @@ Linux GTK4 客户端已能连接本地宿主、渲染、分屏、增量更新、
 本轮实现与验证见 [优化执行记录](docs/optimization-progress.md)。
 
 会话保存在宿主内存中：关闭客户端后任务继续运行；宿主退出或机器重启后不恢复。
-搜索、OSC 52 剪贴板、完整字素等仍待实现；2026-11-05 已接 [OSC 8 链接](docs/osc8.md) 的核心/接口与 macOS Cmd+click（GUI 待验，Linux 点击待接）；macOS 已接 Kitty keyboard protocol 与编程连字，完整现状见
+核心与宿主已提供有界 literal 搜索和文本范围分页，搜索/跨历史选择 UI、regex 与稳定锚点待接（见 [文本查询](docs/text-query.md)）。[OSC 8 链接](docs/osc8.md) 已接核心/接口与 macOS Cmd+click（GUI 待验，Linux 点击待接）；OSC 52 剪贴板与完整字素仍待补。macOS 已接 Kitty keyboard protocol 与编程连字，完整现状见
 [当前能力与缺口](docs/plan.md#11-当前能力与已知缺口)。
 
 - [AGENTS.md](AGENTS.md) —— 给编码 agent 的工作说明：**模块划分**、风格、测试、不变量

@@ -34,10 +34,14 @@ pub enum PgMsgType {
     PG_MSG_PASTE = 29,
     PG_MSG_SHUTDOWN = 30,
     PG_MSG_STATUS_SNAPSHOT = 31,
+    PG_MSG_TEXT_QUERY = 32,
+    PG_MSG_TEXT_QUERY_RESULT = 33,
 }
 
 /// Wire name ↔ enum. Kept in one place so the two can never drift.
 const NAMES: &[(PgMsgType, &str)] = &[
+    (PgMsgType::PG_MSG_TEXT_QUERY, "text_query"),
+    (PgMsgType::PG_MSG_TEXT_QUERY_RESULT, "text_query_result"),
     (PgMsgType::PG_MSG_HELLO, "hello"),
     (PgMsgType::PG_MSG_HELLO_ACK, "hello_ack"),
     (PgMsgType::PG_MSG_HELLO_ERROR, "hello_error"),

@@ -30,6 +30,14 @@ impl FrozenTerm {
 }
 
 impl Term for FrozenTerm {
+    fn text_info(&self) -> crate::PgResult<super::text_query::TextInfo> {
+        // Snapshots lack the engine's leading-wide-spacer flag and may carry only a
+        // history suffix, so treating them as a full query source would invent text.
+        Err(crate::PgError::Unsupported)
+    }
+    fn text_row(&self, _row: i32) -> (u16, bool) { (0, false) }
+    fn text_cell(&self, _row: i32, _col: u16) -> (String, u8) { (String::new(), 0) }
+
     fn set_palette(&mut self, _palette: Option<crate::term::Palette>) {
         // A frozen term does not parse, so it never answers colour queries.
     }

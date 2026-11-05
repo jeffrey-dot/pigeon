@@ -8,7 +8,7 @@
 
 本文保留字段契约；定义了字段不等于所有路径已实现。当前差异如下：
 
-- 宿主提供 `delta`、`scrollback`、`osc7501`、`status_all`、`status_snapshot`；macOS 请求 `delta`、`scrollback`、`status_all`、`status_snapshot`，Linux 请求 `delta`、`scrollback`，首帧快照之后应用连续增量，回看由宿主 `scroll` 切片。
+- 宿主提供 `delta`、`scrollback`、`osc7501`、`status_all`、`status_snapshot`、`text_query`；macOS 请求 `delta`、`scrollback`、`status_all`、`status_snapshot`，Linux 请求 `delta`、`scrollback`，首帧快照之后应用连续增量，回看由宿主 `scroll` 切片。
 - `zstd` 是预留能力，宿主不提供，当前 payload 为裸 CBOR，无压缩 tag。
 - `snapshot`/`delta` 已下发 OSC 8 链接，含历史、回看与续传；每帧独立解析为格子拥有的 URI，macOS 可 Cmd+click，Linux 点击待接。设计/限制见 [OSC 8](osc8.md)。基础 cell 仍为单码点，附加码点通过 `text` 稀疏表传递。
 - `new_session.env` 能编解码，但宿主尚未应用；结构化 `mouse` 能编解码但宿主返回 `unsupported`。
@@ -178,6 +178,36 @@
 | s→c | `unsupported` | `t_of: str` | — | 收到不认识的消息；不断开 |
 | s→c | `error` | `code: str`, `detail: str` | `id: u32` | `id` 回显出错请求 |
 
+### 3.6 文本查询（2026-11-05 核对）
+
+仅协商 `text_query` 后使用；不要求 attach、不改变尺寸或滚动视口。新能力尚未接入两端 UI。
+
+| 方向 | t | 字段 | 说明 |
+|---|---|---|---|
+| c→s | `text_query` | `id:u32`, `pane_id:u32`, `query:map` | 一页有界请求；query.kind 见下表 |
+| s→c | `text_query_result` | `id:u32`, `pane_id:u32`, `result:map` | 复用请求 id；result.kind 与请求一致 |
+
+| kind | query 字段 | result 字段 |
+|---|---|---|
+| `info` | 无 | `info` |
+| `search` | `generation:u64`, `pattern:str`, `case_sensitive:bool`, `max_results:u16`, 可选 `start:text_point` | `info`, `hits:[text_range]`, 可选 `next:text_point` |
+| `range` | `generation:u64`, `range:text_range` | `info`, `text:str`, 可选 `next:text_point` |
+
+`info = {generation:u64, first_row:i32, last_row:i32, cols:u16, alt:bool}`；历史为负行，屏幕从 0 开始。
+`text_point = {row:i32,col:u16,byte:u16}`；`text_range = {start:text_point,end:text_point}` 半开区间。
+格内 byte 必须为 UTF-8 码点边界，宽字符续格无文本；行末 col=cols,byte=0。范围提取保留组合码点，合并软换行、保留 LF 硬换行、裁掉硬行末 ASCII 空格。
+
+search 的 generation=0 且省略 start 表示新查询；续页传返回的 generation 和 next。
+range 必须使用非零 generation；续页把 range.start 替换成 next，end 保持原值。
+feed（包括 pending output）、resize、同步输出 flush 都使旧 generation 失效，返回 `stale_text` 后整次重查。
+旧位置还必须与宿主 instance、pane_id 绑定，不能跨宿主重启复用。
+
+literal 允许 LF、拒绝其它控制字符，长度 1–256 UTF-8 字节；大小写选项只折叠 ASCII，不归一化 Unicode。
+每页最多 128 个命中、128 行/131072 格计费、64 KiB 文本，KMP 线性扫描；无法在预算内向前推进返回 `limit`。
+无命中且有 next 仍需继续；省略 next 才表示完成。停止请求下一页即取消，服务器不保留搜索任务。
+结构类型错误沿用协议错误路径；类型正确但模式/范围/数量非法由宿主返回带 id 的 `invalid_arg`，连接保持。
+完整语义、接入流程及未完成项见 [文本查询](text-query.md)。
+
 ## 4. 错误码
 
 | `code` | 含义 | 发完是否断开 |
@@ -189,6 +219,10 @@
 | `frame_too_large` | 单帧超 8 MiB | 是 |
 | `shutdown` | 宿主正常退出 | 是 |
 | `no_such_pane` | `pane_id` 不存在 | 否 |
+| `stale_text` | 文本 generation 失效，丢弃旧范围/分页内容并重查 | 否 |
+| `limit` | 有界文本查询无法推进或 generation 已耗尽 | 否 |
+| `invalid_arg` | 文本模式、范围或结果数量非法 | 否 |
+| `unsupported` | 未协商 text_query 却发送新请求；错误携带 id | 否 |
 | `bad_request` | 字段组合非法（如 `ratio` 越界且无法夹取） | 否 |
 | `backpressure` | 预留错误码；当前慢连接合并屏幕帧，超限直接断开（§3.3） | 若收到，客户端应重新 `attach` |
 | `internal` | 宿主内部错误，已写日志 | 否 |
@@ -197,6 +231,7 @@
 
 | 名称 | 方向 | 语义 | 未协商时的行为 |
 |---|---|---|---|
+| `text_query` | 双向 | 有界 literal 搜索和范围提取；独立 generation、请求 id、分页 | 新客户端禁用入口；新宿主拒绝未协商请求 |
 | `delta` | s→c | 快照之后发 `delta` | 只发 `snapshot`；客户端按需重新 `attach` |
 | `scrollback` | s→c | `snapshot.history` 与 `scroll` 可用 | 不下发历史，客户端隐藏滚动条 |
 | `zstd` | 双向 | 帧 payload 带 1 字节 tag，`0x01` 为 zstd | payload 必须是不带 tag 的裸 CBOR |
@@ -251,6 +286,7 @@
 | `PgCell.hyperlink_id` + `PgSnapshot/PgDelta.links` | `cell[4]` + 同帧 `links`；表由快照/delta 持有，PgCell 步长不变 |
 | `PgCell.width` | 由 `codepoint` 推导，不上线 |
 | `PgStatus.state/kind/msg/seq` | `status.state/kind/msg/seq`（旧 focused-pane 接口包含已确认存储记录） |
+| `pg_text_query` / `pg_msg_text_query` / `pg_msg_text_result` + `pg_text_result_info/hit/text/free` | 同一 TextQuery 语义用于嵌入 Core 与宿主请求；结果 handle 独立拥有文本，Rust 为 `Core::text_query` / `text_query_message` / `text_result_of` |
 | `pg_status_snapshot_new` / `pg_msg_status_snapshot` + `pg_status_snapshot_info/at/free` | `status_snapshot` 的完整未确认集合；Rust 为 `Core::status_snapshot` / `api::status_snapshot_of`，独立所有权、读取不消费 |
 | `PgRect` | `layout.tree` 的展开结果，不上线 |
 | `pg_pane_dirty_rows` | `delta.rows[].y` |

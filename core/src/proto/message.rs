@@ -218,6 +218,16 @@ pub enum Message {
         revision: u64,
         records: Vec<WireStatusRecord>,
     },
+    TextQuery {
+        id: u32,
+        pane_id: u32,
+        query: crate::term::text_query::TextQuery,
+    },
+    TextQueryResult {
+        id: u32,
+        pane_id: u32,
+        result: crate::term::text_query::TextResult,
+    },
     AckStatus {
         pane_id: u32,
         seq: u32,
@@ -270,6 +280,8 @@ impl Message {
             Self::PaneExited { .. } => "pane_exited",
             Self::Status { .. } => "status",
             Self::StatusSnapshot { .. } => "status_snapshot",
+            Self::TextQuery { .. } => "text_query",
+            Self::TextQueryResult { .. } => "text_query_result",
             Self::AckStatus { .. } => "ack_status",
             Self::Ping { .. } => "ping",
             Self::Shutdown => "shutdown",

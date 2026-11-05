@@ -46,10 +46,11 @@ header = """
 typedef struct PgCore PgCore;
 typedef struct PgMsg PgMsg;
 typedef struct PgStatusSnapshot PgStatusSnapshot;
+typedef struct PgTextResult PgTextResult;
 """
 
 [export]
-exclude = ["PgCore", "PgMsg", "PgStatusSnapshot"]
+exclude = ["PgCore", "PgMsg", "PgStatusSnapshot", "PgTextResult"]
 
 [fn]
 args = "horizontal"

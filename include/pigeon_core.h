@@ -33,6 +33,7 @@
 typedef struct PgCore PgCore;
 typedef struct PgMsg PgMsg;
 typedef struct PgStatusSnapshot PgStatusSnapshot;
+typedef struct PgTextResult PgTextResult;
 
 
 #ifndef PIGEON_CORE_H
@@ -115,6 +116,8 @@ typedef enum PgErrorCode {
      * Valid request, not implemented in this build.
      */
     PG_ERR_UNSUPPORTED = 7,
+    PG_ERR_STALE_TEXT = 8,
+    PG_ERR_LIMIT = 9,
 } PgErrorCode;
 
 /**
@@ -153,6 +156,8 @@ typedef enum PgMsgType {
     PG_MSG_PASTE = 29,
     PG_MSG_SHUTDOWN = 30,
     PG_MSG_STATUS_SNAPSHOT = 31,
+    PG_MSG_TEXT_QUERY = 32,
+    PG_MSG_TEXT_QUERY_RESULT = 33,
 } PgMsgType;
 
 typedef enum PgStatusKind {
@@ -319,6 +324,60 @@ typedef struct PgRect {
     float w;
     float h;
 } PgRect;
+
+typedef struct PgTextRange {
+    uint32_t size;
+    int32_t start_row;
+    uint16_t start_col;
+    uint16_t start_byte;
+    int32_t end_row;
+    uint16_t end_col;
+    uint16_t end_byte;
+} PgTextRange;
+
+/**
+ * kind: 0 info, 1 literal search, 2 range. Search generation=0 starts fresh.
+ * case_sensitive=false folds ASCII only. start_set uses range.start as a search
+ * continuation. Range queries use both endpoints. Unused fields are ignored.
+ */
+typedef struct PgTextQuery {
+    uint32_t size;
+    uint32_t version;
+    uint32_t kind;
+    uint64_t generation;
+    struct PgStr pattern;
+    bool case_sensitive;
+    uint16_t max_results;
+    bool start_set;
+    struct PgTextRange range;
+} PgTextQuery;
+
+typedef struct PgTextResultInfo {
+    uint32_t size;
+    uint32_t version;
+    /**
+     * 0 info, 1 search, 2 range.
+     */
+    uint32_t kind;
+    /**
+     * Protocol request id, or 0 for an embedded query.
+     */
+    uint32_t id;
+    uint32_t pane_id;
+    uint64_t generation;
+    int32_t first_row;
+    int32_t last_row;
+    uint16_t cols;
+    bool alt;
+    size_t count;
+    /**
+     * A page with no matches may still need continuation.
+     */
+    bool has_next;
+    int32_t next_row;
+    uint16_t next_col;
+    uint16_t next_byte;
+} PgTextResultInfo;
 
 typedef struct PgStatus {
     uint32_t size;
@@ -560,6 +619,35 @@ uint32_t pg_layout_split_of(PgCore *core, uint32_t pane_id);
 bool pg_layout_focus(PgCore *core, uint32_t pane_id);
 
 uint32_t pg_layout_focused(PgCore *core);
+
+/**
+ * Runs one bounded query on an embedded pane. NULL means failure; read last_error_code.
+ */
+PgTextResult *pg_text_query(const PgCore *core, uint32_t pane_id, const struct PgTextQuery *query);
+
+/**
+ * Builds a text_query request for the negotiated text_query capability.
+ */
+PgMsg *pg_msg_text_query(uint32_t id, uint32_t pane_id, const struct PgTextQuery *query);
+
+/**
+ * Copies a validated text_query_result; survives freeing the source message.
+ */
+PgTextResult *pg_msg_text_result(const PgMsg *msg);
+
+/**
+ * Caller initializes out.size; larger structs have trailing bytes zeroed.
+ */
+bool pg_text_result_info(const PgTextResult *result, struct PgTextResultInfo *out);
+
+bool pg_text_result_hit(const PgTextResult *result, size_t index, struct PgTextRange *out);
+
+/**
+ * Range text borrows this result until pg_text_result_free, including across other calls.
+ */
+bool pg_text_result_text(const PgTextResult *result, struct PgStr *out);
+
+void pg_text_result_free(PgTextResult *result);
 
 /**
  * Legacy count of all stored records in the focused pane, including acked records.

@@ -5,6 +5,7 @@
 //! embedded client would drive the same struct through the C ABI.
 
 mod backlog;
+mod text_query;
 mod cell_text;
 pub(crate) mod links;
 mod delta_rows;
@@ -44,6 +45,7 @@ pub struct PaneState {
     /// every client sees deltas as `n, n+1, …` after its own snapshot, however many other
     /// windows attach or scroll in between; a gap then really means a lost frame.
     seq: u32,
+    text_generation: u64,
     cols: u16,
     rows: u16,
     term: Box<dyn Term + Send>,
@@ -59,6 +61,7 @@ impl PaneState {
         Self {
             pane_id,
             seq: 0,
+            text_generation: 1,
             cols,
             rows,
             term: Box::new(AlacrittyTerm::new(cols, rows, scrollback)),
@@ -73,6 +76,7 @@ impl PaneState {
         Self {
             pane_id: 1,
             seq: 0,
+            text_generation: 1,
             cols: snapshot.cols,
             rows: snapshot.rows,
             term: Box::new(FrozenTerm::new(snapshot)),
@@ -83,6 +87,9 @@ impl PaneState {
     }
 
     pub fn feed(&mut self, bytes: &[u8]) {
+        if !bytes.is_empty() {
+            self.text_generation = self.text_generation.saturating_add(1);
+        }
         self.term.feed(bytes);
         if self.status_enabled() {
             self.status.feed(bytes);
@@ -96,6 +103,7 @@ impl PaneState {
 
     /// Shows what an expired synchronized update buffered.
     pub fn flush_sync(&mut self) {
+        self.text_generation = self.text_generation.saturating_add(1);
         self.term.flush_sync();
     }
 
@@ -105,6 +113,7 @@ impl PaneState {
     }
 
     pub fn resize(&mut self, cols: u16, rows: u16) {
+        self.text_generation = self.text_generation.saturating_add(1);
         self.cols = cols;
         self.rows = rows;
         self.term.resize(cols, rows);

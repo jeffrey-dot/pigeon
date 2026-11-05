@@ -288,7 +288,7 @@ M0–M1 可以直接复用现有代码：内核的对账语料（来自 tmux 阶
 |---|---|
 | Unicode 字素与整形 | 已保留引擎附加码点，经稀疏 text 表传到快照/delta/历史/C ABI；两端按 cell 文本整形，macOS 复制保留码点。跨宽 cell 的 ZWJ emoji 整簇宽度仍待补；单格文本边界上限 4096 字节，GUI 视觉待验。需要从内核快照、协议/接口到客户端一起补 |
 | 文本资源预算 | 稀疏表计入历史/backlog 预算，FFI 在校验成功后转移所有权；Linux 整形结果缓存最多 1024 项/1 MiB 计费。历史按预算预检后只转换完整连续后缀，字体字节随所有者回收。密集整屏 text 仍可能超 8 MiB，引擎内部零宽码点尚无完整上限；2 MiB 计费不是 RSS 上限，见 [文本预算](text-budget-progress.md) |
-| 搜索与完整文本选择 | 未实现终端搜索；macOS 选择和“Select All”只覆盖当前屏幕。已新增 `ATTR_WRAP` 并在 macOS 复制时保留逻辑换行；旧宿主无标志时仍按网格行处理 |
+| 搜索与完整文本选择 | 2026-11-05 核心/宿主已实现有界 literal 搜索与文本范围分页，独立 generation 检测过期；两端 UI、regex、Unicode 折叠和稳定锚点尚未完成，见 [文本查询](text-query.md)。macOS 选择和“Select All”只覆盖当前屏幕。已新增 `ATTR_WRAP` 并在 macOS 复制时保留逻辑换行；旧宿主无标志时仍按网格行处理 |
 | OSC 8 / OSC 52 | OSC 8 链接已经核心、snapshot/delta/history、Rust/C 接口保留；macOS 已接纯文本 hover 和 http/https Cmd+click，复审修复取消序列与点击目标变化，AppKit/GUI 待验；Linux 点击待接。OSC 52 事件仍被忽略，远端程序复制到本地剪贴板不可用。见 [osc8.md](osc8.md) |
 | 现代终端协议 | macOS 已接 Kitty keyboard protocol 与应用小键盘，Linux 仍为 legacy；DEC 2026 同步输出与超时已接；图片协议、OSC 9;4 进度、完整 OSC 133 命令边界/命令输出导航未实现。不能把底层 VT 库的能力当成产品端到端能力 |
 | agent 记录同步 | 多 pane 状态聚合、来源 ack、跨应用重启事件身份持久化和重播去重已实现；按 host/instance/pane/seq/record 隔离，缓存报告/旧屏幕不作查看依据。宿主与双外形接口已提供同 pane 完整未确认集合及独立 revision，ack/clear/退出立即广播；macOS 已协商完整集合并提供 Status Records 面板逐条查看/显式确认，旧宿主仍走单条路径；Linux UI 待接入。身份集合有界存储、多进程写入一致性和 AppKit 交互仍待验收 |

@@ -37,6 +37,8 @@
 | **增量** delta | 快照之后只带脏行的帧，`seq` 单调递增 | diff、patch、update |
 | **脏行** dirty row | 自上次发出后内容变过的行号，`pg_pane_dirty_rows` 的值 | changed row |
 | **`seq`** | 每个 pane 独立的增量序号，从 1 开始。只有 `delta` 递增；`snapshot` 携带它已包含的最新 `seq`，自己不占号 | version、revision |
+| **文本代次** text generation | pane 文本查询坐标的有效期；feed/resize/同步输出落地即失效，独立于屏幕 seq，见 `docs/text-query.md` | 稳定行 id、屏幕 revision |
+| **文本位置** text point | 同 generation 内的行、格列和格内 UTF-8 码点边界，范围采用半开区间 | 字节流 offset |
 | **时钟基准** seq 基准 | 某客户端在某 pane 上已收到的最大 `seq`。`snapshot` 重置它；`hello_ack.instance` 变了就丢弃全部 | — |
 | **格子** cell | 屏幕上一个字符位：`codepoint` + `attrs` + `fg` + `bg` + 可选 `link` + 推导出的 `width` | char、glyph |
 | **宽字符** wide char | 占两格的码位（CJK、emoji）。第二格是续格，客户端按宽度跳过绘制 | fullwidth |

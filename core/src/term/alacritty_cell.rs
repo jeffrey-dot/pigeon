@@ -46,6 +46,13 @@ impl<'a> ExportedText<'a> {
         (!self.marks.is_empty()).then_some(self.len)
     }
 
+    pub(super) fn text(&self) -> String {
+        let mut text = String::with_capacity(self.len);
+        text.push(self.base);
+        text.extend(self.marks.iter().copied());
+        text
+    }
+
     fn extra_text(&self) -> Option<Arc<str>> {
         let mut text = String::with_capacity(self.extra_len()?);
         text.push(self.base);
