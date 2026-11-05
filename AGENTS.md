@@ -36,6 +36,8 @@ swift build                     # 客户端（macOS only）
 swift test                      # 客户端纯逻辑单测（SidebarModel / Grouping / KeyEncoder）
 cargo build -p pigeon-linux     # Linux 客户端（需要 GTK4；不在根的 default-members 里）
 cargo test  -p pigeon-linux     # Linux 客户端纯逻辑单测（KeyEncoder / 调色板 / 实例布局）
+cargo build -p pigeon-gpui      # GPUI 统一客户端（macOS 需完整 Xcode + Metal Toolchain；不在 default-members 里）
+cargo test  -p pigeon-gpui      # GPUI 客户端纯逻辑单测（复用 Linux 的 host/transport）
 tools/vt-parity/run.sh          # 8 条 VT 语料与已提交的 tmux golden 对账；--record 才需要 tmux
 ```
 
@@ -43,6 +45,7 @@ tools/vt-parity/run.sh          # 8 条 VT 语料与已提交的 tmux golden 对
 宿主为新 pane 固定声明 `TERM=xterm-256color` 与 `COLORTERM=truecolor`；`new_session.env` 覆盖普通环境变量并由分屏继承，不允许覆盖这两个能力变量或 `PI_PROGRAM_STATUS`，见 `docs/protocol.md`；真实 PTY 测试使用独立 HOME/配置目录，不继承用户 rc。`tools/checks/swift-logic.sh` 可在有 Swift 的 Linux/macOS 上复跑侧栏/链接纯逻辑；选择测试经 `tools/checks/swift-selection.sh` 链接真实 C ABI，两者均不替代 macOS AppKit 验收。两端可见选择规则统一由 `api::select_grid` / `pg_select_grid` 决定，客户端只保存手势并绘制 span，见 `docs/selection.md`。
 `tools/bench/host-bench.py --out /tmp/pigeon-bench-result` 记录隔离 release 宿主的协议回显、快照重连和短时输出样本，不代表 GUI 显示延迟；见 `docs/host-benchmark.md`。
 `swift test` 需要完整 Xcode（`xcode-select` 指向 CommandLineTools 时用 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`）。
+`pigeon-gpui`（统一 GPUI 客户端，见 `docs/adr/0013-gpui-single-client.md`）在 macOS 上同样需要完整 Xcode，并额外需要 Metal Toolchain 组件（`xcodebuild -downloadComponent MetalToolchain`）来编译 GPUI 的 shader。
 
 ## 3. 模块划分（强制）
 
@@ -135,6 +138,8 @@ pigeon/
     │   │       └── Update/           # 软件更新：检查 latest.json、验签、替换 Pigeon.app 并重启
     │   └── Tests/PigeonAppTests/     # SidebarModel / Grouping / KeyEncoder 等纯逻辑单测
     └── linux/                    # M5：GTK4 客户端（Rust，第一片已跑通；见 clients/linux/README.md）
+    └── gpui/                     # 统一 GPUI 客户端（Rust，macOS/Linux/Windows 一套 UI；见 ADR-0013）
+                                  #   只依赖 pigeon_core::api；host/ 与 linux 共用连接层；渲染/输入走 GPUI
 ```
 
 协议与宿主只存在于 `core/src/proto/` 与 `core/src/bin/pigeon-server/`，没有 Swift 版：宿主必须是 3–8MB

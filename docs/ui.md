@@ -137,6 +137,7 @@
 
 - `swift test`：配色切换、长标题布局、紧凑行、远端机器标题、尺寸来源、状态及输入逻辑。
 - `python3 tools/checks/harp-ui-check.py --out /tmp/pigeon-ui`：临时目录内启动独立宿主，创建真实 OSC 7501 会话，截取浅/深色窗口；不读取用户会话和配置。
+- `python3 tools/checks/gpui-ui-check.py --out /tmp/pigeon-gpui`：同一组 fixture 驱动 GPUI 客户端（[ADR-0013](adr/0013-gpui-single-client.md)），截取浅/深色窗口。
 - `PIGEON_SELFTEST=1`：现有真实窗口交互验收入口，覆盖分屏、zoom、滚动、输入、会话选择及复制粘贴。
 
 ## 7. 本轮行为补充（2026-11-04）

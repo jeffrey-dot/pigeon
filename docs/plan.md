@@ -279,6 +279,7 @@ M0–M1 可以直接复用现有代码：内核的对账语料（来自 tmux 阶
 | macOS 侧栏 | 机器/项目/会话分组、状态与 `msg`/`app`、相对时间、未读、needs-you、跳转、改名和排序持久化；Harp 单行侧栏、任务提示、悬停关闭、透明标题栏。具体口径见 [ui.md](ui.md) |
 | macOS 远端 | 系统 SSH，兼容宿主复用、按需下载/安装、A/B/C 三档对接与断线重连；15s 心跳、45s 静默超时。A/B 保持远端会话，C 明示不持久。见 [remote.md](remote.md) |
 | Linux 首片 | Rust + GTK4，`GtkGLArea` + OpenGL ES 3 / 3.3 core；本地自动拉起宿主、多 pane、分屏、zoom、焦点与 resize，灰度和彩色图集。见 [Linux README](../clients/linux/README.md) |
+| GPUI 统一客户端首片 | 2026-11-05 核对。`clients/gpui/`（crate `pigeon-gpui`）只依赖 `pigeon_core::api`。已接：本地自动拉起宿主、握手（`status_all` + `status_snapshot`）、按项目分组的单行侧栏（组名首字母大写；行内名称、10pt 等宽数字相对时间、16pt 槽位里自绘的 working 弧 / blocked 环+点 / done 实心对勾 / 已读细勾 / idle 月亮 / error 三角；组头 needs-you 按 blocked + error + 未读 done 聚合；选中行白底 8pt 圆角 0.5pt 描边 + 轻阴影；悬停底色；点击切换会话）、56pt 顶栏（红绿灯对齐中线，折叠与新建 28×28 按钮，仅外观无动作）、终端卡片（10pt 圆角、0.5pt 描边、向下 4pt/模糊 16pt 阴影；头部名称 + 从开头截断的 `~` 路径 + 有 OSC 7501 时的 `Working · 1m`，最多占宽 45%）、终端网格（attach 后消费 snapshot/delta，按行绘制合并同样式的彩色 Menlo 13pt/行高 17pt）。外观跟随系统并监听变化，`PIGEON_APPEARANCE` 可固定。色值与尺寸取自 Harp `54c5286` 的 `vertical_tabs.rs` / `default_themes.rs`；侧栏底色为 Harp `GLASS_TINT` 合成在 `SIDEBAR` 上的不透明近似（#f2f2f4，参考图实测 #f2f2f3）。27 条单测通过，`cargo clippy -p pigeon-gpui --all-targets -- -D warnings` 通过。截图：`python3 tools/checks/gpui-ui-check.py`。见 [ADR-0013](adr/0013-gpui-single-client.md) |
 | 合并远端改进 | 2026-11-04 合并 `origin/main` @ `edba2ed`：握手/空闲超时、私有 socket/对端验证、有界 PTY 输入、增量转换/渲染缓存、现代键盘与编程连字；本次合并重新验证，不能沿用旧测试数字 |
 | 质量与分发基础 | Rust 双平台 CI、Swift CI（默认 macos-15-intel，可手动选择 macos-latest 验证 Apple Silicon）、无默认 feature 构建、头文件 diff、宿主体积上限；8 条 VT 文本 golden；macOS universal 包、Ed25519 应用更新、多个架构的远端宿主产物 |
 
@@ -303,6 +304,7 @@ M0–M1 可以直接复用现有代码：内核的对账语料（来自 tmux 阶
 | 验收深度 | 已有 [宿主协议基线](host-benchmark.md) 的回显、快照重连和最多 16 pane 短时输出原始样本；完整 `vttest`/属性对账、fuzz、GUI/IME/无障碍、持续输出、弱网时延和功耗仍待补。8 条文本 golden 只覆盖基础场景；core unsafe/生产 panic 有编译 lint；Linux unsafe 限定在 gl.rs，Xvfb 资源回收 CI 通过；直接依赖与平台导入静态检查已接 CI，传递依赖审计仍待补 |
 | TERM/terminfo 后续 | 已修复继承外部 TERM：新 pane 固定 xterm-256color/truecolor，四种外部环境回归通过；专用 terminfo 随现代能力完善 |
 | 其它限制 | 无 OSC 7501 的会话不显示虚构活动时间；宿主状态不写盘（既定取舍）；`swift test` 需要完整 Xcode |
+| GPUI 客户端未完成部分 | 2026-11-05 截图对比（浅色）：布局坐标、侧栏/卡片底色、选中行、字形与按钮位置已与参考图一致；仍不同：①needs-you 口径——本项目（macOS `SidebarModel`、ui.md §3.1）计未读 done，参考图（Harp）只计 blocked，故 fixture 下 Launch 显示 `2 need you`、Backend/Other 也出现计数，待定口径；②fixture 只能产生刚上报的记录，时间全为 `now`、done 全为未读（参考图有 1m/4m/2d 与已读细勾），这是验收数据差异，不是渲染缺失；③组名规则同 Harp 只大写首字母，fixture 目录名 `iOS app` 显示为 `IOS app`。功能缺口：顶栏按钮与悬停关闭无动作、无侧栏拖宽与折叠、无行切换动画/blocked 脉冲、无光标绘制、无输入/IME、无分屏绘制、无选择/剪贴板/回看/搜索/OSC 8、无 SSH 远端与软件更新、无真实窗口模糊材质（用不透明近似）、无 cross-restart seen 与逐条确认、网格无字形批处理/脏行复用。macOS 需完整 Xcode + Metal Toolchain；GPUI 为 pre-1.0，git rev 固定为 `654efae4`，升级需复验。Linux/Windows 上未构建验证 |
 
 **优化前核对证据**：8 条已提交 VT golden 通过。用 `vt-dump` 输入 `e\u0301` 得到 `e`，输入 `👩\u200d💻` 得到 `👩💻`，确认组合码点在快照转换时丢失；预组字符 `é` 保留。
 Linux 默认环境 `TERM=linux` 下，`cargo test --manifest-path core/Cargo.toml --offline` 的 `vim_alternate_screen_survives_a_reconnect` 超时。
