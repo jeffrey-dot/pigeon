@@ -132,7 +132,9 @@ result=$?
 printf 'Command exit: %s\n' "$result"
 ```
 
-wrapper 首先发 `working`，只有这一步成功才启动命令；命令保持在前台，stdin 和参数逐项原样传递。
+wrapper 先 dry-run 校验最坏终态长度，再发 `working`，两步成功才启动命令；命令在独立前台子 shell 执行，
+stdin 和参数逐项原样传递，`exec` / `trap` 等 builtin 不能替换 wrapper 或移除其退出处理。
+id/app 以 `--id=…` / `--app=…` 传给发送器，合法的 `-run` 或 `--help` 文本不会被当作选项。
 命令退出 0 发 `done`，任何非零退出（含通常的 128+signal）发 `error`，并保留命令退出码。
 HUP/INT/TERM trap 将退出码设为 129/130/143，并阻止退出 trap 误报 done；最终上报失败也不覆盖命令退出码。
 它只记录所包的前台命令，不跟踪该命令遗留的后台进程或整个 agent 的内部任务。
@@ -203,3 +205,6 @@ git diff --check
 2026-11-05 Linux / Python 3.14.9 实跑：17 组工具测试通过（另含 SIGKILL、安装副本末次上报失败），
 core 全量 315 passed、2 ignored；fmt、辅助程序 rustfmt、clippy、文档链接与 `git diff --check` 通过。
 本次 Linux CLI/API/PTY 验证不代表 macOS 实机、双平台 GUI、第三方 agent、远端链路或桌面通知已验收。
+
+主线程复审后的 21 组测试通过：新增选项样式字段、builtin 隔离、启动前终态预算和 dry-run 写失败退出码回归，
+四组先失败后修复。诊断通过受控写调用输出，写失败返回 1，不依赖解释器退出时刷新。CI 在 macOS/Ubuntu 的结果由集中执行记录维护。

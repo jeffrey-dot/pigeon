@@ -18,21 +18,24 @@ finish() {
     trap - 0
     trap '' HUP INT TERM
     if [ "$result" -eq 0 ] && [ -z "$report_signal" ]; then
-        "$report" done --id "$PIGEON_REPORT_ID" --app "$report_app" --msg 'Command completed.'
+        "$report" done --id="$PIGEON_REPORT_ID" --app="$report_app" --msg='Command completed.'
     else
-        "$report" error --id "$PIGEON_REPORT_ID" --app "$report_app" \
-            --msg "Command ended with exit code $result${report_signal:+ (signal $report_signal)}."
+        "$report" error --id="$PIGEON_REPORT_ID" --app="$report_app" \
+            --msg="Command ended with exit code $result${report_signal:+ (signal $report_signal)}."
     fi
     # A reporting error must not replace the command's exit status.
     exit "$result"
 }
 
 # Refuse to launch an apparently monitored command when initial reporting fails.
-"$report" working --id "$PIGEON_REPORT_ID" --app "$report_app" --msg 'Command started.' || exit $?
+# Reserve enough bytes for the longest exit code and signal label before emitting working.
+"$report" error --id="$PIGEON_REPORT_ID" --app="$report_app" \
+    --msg='Command ended with exit code 255 (signal TERM).' --dry-run >/dev/null || exit $?
+"$report" working --id="$PIGEON_REPORT_ID" --app="$report_app" --msg='Command started.' || exit $?
 trap finish 0
 trap 'report_signal=HUP; exit 129' HUP
 trap 'report_signal=INT; exit 130' INT
 trap 'report_signal=TERM; exit 143' TERM
 # Foreground execution preserves stdin and terminal process-group signal delivery.
-"$@"
+( "$@" )
 exit $?

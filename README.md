@@ -12,6 +12,7 @@ Linux GTK4 客户端已有本地多会话侧栏、逐条状态确认、渲染、
 [当前能力与缺口](docs/plan.md#11-当前能力与已知缺口)。
 
 - [AGENTS.md](AGENTS.md) —— 给编码 agent 的工作说明：**模块划分**、风格、测试、不变量
+- [Agent 主动接入](docs/agent-integration.md) —— `pigeon-report` 上报状态，`pigeon-run` 包装前台命令；工具不修改 shell/agent 配置
 - [GLOSSARY.md](GLOSSARY.md) —— 领域词汇：一个概念只有一个名字，含「禁用的说法」
 - [docs/adr/](docs/adr/README.md) —— **架构决策记录**：为什么是 Rust 内核、为什么宿主持有 PTY、否掉过哪些选项
 - [docs/m0-checklist.md](docs/m0-checklist.md) —— **M0 验收记录**：自动化结果、截图证据、未验项

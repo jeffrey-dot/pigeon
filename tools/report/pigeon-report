@@ -112,7 +112,7 @@ def main():
             else:
                 os.close(tty)
                 available = True
-            print(json.dumps({
+            diagnostic = (json.dumps({
                 "valid": True,
                 "emitted": False,
                 "destination": "stdout" if args.stdout else "controlling_tty",
@@ -122,7 +122,9 @@ def main():
                 "raw_bytes": raw_size,
                 "encoded_bytes": len(sequence),
                 "limit_bytes": MAX_SEQUENCE,
-            }, sort_keys=True))
+            }, sort_keys=True) + "\n").encode("utf-8")
+            if os.write(sys.stdout.fileno(), diagnostic) != len(diagnostic):
+                raise OSError("Incomplete diagnostic output")
             return 0
         fd = sys.stdout.fileno() if args.stdout else open_tty()
         try:

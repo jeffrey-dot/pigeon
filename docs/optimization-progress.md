@@ -34,8 +34,9 @@
 | `662644e` | [41944011109](https://github.com/jeffrey-dot/pigeon/actions/runs/41944011109) | 全部通过，含 Linux GL 所有权、编译边界和独立 Xvfb driver 资源测试 |
 | `73813d5` | [41946816404](https://github.com/jeffrey-dot/pigeon/actions/runs/41946816404) | 全部通过，含 Ubuntu/macOS 宿主基线 smoke 与原始样本 artifact |
 | `03b1a41` | [41951970329](https://github.com/jeffrey-dot/pigeon/actions/runs/41951970329) | 全部通过，含 OSC 8 复审、文本查询、Linux 侧栏/订阅隔离与 Swift ABI 夹具修复 |
+| `61acd11` | [41953937127](https://github.com/jeffrey-dot/pigeon/actions/runs/41953937127) | 全部通过，含会话环境覆盖、分屏继承、API/C ABI 与真实 PTY 校验 |
 
-已通过的平台 CI 对应 `03b1a41`，含 OSC 8、文本查询、Linux 侧栏和宿主基线 smoke；新 session env 切片 CI 待核对。`8ccaeb3` 的 macOS 15 Intel `swift build` 与 `swift test` 通过：执行 352 项、跳过 7 项、0 failures；独立 Foundation 测试 98 项通过。
+已通过的平台 CI 对应 `61acd11`，含 session env、OSC 8、文本查询、Linux 侧栏和宿主基线 smoke；上报工具/架构检查新 CI 待核对。`8ccaeb3` 的 macOS 15 Intel `swift build` 与 `swift test` 通过：执行 352 项、跳过 7 项、0 failures；独立 Foundation 测试 98 项通过。
 Apple Silicon 的最终提交尚未完成验收；不能用 Intel 结果代替。CI 构建和测试也不等于真实状态面板/SSH/GPU 呈现验收。
 
 ## 主线程本地验证
@@ -74,3 +75,5 @@ Linux 侧栏整合复审：两轴发现后台未发现 pane 状态误清、legac
 Session env 本机验证：默认 core 320 passed / 2 ignored，无默认 feature 214 passed / 1 ignored；API 2 项、C ABI 1 项、真实宿主 2 项专题通过。默认/无默认 clippy、无默认库构建、FFI import 与 cbindgen 通过；GNU release 1,993,536 bytes。之后追加能力探测与 128 项/32 KiB 精确上限断言，专题复跑通过；最终平台 CI 待验。
 
 架构检查：core 直接依赖评审清单、host optional feature、客户端禁止打开内部 feature、核心 host-runtime/OS 分支和 Swift UI/CoreText import 接入 CI。4 组违规夹具与当前树检查通过；脚本是源码/manifest 检查，不替代编译器、传递依赖/许可证审计。
+
+OSC 7501 上报工具：pigeon-report/pigeon-run 与接入指南已整合。规范轴发现选项样式字段和 dry-run 写失败码，行为轴另发现终态预算与 builtin 改写 trap；四组复现先失败后修复，21 组真实 CLI/API/PTY 测试通过，新增双平台 CI。共享能力表已同步，第三方 agent/远端/桌面通知仍未验。

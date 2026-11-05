@@ -210,6 +210,8 @@ pigeon/
 
 ## 6. 常见任务的做法
 
+**程序主动上报状态**：`tools/report/pigeon-report` 与可选 `pigeon-run`，安装、字段和退出语义见 `docs/agent-integration.md`；不自动安装 hook 或修改用户配置，不把能力环境变量当成接入成功。
+
 **加一种状态显示**：`core/src/status/` 已有记录 → 只改 `SidebarModel` 的排序/图标映射 + `SidebarRowView`，不动协议。
 
 **加一条通信消息**：`core/src/proto/` 的 message enum 加 case（带 version）→ 分帧/编解码自动覆盖 →

@@ -239,6 +239,31 @@ panic = "deny"
         self.assertEqual(result, 127)
         self.assertEqual(self.records(output)[0][1], "error")
 
+    def test_wrapper_preserves_option_like_fields(self):
+        code, output = self.terminal([str(WRAPPER), "-run", "--help", "--", "/bin/true"])
+        self.assertEqual(code, 0, output)
+        self.assertEqual(self.records(output)[0][:4], ("-run", "done", "", "--help"))
+
+    def test_wrapper_builtins_cannot_replace_or_untrap_the_wrapper(self):
+        for command in [["exec", "/bin/true"], ["trap", "", "EXIT"]]:
+            code, output = self.terminal([str(WRAPPER), "run", "Tests", "--", *command])
+            self.assertEqual(code, 0, output)
+            self.assertEqual(self.records(output)[0][1], "done")
+
+    def test_wrapper_rejects_insufficient_terminal_report_budget_before_launch(self):
+        code, output = self.terminal([str(WRAPPER), "r" * 4036, "", "--", "/bin/sh", "-c", "printf STARTED; exit 7"])
+        self.assertEqual(code, 2, output)
+        self.assertNotIn(b"STARTED", output)
+        self.assertEqual(self.records(output), [])
+
+    @unittest.skipUnless(Path("/dev/full").exists(), "requires full device")
+    def test_dry_run_write_failure_uses_documented_exit_code(self):
+        with open("/dev/full", "wb") as output:
+            result = subprocess.run([sys.executable, str(REPORT), "working", "--dry-run"],
+                                    stdout=output, stderr=subprocess.PIPE, env=self.env, timeout=10)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertNotIn(b"Exception ignored", result.stderr)
+
     def test_wrapper_keeps_stdin_and_nested_ids(self):
         script = ('"$1" "${PIGEON_REPORT_ID}.child" Child -- /bin/sh -c "exit 7"; '
                   '"$2" working --id "$PIGEON_REPORT_ID"; printf READY; read line; test "$line" = ok')

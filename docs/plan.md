@@ -292,7 +292,7 @@ M0–M1 可以直接复用现有代码：内核的对账语料（来自 tmux 阶
 | OSC 8 / OSC 52 | OSC 8 链接已经核心、snapshot/delta/history、Rust/C 接口保留；macOS 已接纯文本 hover 和 http/https Cmd+click，复审修复取消序列与点击目标变化，AppKit CI 通过、真实 GUI 待验；Linux 点击待接。OSC 52 事件仍被忽略，远端程序复制到本地剪贴板不可用。见 [osc8.md](osc8.md) |
 | 现代终端协议 | macOS 已接 Kitty keyboard protocol 与应用小键盘，Linux 仍为 legacy；DEC 2026 同步输出与超时已接；图片协议、OSC 9;4 进度、完整 OSC 133 命令边界/命令输出导航未实现。不能把底层 VT 库的能力当成产品端到端能力 |
 | agent 记录同步 | 多 pane 状态聚合、来源 ack、跨应用重启事件身份持久化和重播去重已实现；按 host/instance/pane/seq/record 隔离，缓存报告/旧屏幕不作查看依据。宿主与双外形接口已提供同 pane 完整未确认集合及独立 revision，ack/clear/退出立即广播；macOS 已协商完整集合并提供 Status Records 面板逐条查看/显式确认，旧宿主仍走单条路径；Linux 本地侧栏也已接完整集合与逐条确认，尚无跨重启 seen。身份集合有界存储、多进程写入一致性和 AppKit 交互仍待验收 |
-| agent 接入与通知 | 目前注入 `PI_PROGRAM_STATUS=1`，其它程序必须自行上报 OSC 7501；没有通用的上报工具/接入指南、完整适配矩阵或桌面通知投递。不能把“能运行 agent”写成“能自动显示其状态” |
+| agent 接入与通知 | 注入 `PI_PROGRAM_STATUS=1`，已有通用 `pigeon-report`、`pigeon-run` 与 [主动接入指南](agent-integration.md)，程序仍须主动上报 OSC 7501。第三方程序版本适配矩阵和桌面通知未验/未实现；不能把“能运行 agent”写成“能自动显示其状态” |
 | Linux 功能对齐 | 本地侧栏/会话选择、未读/needs-you、逐条确认与尺寸来源已接；缺 SSH 连接管理、选择复制、鼠标/焦点上报、拖动分隔线、渲染脏行复用与自动断线恢复；delta、IME、复制当前屏幕、宿主括号粘贴、滚动回看与 15s ping 保活已接。Xvfb/fcitx5 输入与延迟回看验收通过，Wayland/IBus/日文/混合 DPI 未验；GTK CI 已运行，GUI 发布产物未做 |
 | DECSTBM 元数据 | VT 引擎处理滚动区，但 `Snapshot.scroll` 导出为整屏；不是 VT 不支持滚动区。真正边界未暴露给客户端 |
 | C 档远端尺寸 | 退化模式本地 VT 会 resize，尚无本地 PTY 向 ssh 转发 `TIOCSWINSZ`，远端尺寸不能随窗口可靠更新 |
@@ -307,4 +307,4 @@ M0–M1 可以直接复用现有代码：内核的对账语料（来自 tmux 阶
 **优化前核对证据**：8 条已提交 VT golden 通过。用 `vt-dump` 输入 `e\u0301` 得到 `e`，输入 `👩\u200d💻` 得到 `👩💻`，确认组合码点在快照转换时丢失；预组字符 `é` 保留。
 Linux 默认环境 `TERM=linux` 下，`cargo test --manifest-path core/Cargo.toml --offline` 的 `vim_alternate_screen_survives_a_reconnect` 超时。
 改用 `TERM=xterm-256color cargo test --manifest-path core/Cargo.toml --offline --quiet` 后全量通过：194 passed，2 ignored（含文档测试）。
-上述 TERM 问题已在本轮修复；后续实现与验证见 [优化执行记录](optimization-progress.md)。`03b1a41` 的 Rust 双平台、GTK/GL 资源、宿主基线 smoke 和 macOS 15 Intel Swift 完整构建/测试已由 CI 全部通过；session env 新切片、Apple Silicon 最终版本与真实 GUI 仍待验。
+上述 TERM 问题已在本轮修复；后续实现与验证见 [优化执行记录](optimization-progress.md)。`61acd11` 的 Rust 双平台、GTK/GL 资源、宿主基线 smoke 和 macOS 15 Intel Swift 完整构建/测试已由 CI 全部通过；上报工具/架构检查新切片、Apple Silicon 最终版本与真实 GUI 仍待验。
