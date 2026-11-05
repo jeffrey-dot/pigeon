@@ -3,7 +3,7 @@
 给编码 agent 的工作说明。人看的部分在 `README.md`，产品/架构在设计文档里（见 §11）。
 **当前状态（2026-11-05 核对）：M0–M4 主体已落地，M5 Linux 客户端进行中**。
 macOS 已有分屏、回看、zoom、agent 侧栏、SSH 三档对接、Metal 渲染、增量更新、选择复制粘贴、鼠标上报与
-`NSTextInputClient` 输入法、Kitty keyboard protocol、编程连字；Linux 已有 GTK4/OpenGL 网格、本地宿主连接、分屏/分隔线拖动与 zoom、增量更新、IME、滚动回看、复制当前屏幕与异步粘贴，已接握手/静默超时与有界传输，本地自动重连、同实例增量续传与全量退化已接，尚未功能对齐。Linux 已接 Harp 风格单行侧栏、浅深色终端卡片与顶部栏，界面验收见 `docs/linux-harp.md`。
+`NSTextInputClient` 输入法、Kitty keyboard protocol、编程连字；Linux 已有 GTK4/OpenGL 网格、本地宿主连接、分屏/分隔线拖动与 zoom、增量更新、IME、滚动回看、可见屏幕选择复制与异步粘贴，已接握手/静默超时与有界传输，本地自动重连、同实例增量续传与全量退化已接，尚未功能对齐。Linux 已接 Harp 风格单行侧栏、浅深色终端卡片与顶部栏，界面验收见 `docs/linux-harp.md`。
 2026-11-05 核对：宿主已实现同 pane 完整状态快照与独立修订号；macOS 与 Linux 均已协商并提供 Status Records 逐条查看/确认，Linux 已接本地多会话侧栏；跨重启持久化仅 macOS 已接，见 `docs/status-sync.md`、`docs/status-client.md`、`docs/linux-sidebar-progress.md`。
 2026-11-05 核对：OSC 8 已经核心、宿主帧与双外形接口传递；macOS 已接 hover/Cmd+click（仅 http/https，AppKit CI 通过，真实 GUI 待验），Linux Ctrl+click/hover 与 Kitty 键鼠/焦点上报已接，真实硬件/Wayland 待验，见 `docs/osc8.md`、`docs/linux-modern-input.md`。
 2026-11-05：核心/宿主提供 generation 绑定的 literal 搜索、范围分页与原子视口定位；macOS 搜索条/分页/取消/上下命中/高亮已接入，6489ca6 的 AppKit CI 已通过，真实 GUI 待验；Linux Ctrl+Shift+F 搜索/定位已接并通过隔离 GTK 验收；regex、完整选择和稳定锚点待做，见 `docs/text-query.md`、`docs/search-progress.md`、`docs/linux-search.md`。

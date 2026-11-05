@@ -145,3 +145,5 @@ PgSnapshot {            // 字段以 include/pigeon_core.h 为准，此处只写
 `api::Core::text_query` 与 C `pg_text_query` 同语义；`text_query_message` / `text_result_of` 对应 C 消息 builder / 结果 handle，FFI 只转换所有权与指针。
 宿主 pane actor 每次执行一页有界请求，页间处理输出/输入；客户端不再取下一页就是取消。
 坐标、预算、协议及 regex/稳定锚点/UI 尚未完成的限制见 [文本查询](text-query.md)。
+
+可见网格选择通过 `api::select_grid` 与 `pg_select_grid` 提供；格子/词/行/矩形、宽字符与软换行由 core/src/term/selection.rs 统一决定，返回 owned 文本和行 span。范围/预算与平台接入见 [选择说明](selection.md)。

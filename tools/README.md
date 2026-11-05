@@ -19,6 +19,7 @@
 | `checks/linux-search-check.py` | 隔离 GTK/真实 PTY 搜索定位、取消、Unicode 与旧宿主退化验收 |
 | `checks/linux-reconnect-check.py` | 隔离代理断链/宿主重启验收，验证会话与画面恢复、离线输入不重放及新实例隔离 |
 | `checks/linux-divider-check.py` | 隔离真实 GTK/宿主验收左右/嵌套分隔线拖动、zoom 禁用和应用鼠标事件不泄漏 |
+| `checks/linux-selection-check.py` | 隔离 GTK 选择复制：拖选/反向/词/行/矩形、Unicode 和 Shift 覆盖应用鼠标 |
 | `checks/linux-harp-check.py` | 真实宿主/GTK 的 Harp 浅色深色截图，独立桌面与 fixture；见 [界面验收](../docs/linux-harp.md) |
 | `checks/linux-input-check.py` | 独立 Xvfb/fcitx5/宿主验收 IME、复制当前屏幕、异步粘贴与分屏焦点；不操作用户桌面 |
 | `checks/ffi-imports.sh` | 禁止 FFI 直接引用核心内部模块 |

@@ -308,6 +308,7 @@ literal 允许 LF、拒绝其它控制字符，长度 1–256 UTF-8 字节；大
 | `PgCell.hyperlink_id` + `PgSnapshot/PgDelta.links` | `cell[4]` + 同帧 `links`；表由快照/delta 持有，PgCell 步长不变 |
 | `PgCell.width` | 由 `codepoint` 推导，不上线 |
 | `PgStatus.state/kind/msg/seq` | `status.state/kind/msg/seq`（旧 focused-pane 接口包含已确认存储记录） |
+| `pg_select_grid` / `pg_selection_text/spans/free` | 可见 Snapshot 选择的独立拥有文本/高亮；Rust api::select_grid，同一核心语义，见 [选择说明](selection.md) |
 | `pg_msg_set_session_env` | 与 Rust `api::set_session_env` 共用有界校验、失败不修改消息；先设置 new_session.id，再逐项设置 env |
 | `pg_text_query` / `pg_msg_text_query` / `pg_msg_text_result` + `pg_text_result_info/hit/text/free` | 同一 TextQuery 语义用于嵌入 Core 与宿主请求；结果 handle 独立拥有文本，Rust 为 `Core::text_query` / `text_query_message` / `text_result_of` |
 | `pg_text_result_snapshot` / `pg_text_result_viewport` | viewport 结果的独立快照与 offset/history_len/modes；Rust 为 `text_viewport_snapshot` / `text_viewport_of`；kind=3，`pg_text_result_hit(0)` 读取同画面范围 |

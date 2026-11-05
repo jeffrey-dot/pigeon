@@ -26,7 +26,7 @@ cargo test -p pigeon-linux                   # 纯逻辑单测（会话路由 / 
 首次空宿主自动建会话；关闭最后一个会话后保留空窗口，可用 New Session 再建。关闭窗口不关闭宿主/PTY。
 
 快捷键（终端焦点下，先于 shell 生效）：`Ctrl+Shift+D` 左右分屏 · `Ctrl+Shift+E` 上下分屏 ·
-`Ctrl+Shift+W` 关闭焦点 pane · `Ctrl+Shift+Z` 放大/还原 · `Ctrl+Shift+C` 复制焦点 pane 当前可见屏幕（含回看屏幕） · `Ctrl+Shift+V` 粘贴。
+`Ctrl+Shift+W` 关闭焦点 pane · `Ctrl+Shift+Z` 放大/还原 · `Ctrl+Shift+C` 优先复制选区，否则复制焦点 pane 当前可见屏幕（含回看屏幕） · `Ctrl+Shift+V` 粘贴。
 
 回看快捷键：`Shift+PageUp/PageDown` 翻页（回看中裸 `PageUp/PageDown` 也翻页）；`Shift+Home` 到最旧历史、
 `Shift+End` 或 “Return to live” 按钮回实时屏。裸 PageUp/PageDown 在实时屏上仍发给程序；Ctrl/Alt 修饰不触发回看。
@@ -39,7 +39,7 @@ cargo test -p pigeon-linux                   # 纯逻辑单测（会话路由 / 
 光标三种形状）、R8 掩码图集 + RGBA 彩色图集（emoji）、CJK/全角/符号 fallback、制表符与方块元素
 用矩形画（不接缝）、宽字符居中、xterm legacy/Kitty 按键编码（含 DECCKM/DECKPAM）、窗口缩放 → `resize_pane` → PTY 尺寸；协议 delta 更新（核心导出格宽，校验 seq/网格后原子应用，缺序重新 attach）。
 
-**输入与剪贴板**：GtkIMMulticontext preedit/commit 与候选窗定位；异步剪贴板粘贴经宿主包装括号粘贴，切换 pane/失焦取消待完成粘贴。复制仅包含当前 pane 屏幕，保留附加码点和软换行，不含可见屏幕之外的历史或选择。
+**输入与剪贴板**：GtkIMMulticontext preedit/commit 与候选窗定位；异步剪贴板粘贴经宿主包装括号粘贴，切换 pane/失焦取消待完成粘贴。左键拖选、双击词、三击行、Alt 矩形、Shift 覆盖应用鼠标已接；Ctrl+Shift+A 选择当前可见屏幕，Ctrl+Shift+C 优先复制选区。核心统一软换行/宽字符/附加码点语义，不含可见屏幕之外的历史，见 [选择说明](../../docs/selection.md)。
 
 **本地侧栏与状态**：按本地 git 根/cwd 分组、列出所有会话、紧急度排序、未读记录数、needs-you 会话计数及尺寸来源。
 无 OSC 7501 报告时不给状态或虚构活动时间。hello 请求 `status_all` + `status_snapshot`，仅按协商路径读取；
@@ -54,7 +54,7 @@ cargo test -p pigeon-linux                   # 纯逻辑单测（会话路由 / 
 
 **分隔线**：左键拖动左右/上下分隔线调整比例，嵌套布局按核心矩形命中；zoom 隐藏分隔线，拖动不向应用发送鼠标字节。见 [验收说明](../../docs/linux-divider.md)。
 
-**未做**：SSH 连接管理、拖选/选择复制、
+**未做**：SSH 连接管理、跨历史选择/自动滚动、
 渲染脏行增量、DMABUF、emoji ZWJ 序列整形。
 GTK 客户端已有 Ubuntu CI 作业（构建/clippy/逻辑测试），尚无 GUI 发布产物。输入切片通过独立 Xvfb + fcitx5 拼音验收；Wayland、IBus、日文 IME、非美式键盘和混合 DPI 仍未验。见 [输入验证记录](../../docs/linux-input-progress.md)。
 

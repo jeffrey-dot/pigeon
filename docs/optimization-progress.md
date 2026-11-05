@@ -39,8 +39,9 @@
 | `a92a079` | [41999149991](https://github.com/jeffrey-dot/pigeon/actions/runs/41999149991) | 六作业全部通过，含 Linux 搜索/冻结画面/取消与定位 |
 | `bcb7337` | [42001191110](https://github.com/jeffrey-dot/pigeon/actions/runs/42001191110) | 六作业全部通过，含 Linux 有界传输、握手与静默期限 |
 | `fa61805` | [42009346310](https://github.com/jeffrey-dot/pigeon/actions/runs/42009346310) | 六作业全部通过，含本地自动重连、增量续传和状态查看隔离 |
+| `5bf8737` | [42010929968](https://github.com/jeffrey-dot/pigeon/actions/runs/42010929968) | 六作业全部通过，含 Linux 嵌套分隔线拖动及绘线位置修复 |
 
-已通过的平台 CI 对应 `fa61805`，含 session env、OSC 8、文本查询、Linux 侧栏和宿主基线 smoke；Linux 分隔线拖动新 CI 待核对。`8ccaeb3` 的 macOS 15 Intel `swift build` 与 `swift test` 通过：执行 352 项、跳过 7 项、0 failures；独立 Foundation 测试 98 项通过。
+已通过的平台 CI 对应 `5bf8737`，含 session env、OSC 8、文本查询、Linux 侧栏和宿主基线 smoke；共享选择接口/Linux 选择复制新 CI 待核对。`8ccaeb3` 的 macOS 15 Intel `swift build` 与 `swift test` 通过：执行 352 项、跳过 7 项、0 failures；独立 Foundation 测试 98 项通过。
 Apple Silicon 的最终提交尚未完成验收；不能用 Intel 结果代替。CI 构建和测试也不等于真实状态面板/SSH/GPU 呈现验收。
 
 ## 主线程本地验证
@@ -101,3 +102,5 @@ Linux 本地恢复：顺序连接泵、后台重试、完整快照恢复选中�
 Linux 增量续传：同实例实时屏保留 seq，attach.since 后用顺序 pong 标记追赶结束；该标记不授权状态已查看，显式记录面板需要新屏幕。缺序取消旧 pong 并取全量，历史/搜索/新实例不续传。GTK 95 passed / 2 ignored；静默无快照、漏帧 delta 补回、延迟历史全量恢复三种真实代理断链验收通过，侧栏/搜索回归通过。
 
 Linux 分隔线：核心矩形/ratio 的像素映射、左右与嵌套上下拖动、zoom 禁用和全手势消费已接；同步修正绘线位置。GTK 97 passed / 2 ignored，fmt/clippy/build 通过；真实鼠标模式应用未收到拖动字节，极端比例由核心钳制。见 [分隔线说明](linux-divider.md)。
+
+可见网格选择：核心统一 Cell/Word/Line/rectangle、文本和 span，安全 Rust/C ABI 同步；Linux 拖选/反向/双三击/矩形/Shift 应用鼠标覆盖与复制优先级已接。默认 core 334 passed / 2 ignored，无默认 227 / 1，GTK 98 / 2；选择与现代输入/回看/搜索/侧栏/分隔线桌面验收通过。新 ABI 由 cbindgen0.27 生成；跨历史自动滚动和 macOS 迁移尚未完成，见 [选择说明](selection.md)。
