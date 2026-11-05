@@ -1,0 +1,147 @@
+#!/usr/bin/env python3
+"""Emit the OSC 7501 subset in core/src/status/parse.rs (2026-11-05).
+
+No upstream revision is pinned by the receiver; see docs/agent-integration.md.
+Only msg is base64. This sender does not parse OSC, VT, or host protocol frames.
+"""
+
+import argparse
+import base64
+import json
+import os
+import re
+import sys
+
+MAX_SEQUENCE = 4096
+STATES = ("idle", "working", "blocked", "done", "error", "clear")
+KINDS = ("permission", "question", "auth")
+ID_PATTERN = re.compile(r"[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*", re.ASCII)
+
+
+class ReportParser(argparse.ArgumentParser):
+    def error(self, message):
+        # Arguments can contain terminal controls or secrets; do not echo them.
+        self.exit(2, "pigeon-report: Invalid arguments; use --help.\n")
+
+
+def arguments():
+    parser = ReportParser(
+        description="Report an explicit program state to the controlling TTY.",
+        epilog="Exit 0 means bytes written, not receiver acknowledgement. "
+        "PI_PROGRAM_STATUS=1 is only a capability hint. Python 3.8+ required.",
+        allow_abbrev=False,
+    )
+    parser.add_argument("state", choices=STATES)
+    parser.add_argument("--id", help="ASCII dot-separated record id; omitted = default record")
+    parser.add_argument("--kind", choices=KINDS, help="blocked reason only")
+    parser.add_argument("--msg", help="plain UTF-8 text; encoded to base64 by this tool")
+    parser.add_argument("--app", help="plain application name (no colon)")
+    parser.add_argument("--all", action="store_true", help="clear every record in this pane")
+    parser.add_argument("--stdout", action="store_true", help="explicitly emit bytes to stdout")
+    parser.add_argument("--dry-run", action="store_true", help="validate and print redacted JSON; emit no OSC")
+    return parser.parse_args()
+
+
+def text_bytes(name, value):
+    if any(ord(char) < 32 or 0x7f <= ord(char) <= 0x9f for char in value):
+        raise ValueError(name + " must not contain C0, DEL, or C1 control characters.")
+    try:
+        data = value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError(name + " must be valid UTF-8 text.") from None
+    if len(data) > MAX_SEQUENCE:
+        raise ValueError(name + " exceeds the 4096-byte raw UTF-8 limit.")
+    return data
+
+
+def encode_report(args):
+    record_id = text_bytes("id", args.id or "")
+    msg = text_bytes("msg", args.msg or "")
+    app = text_bytes("app", args.app or "")
+    if args.id is not None and ID_PATTERN.fullmatch(args.id) is None:
+        raise ValueError("id must contain nonempty ASCII letter/digit/_/- segments separated by dots.")
+    if b":" in app:
+        raise ValueError("app must not contain a colon; only msg supports base64.")
+    if args.kind is not None and args.state != "blocked":
+        raise ValueError("kind is only valid with blocked.")
+    if args.state == "clear":
+        if args.kind is not None or args.msg is not None or args.app is not None:
+            raise ValueError("clear accepts only --id or --all, plus output options.")
+        if (args.id is None and not args.all) or (args.id is not None and args.all):
+            raise ValueError("clear requires exactly one of --id or --all.")
+    elif args.all:
+        raise ValueError("--all is only valid with clear.")
+
+    fields = [b"state=" + args.state.encode("ascii")]
+    if args.id is not None:
+        fields.append(b"id=" + record_id)
+    if args.kind is not None:
+        fields.append(b"kind=" + args.kind.encode("ascii"))
+    if args.app is not None:
+        fields.append(b"app=" + app)
+    prefix, suffix = b"\x1b]7501;", b"\x1b\\"
+    raw_fields = fields + ([b"msg=" + msg] if args.msg is not None else [])
+    raw_size = len(prefix) + len(b":".join(raw_fields)) + len(suffix)
+    if raw_size > MAX_SEQUENCE:
+        raise ValueError("Raw report exceeds 4096 UTF-8 bytes including OSC framing.")
+    if args.msg is not None:
+        fields.append(b"msg=" + base64.b64encode(msg))
+    sequence = prefix + b":".join(fields) + suffix
+    if len(sequence) > MAX_SEQUENCE:
+        raise ValueError("Encoded report exceeds 4096 bytes including OSC framing; shorten the text.")
+    return sequence, raw_size
+
+
+def open_tty():
+    try:
+        return os.open("/dev/tty", os.O_WRONLY | os.O_NOCTTY)
+    except OSError:
+        raise ValueError("No writable controlling TTY; use --stdout explicitly for a pipe or file.") from None
+
+
+def main():
+    args = arguments()
+    try:
+        sequence, raw_size = encode_report(args)
+        hinted = os.environ.get("PI_PROGRAM_STATUS") == "1"
+        if args.dry_run:
+            try:
+                tty = open_tty()
+            except ValueError:
+                available = False
+            else:
+                os.close(tty)
+                available = True
+            print(json.dumps({
+                "valid": True,
+                "emitted": False,
+                "destination": "stdout" if args.stdout else "controlling_tty",
+                "tty_available": available,
+                "capability_hint": hinted,
+                "receiver_verified": False,
+                "raw_bytes": raw_size,
+                "encoded_bytes": len(sequence),
+                "limit_bytes": MAX_SEQUENCE,
+            }, sort_keys=True))
+            return 0
+        fd = sys.stdout.fileno() if args.stdout else open_tty()
+        try:
+            if not args.stdout and not hinted:
+                print("pigeon-report: OSC 7501 support is unconfirmed (no capability hint). "
+                      "Writing bytes does not confirm monitoring.", file=sys.stderr)
+            if os.write(fd, sequence) != len(sequence):
+                raise OSError("Incomplete output")
+        finally:
+            if not args.stdout:
+                os.close(fd)
+    except ValueError as error:
+        print("pigeon-report: " + str(error), file=sys.stderr)
+        return 2
+    except OSError:
+        print("pigeon-report: Output failed; the report may be incomplete.", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

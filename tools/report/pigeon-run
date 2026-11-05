@@ -1,0 +1,38 @@
+#!/bin/sh
+# Opt-in foreground wrapper for the OSC 7501 subset in docs/agent-integration.md.
+# Run as a separate process, never source: traps belong only to this wrapper.
+if [ "$#" -lt 4 ] || [ "$3" != "--" ]; then
+    printf '%s\n' 'Usage: pigeon-run ID APP -- COMMAND [ARG ...]' >&2
+    exit 2
+fi
+report_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || exit 2
+report="$report_dir/pigeon-report"
+PIGEON_REPORT_ID=$1
+report_app=$2
+export PIGEON_REPORT_ID
+shift 3
+report_signal=
+
+finish() {
+    result=$?
+    trap - 0
+    trap '' HUP INT TERM
+    if [ "$result" -eq 0 ] && [ -z "$report_signal" ]; then
+        "$report" done --id "$PIGEON_REPORT_ID" --app "$report_app" --msg 'Command completed.'
+    else
+        "$report" error --id "$PIGEON_REPORT_ID" --app "$report_app" \
+            --msg "Command ended with exit code $result${report_signal:+ (signal $report_signal)}."
+    fi
+    # A reporting error must not replace the command's exit status.
+    exit "$result"
+}
+
+# Refuse to launch an apparently monitored command when initial reporting fails.
+"$report" working --id "$PIGEON_REPORT_ID" --app "$report_app" --msg 'Command started.' || exit $?
+trap finish 0
+trap 'report_signal=HUP; exit 129' HUP
+trap 'report_signal=INT; exit 130' INT
+trap 'report_signal=TERM; exit 143' TERM
+# Foreground execution preserves stdin and terminal process-group signal delivery.
+"$@"
+exit $?

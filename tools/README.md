@@ -1,9 +1,13 @@
 # tools/
 
-开发期脚本，不进产品。每个脚本自己定位仓库根，从任何目录运行都可以。
+`report/` 是用户主动运行的上报工具，可单独安装到用户目录；运行依赖、接入示例与支持边界见
+[Agent 接入](../docs/agent-integration.md)。其余为开发期脚本，每个脚本自己定位仓库根，从任何目录运行都可以。
 
 | 脚本 | 做什么 |
 |---|---|
+| `report/pigeon-report` | Python 3 标准库 OSC 7501 CLI；默认控制 TTY，显式 stdout/dry-run，不自动改配置 |
+| `report/pigeon-run` | 用户主动运行的前台命令 wrapper/trap 示例；保留退出码，取消不报 done |
+| `checks/report-check.py` | 隔离 HOME/PTY，真实 CLI 输出经 core API 验证记录、长度、生命周期与 wrapper 信号 |
 | `build/bundle-app.sh` | 打 Pigeon.app；`UNIVERSAL=1` 出双架构（发行用） |
 | `bench/environment.py` | 输出 JSON 环境基线：版本、OS/CPU/工具链、GTK、指定环境变量；字体/刷新率等必须手工补充 |
 | `bench/host-bench.py --out /tmp/pigeon-bench-result` | 隔离 release 宿主，记录协议回显、快照重连和多 pane 短时输出原始样本；[测量边界](../docs/host-benchmark.md) |
