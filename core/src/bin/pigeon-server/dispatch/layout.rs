@@ -57,7 +57,7 @@ pub async fn split(
     session.panes.insert(new_pane, sender);
     // The new pane takes focus, like every terminal's split.
     session.layout.focus(new_pane);
-    apply_layout(session_id, session, &host.events);
+    apply_layout(session_id, session, host);
     None
 }
 
@@ -82,7 +82,7 @@ pub async fn resize_split(host: &HostState, id: u32, split_id: u32, ratio: f32) 
     {
         return Some(bad_split());
     }
-    apply_layout(*session_id, session, &host.events);
+    apply_layout(*session_id, session, host);
     None
 }
 
@@ -96,7 +96,7 @@ pub async fn focus(host: &HostState, client_id: u32, pane_id: u32) -> Option<Mes
         host.votes_changed();
         session.refit();
     }
-    apply_layout(session_id, session, &host.events);
+    apply_layout(session_id, session, host);
     None
 }
 
@@ -115,10 +115,10 @@ pub async fn resize_pane(
     session.vote.report(client_id, wanted);
     host.votes_changed();
     if session.refit() {
-        apply_layout(session_id, session, &host.events);
+        apply_layout(session_id, session, host);
     } else {
         // The request stands or was overruled either way: say which (protocol §3.2).
-        broadcast_size(session_id, session, &host.events);
+        broadcast_size(session_id, session, host);
     }
     None
 }
@@ -138,7 +138,7 @@ pub async fn zoom(host: &HostState, id: u32, pane_id: u32, on: bool) -> Option<M
     if !changed {
         return Some(no_such_pane(pane_id, Some(id)));
     }
-    apply_layout(session_id, session, &host.events);
+    apply_layout(session_id, session, host);
     None
 }
 
@@ -155,11 +155,19 @@ pub async fn close(host: &HostState, pane_id: u32) -> Option<Message> {
     let _ = session.layout.close(pane_id);
     if session.layout.is_empty() {
         if let Some(frame) = encode(&empty_layout_message(session_id)) {
-            let _ = host.events.send(Event::Layout { session_id, frame });
+            let sequence = host
+                .control_sequence
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                + 1;
+            let _ = host.events.send(Event::Layout {
+                sequence,
+                session_id,
+                frame,
+            });
         }
         map.remove(&session_id);
     } else {
-        apply_layout(session_id, session, &host.events);
+        apply_layout(session_id, session, host);
     }
     None
 }

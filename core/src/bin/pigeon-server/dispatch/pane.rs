@@ -110,9 +110,15 @@ pub async fn attach(
         return Some(no_such_pane(pane_id, Some(id)));
     };
     state.watched.insert(pane_id, state.delta_ok);
+    let changed_session = state.session != Some(session_id);
     state.session = Some(session_id);
     // Protocol §6: the first `attach` decides the policy; later ones merely join.
     let mut map = sessions.lock().await;
+    if changed_session {
+        state.control_since = host
+            .control_sequence
+            .load(std::sync::atomic::Ordering::SeqCst);
+    }
     if let Some(session) = map.get_mut(&session_id) {
         let policy = SizePolicy::from_name(size_policy.as_deref());
         let current = session.size();
@@ -121,9 +127,17 @@ pub async fn attach(
         // The tree follows the snapshot, so a reconnecting window redraws
         // the same split geometry and learns who owns the size.
         if let Some(frame) = encode(&session.layout_message(session_id)) {
-            let _ = host.events.send(Event::Layout { session_id, frame });
+            let sequence = host
+                .control_sequence
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                + 1;
+            let _ = host.events.send(Event::Layout {
+                sequence,
+                session_id,
+                frame,
+            });
         }
-        broadcast_size(session_id, session, &host.events);
+        broadcast_size(session_id, session, host);
     }
     // `latest_status` takes the sessions lock again.
     drop(map);

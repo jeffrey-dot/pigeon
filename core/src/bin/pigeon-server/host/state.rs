@@ -38,6 +38,7 @@ pub struct HostState {
     /// `note_activity` changed nothing can skip the next one (and the global lock it takes
     /// on every keystroke) until this moves.
     pub vote_epoch: Arc<AtomicU64>,
+    pub control_sequence: Arc<AtomicU64>,
 }
 
 impl HostState {
@@ -53,6 +54,7 @@ impl HostState {
             shell,
             stop: Arc::new(tokio::sync::Notify::new()),
             vote_epoch: Arc::new(AtomicU64::new(0)),
+            control_sequence: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -98,7 +100,7 @@ impl HostState {
         if session.vote.activity(client_id) {
             self.votes_changed();
             if session.refit() {
-                apply_layout(session_id, session, &self.events);
+                apply_layout(session_id, session, self);
             }
         }
         // Read under the lock: every vote change happens under it too.
@@ -113,7 +115,7 @@ impl HostState {
             if session.vote.leave(client_id) {
                 self.votes_changed();
                 if session.refit() {
-                    apply_layout(*session_id, session, &self.events);
+                    apply_layout(*session_id, session, self);
                 }
             }
         }
@@ -127,21 +129,26 @@ pub fn session_of(map: &HashMap<u32, Session>, pane_id: u32) -> Option<u32> {
 }
 
 /// Re-fits every pane to its rect and tells clients what the tree looks like.
-pub fn apply_layout(session_id: u32, session: &Session, events: &broadcast::Sender<Event>) {
+pub fn apply_layout(session_id: u32, session: &Session, host: &HostState) {
     for (pane_id, cols, rows) in session.pane_sizes() {
         if let Some(sender) = session.panes.get(&pane_id) {
             send_or_queue(sender, Cmd::Resize(cols, rows));
         }
     }
     if let Some(frame) = encode(&session.layout_message(session_id)) {
-        let _ = events.send(Event::Layout { session_id, frame });
+        let sequence = host.control_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+        let _ = host.events.send(Event::Layout {
+            sequence,
+            session_id,
+            frame,
+        });
     }
-    broadcast_size(session_id, session, events);
+    broadcast_size(session_id, session, host);
 }
 
 /// Protocol §6: every size change is announced with its `source` and the number of
 /// clients, so each window can show who is in charge.
-pub fn broadcast_size(session_id: u32, session: &Session, events: &broadcast::Sender<Event>) {
+pub fn broadcast_size(session_id: u32, session: &Session, host: &HostState) {
     let clients = session.vote.clients();
     if clients > 1 && crate::debug() {
         let (cols, rows) = session.size();
@@ -152,7 +159,12 @@ pub fn broadcast_size(session_id: u32, session: &Session, events: &broadcast::Se
     }
     for message in session.size_states() {
         if let Some(frame) = encode(&message) {
-            let _ = events.send(Event::SizeState { session_id, frame });
+            let sequence = host.control_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+            let _ = host.events.send(Event::SizeState {
+                sequence,
+                session_id,
+                frame,
+            });
         }
     }
 }

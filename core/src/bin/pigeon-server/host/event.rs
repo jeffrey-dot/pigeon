@@ -18,11 +18,13 @@ pub enum Event {
         code: i32,
     },
     Layout {
+        sequence: u64,
         session_id: u32,
         frame: Frame,
     },
     /// A pane's size changed: who won the policy and how many clients watch (protocol §6).
     SizeState {
+        sequence: u64,
         session_id: u32,
         frame: Frame,
     },

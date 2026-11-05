@@ -203,8 +203,17 @@ async fn forward(
     match event {
         // Follow the session even after its last watched pane is gone, so closing the
         // active pane still redraws the tree.
-        Event::Layout { session_id, frame } | Event::SizeState { session_id, frame } => {
-            if state.session == Some(session_id) {
+        Event::Layout {
+            session_id,
+            sequence,
+            frame,
+        }
+        | Event::SizeState {
+            session_id,
+            sequence,
+            frame,
+        } => {
+            if state.session == Some(session_id) && sequence > state.control_since {
                 outbound.control(frame)?;
             }
         }
@@ -284,3 +293,7 @@ fn type_tag(payload: &[u8]) -> Option<String> {
             _ => None,
         })
 }
+
+#[cfg(test)]
+#[path = "client_tests.rs"]
+mod tests;

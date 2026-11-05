@@ -15,6 +15,8 @@ pub struct ClientState {
     pub watched: HashMap<u32, bool>,
     /// The session whose layout this connection follows (one per window in M1).
     pub session: Option<u32>,
+    /// Internal layout/size events emitted before this subscription are obsolete.
+    pub control_since: u64,
     /// Whether the handshake negotiated `delta` for this connection.
     pub delta_ok: bool,
     /// `status_all`: this connection gets every pane's `status`, attached or not, so a
