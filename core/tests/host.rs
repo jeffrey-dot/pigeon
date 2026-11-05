@@ -165,6 +165,8 @@ struct Client {
     buffer: Vec<u8>,
     /// Last snapshot grid, kept so a timeout can show what the pane actually said.
     last_screen: String,
+    /// The socket, when there is one, so a test can keep the connection alive like a window.
+    socket: Option<UnixStream>,
 }
 
 impl Client {
@@ -186,13 +188,22 @@ impl Client {
             incoming,
             buffer: Vec::new(),
             last_screen: String::new(),
+            socket: None,
         }
     }
 
     fn connect(socket: &str) -> Self {
         let stream = UnixStream::connect(socket).expect("connect");
         let writer = stream.try_clone().expect("clone the socket for writing");
-        Self::new(Box::new(stream), Box::new(writer))
+        let kept = stream.try_clone().expect("clone the socket for pings");
+        let mut client = Self::new(Box::new(stream), Box::new(writer));
+        client.socket = Some(kept);
+        client
+    }
+
+    /// Pings in the background like a real transport; call after `hello`.
+    fn keep_alive(&self) {
+        keep_pinging(self.socket.as_ref().expect("a socket client"));
     }
 
     fn send(&mut self, message: &Message) {
@@ -2757,9 +2768,30 @@ fn stalled_delta_client(socket: &str, pane: u32) -> (UnixStream, Option<Screen>)
         let message = read_frame(&mut slow);
         Screen::apply(&mut screen, pane, &message);
         if matches!(message, Message::Layout { .. }) && screen.is_some() {
+            keep_pinging(&slow);
             return (slow, screen);
         }
     }
+}
+
+/// A real window keeps pinging every 15 s even while it does not read (protocol §1). The flood
+/// tests run longer than the host's 45 s idle timeout on a slow CI runner, and a silent test
+/// client was then hung up on ("host closed the connection") — a different behaviour from the
+/// one under test. `PIGEON_IDLE_MS=500` reproduces that locally. Writes go to a clone, so a
+/// stalled read side stays stalled.
+fn keep_pinging(socket: &UnixStream) {
+    let mut writer = socket.try_clone().expect("clone the socket for pings");
+    // A third of the host's idle timeout, the same ratio as the real 15 s / 45 s.
+    let idle = std::env::var("PIGEON_IDLE_MS")
+        .ok()
+        .and_then(|ms| ms.parse().ok())
+        .map_or(Duration::from_secs(45), Duration::from_millis);
+    std::thread::spawn(move || {
+        let frame = proto::encode_frame(&Message::Ping { ts: 0 }).expect("encode");
+        while writer.write_all(&frame).is_ok() {
+            std::thread::sleep(idle / 3);
+        }
+    });
 }
 
 /// A window behind a stalled link: the pane floods far more output than any socket buffer
@@ -2771,6 +2803,7 @@ fn a_stalled_client_catches_up_to_the_same_screen_and_keeps_the_status() {
     let host = start_host();
     let mut worker = Client::connect(&host.socket);
     hello(&mut worker);
+    worker.keep_alive();
     let pane = attach_first(&mut worker);
     let (slow, mut screen) = stalled_delta_client(&host.socket, pane);
 
@@ -2822,6 +2855,7 @@ fn control_messages_keep_their_order_behind_a_stalled_socket() {
     let host = start_host();
     let mut worker = Client::connect(&host.socket);
     hello(&mut worker);
+    worker.keep_alive();
     let first = attach_first(&mut worker);
     let (_second, layout) = split(&mut worker, first, proto::SplitAxis::Vertical, 0.5, 2);
     let split_id = splits_of(tree_of(&layout))[0].0;

@@ -230,16 +230,28 @@ fn viewport_real_pty_is_negotiated_atomic_and_does_not_change_other_views() {
     hello_with(&mut client, &["text_query", "text_viewport"]);
     let pane = attach_first(&mut client);
     wait_for_pane_text(&mut client, pane, "READY");
-    let TextResult::Search { info, hits, .. } =
-        result(query(&mut client, pane, search("OLD_TOKEN")))
-    else {
-        panic!()
+    // The interactive shell exec'd after READY can still write (startup modes, an empty prompt)
+    // and so advance the text generation between the search and the location. That is the
+    // generation check working, not the behaviour under test, so search again until a location
+    // lands on the generation it was searched in.
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let (request, located) = loop {
+        let TextResult::Search { info, hits, .. } =
+            result(query(&mut client, pane, search("OLD_TOKEN")))
+        else {
+            panic!()
+        };
+        let request = TextQuery::Viewport {
+            generation: info.generation,
+            range: hits[0],
+        };
+        match query(&mut client, pane, request.clone()) {
+            Message::Error { code, .. } if code == "stale_text" && Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            message => break (request, result(message)),
+        }
     };
-    let request = TextQuery::Viewport {
-        generation: info.generation,
-        range: hits[0],
-    };
-    let located = result(query(&mut client, pane, request.clone()));
     let picture = pigeon_core::api::text_viewport_snapshot(&located).unwrap();
     assert!(picture.history.is_empty());
     assert_eq!(picture.screen[0][0].codepoint, 'O' as u32);

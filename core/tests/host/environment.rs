@@ -19,8 +19,11 @@ pub fn command(socket: &str, program: &str) -> Command {
     if let Some(locale) = std::env::var_os("LANG") {
         command.env("LANG", locale);
     }
-    if let Some(debug) = std::env::var_os("PIGEON_DEBUG") {
-        command.env("PIGEON_DEBUG", debug);
+    // Diagnostics and the host's own test knobs pass through; everything else is cleared.
+    for name in ["PIGEON_DEBUG", "PIGEON_IDLE_MS", "PIGEON_HELLO_MS"] {
+        if let Some(value) = std::env::var_os(name) {
+            command.env(name, value);
+        }
     }
     command.args(["--socket", socket, "--shell", program]);
     command
