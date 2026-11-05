@@ -152,7 +152,7 @@ pigeon/
 | 渲染、字体、输入法 | `clients/macos/Sources/PigeonApp/Terminal/`，不往下漏 |
 | 一次性脚本 / 对账工具 | `tools/` 下的 `build/` `bench/` `checks/` `vt-parity/`，不放进 `clients/` 或 `core/src/` |
 
-### 可移植性硬规则（CI 跑 fmt / clippy（含 §4 的 lint）/ test / tokio+portable-pty 引用检查 / `--lib --no-default-features` 构建 / 体积上限 / 头文件 diff；平台 crate 还没有静态检查）
+### 可移植性硬规则（CI 跑 fmt / clippy（含 §4 的 lint）/ test / tokio+portable-pty 引用检查 / `--lib --no-default-features` 构建 / 体积上限 / 头文件 diff；直接依赖与平台 import 有静态检查）
 
 - `core/` 里**不许**出现：平台专属 crate（`core-foundation`、`objc2`…）、`cfg(target_os = …)` 分支
  （PTY 与信号可以有一处，且必须两边都有实现）、直接操作窗口/字体/图形 API。
@@ -167,6 +167,8 @@ pigeon/
 - 字体/渲染/输入法只在客户端层处理；`core/` 只搬字节与状态。
 - `tokio` / `portable-pty` 是 **optional 依赖，只由 `host` feature 打开（默认开），且只允许在 `core/src/bin/` 里使用**。
   CI 会跑 `cargo build --lib --no-default-features`，并 grep 保证库本体不引用它们。
+
+`tools/checks/architecture.py` 校验 core 直接依赖清单、host optional feature、Rust 客户端关闭默认/internal feature、核心源码中的 host runtime/OS 分支和 Swift UI/CoreText import。新增直接依赖须按本文件评审并更新清单；文本检查不是编译器，也不审计全部传递依赖。
 
 ### 模块内的硬规则
 

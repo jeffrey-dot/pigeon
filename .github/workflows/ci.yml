@@ -66,6 +66,10 @@ jobs:
         run: |
           ! rg -n "use (tokio|portable_pty)" core/src -g '!core/src/bin/**'
       - run: tools/checks/ffi-imports.sh
+      - name: Direct dependency and platform import boundaries
+        run: |
+          python3 -B tools/checks/architecture_test.py
+          python3 -B tools/checks/architecture.py
       - if: steps.core.outputs.exists == 'true'
         name: 不带 host feature 也能构建库
         run: cargo build --manifest-path core/Cargo.toml --lib --no-default-features

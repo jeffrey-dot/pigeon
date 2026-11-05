@@ -13,6 +13,7 @@
 | `checks/linux-gl-check.sh` | 独立 Xvfb 软件 GL 检查资源删除、上下文恢复和非法上传拒绝；CI 单独运行 |
 | `checks/linux-input-check.py` | 独立 Xvfb/fcitx5/宿主验收 IME、复制当前屏幕、异步粘贴与分屏焦点；不操作用户桌面 |
 | `checks/ffi-imports.sh` | 禁止 FFI 直接引用核心内部模块 |
+| `checks/architecture.py` / `architecture_test.py` | 检查直接依赖与 Swift/Rust 导入边界，并用违规夹具验证检查器；不替代编译器或传递依赖审计 |
 | `bench/render-bench.sh` | 渲染基准：大文件 `cat` + 5 秒持续输出，读 `PIGEON_FRAME_STATS` |
 | `checks/m0-gui-check.sh` | M0：单 pane、关窗重开（对应 [m0-checklist](../docs/m0-checklist.md)） |
 | `checks/m1-gui-check.sh` | M1：分屏、拖动分隔线、焦点（[m1-checklist](../docs/m1-checklist.md)） |

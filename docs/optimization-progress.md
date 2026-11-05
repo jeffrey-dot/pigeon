@@ -72,3 +72,5 @@ Linux 侧栏整合复审：两轴发现后台未发现 pane 状态误清、legac
 2026-11-05 session env：宿主真实 PTY 复现忽略覆盖与非法请求创建成功，再修复；验证 Unicode/空值/继承/分屏/会话隔离及拒绝 NUL/非法名称/保留变量。新增安全 API 与 C setter 原子构建，session_env 能力可探测。无 GUI 配置入口，未做运行中环境修改。
 
 Session env 本机验证：默认 core 320 passed / 2 ignored，无默认 feature 214 passed / 1 ignored；API 2 项、C ABI 1 项、真实宿主 2 项专题通过。默认/无默认 clippy、无默认库构建、FFI import 与 cbindgen 通过；GNU release 1,993,536 bytes。之后追加能力探测与 128 项/32 KiB 精确上限断言，专题复跑通过；最终平台 CI 待验。
+
+架构检查：core 直接依赖评审清单、host optional feature、客户端禁止打开内部 feature、核心 host-runtime/OS 分支和 Swift UI/CoreText import 接入 CI。4 组违规夹具与当前树检查通过；脚本是源码/manifest 检查，不替代编译器、传递依赖/许可证审计。

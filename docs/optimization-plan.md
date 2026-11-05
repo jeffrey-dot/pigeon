@@ -90,7 +90,7 @@ Windows、内置模型服务、嵌入浏览器、插件市场、云协作不进�
 - [ ] 退出、关闭和宿主重启的行为可预测，验证子进程组清理和失败提示；新 instance 不复用旧 seq/记录。
 - [x] 把 delta 接口补到安全 Rust API，FFI 统一通过 api，生成头文件并加入 FFI import 检查。
 - [x] 核心和 Linux unsafe 边界由编译器强制，Linux driver 资源生命周期有独立 Xvfb 测试。
-- [ ] 补全平台依赖静态架构检查。
+- [x] core 直接依赖、host optional feature、客户端 feature 与 Swift/Rust 导入边界加入静态检查及违规夹具；编译隐私/unsafe lint 继续强制。传递依赖与完整语法分析不由此脚本保证。
 
 **验收**：pane A blocked 时 pane B idle/done 不得覆盖 A；ack B 不影响 A；重连不重复未读、不误清状态；
 外部 TERM 不改变所承诺的 TUI 行为；普通客户端退出或崩溃不结束宿主任务。
