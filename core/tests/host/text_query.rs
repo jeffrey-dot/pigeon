@@ -42,7 +42,8 @@ fn text(client: &mut Client, pane: u32, generation: u64, range: TextRange) -> St
 #[test]
 fn text_query_real_pty_history_unicode_paging_limits_and_negotiation() {
     let _serial = one_at_a_time();
-    let fixture = script("#!/bin/sh\nstty -echo\nprintf 'abc你好éZ\\r\\nhard\\r\\n'\ni=0; while [ $i -lt 300 ]; do printf 'line %s\\r\\n' \"$i\"; i=$((i+1)); done\nprintf 'READY\\r\\n'\nexec env PS1= /bin/sh -i\n");
+    // READY is the last output, including shell startup modes: pagination needs a quiet generation.
+    let fixture = script("#!/bin/sh\nstty -echo\nprintf 'abc你好éZ\\r\\nhard\\r\\n'\ni=0; while [ $i -lt 300 ]; do printf 'line %s\\r\\n' \"$i\"; i=$((i+1)); done\nprintf 'READY'\nwhile IFS= read -r line; do :; done\n");
     let host = start_host_with(fixture.to_str().unwrap());
     let mut client = Client::connect(&host.socket);
     assert!(hello_with(&mut client, &["text_query"]).contains(&"text_query".into()));
