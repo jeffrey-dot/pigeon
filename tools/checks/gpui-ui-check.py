@@ -37,10 +37,10 @@ def stop(process):
 
 # The same fixture set as harp-ui-check.py, so the two clients are compared on identical data.
 SESSIONS = [
-    ("launch", "landing-hero", "working", "Updating the landing page"),
-    ("launch", "pricing-page", "blocked", "Choose monthly pricing: $12 or $15?"),
-    ("launch", "launch-thread", "done", ""),
-    ("launch", "og-images", "idle", ""),
+    ("launchpad", "landing-hero", "working", "Updating the landing page"),
+    ("launchpad", "pricing-page", "blocked", "Choose monthly pricing: $12 or $15?"),
+    ("launchpad", "launch-thread", "done", ""),
+    ("launchpad", "og-images", "idle", ""),
     ("iOS app", "onboarding-v2", "working", "Refining the first-run experience"),
     ("iOS app", "paywall-crash", "blocked", "Allow the test run?"),
     ("iOS app", "app-store-shots", "done", ""),
@@ -80,7 +80,76 @@ def capture_window(helper, app, path, attempts=20):
     raise RuntimeError(f"could not capture the window into {path}")
 
 
-def capture(out):
+# The reference shows minute-old working/done/idle reports and a just-raised blocked one. The
+# fixture reproduces that with real time: most records are reported at once, blocked ones only
+# BLOCKED_DELAY seconds later, and the first capture waits until AGE_WAIT seconds have passed.
+AGE_WAIT = 64
+BLOCKED_DELAY = 52
+
+# A deep cwd for the minimum-size capture, so the header path has to truncate from the start.
+NARROW_CWD = ("code", "clients", "acme", "platform", "monorepo", "services", "billing",
+              "workers", "launchpad")
+
+
+def start_host(runtime, env, out, name):
+    # The client finds the host with `pigeon-server --socket-path`: $XDG_RUNTIME_DIR/pigeon.sock.
+    socket = runtime / "pigeon.sock"
+    log = (out / f"{name}-host.log").open("w")
+    host = subprocess.Popen(
+        [str(ROOT / "core/target/debug/pigeon-server"), "--socket", str(socket),
+         "--shell", "/bin/sh"], env=env, stdout=log, stderr=log)
+    deadline = time.monotonic() + 5
+    while not socket.exists():
+        if host.poll() is not None or time.monotonic() > deadline:
+            raise RuntimeError("isolated host did not start")
+        time.sleep(0.05)
+    return host, socket
+
+
+def seed(work, socket, prefix, sessions, cwd_of, delay_blocked):
+    for index, (group, name, state, message) in enumerate(sessions):
+        cwd = cwd_of(group)
+        cwd.mkdir(parents=True, exist_ok=True)
+        status = f"state={state}:app={name}"
+        if state == "blocked":
+            status += ":kind=permission"
+        if message:
+            status += ":msg=" + base64.b64encode(message.encode()).decode()
+        content = TRANSCRIPT if index == 0 else f"\n  {name}\n\n  {message}\n"
+        title = f"\033]0;{name}\007\033[?25l"
+        report = f"\033]7501;{status}\007"
+        wait = f"sleep {delay_blocked}\n" if state == "blocked" and delay_blocked else ""
+        # A fixture writes terminal bytes through a real PTY; no client-side VT parsing.
+        shell = work / f"{prefix}-session-{index}.sh"
+        shell.write_text(
+            "#!/bin/sh\nprintf '%s' " + shlex.quote(title) + "\n" + wait
+            + "printf '%s' " + shlex.quote(report)
+            + "\nwhile :; do\nprintf '%s' " + shlex.quote("\033[H\033[2J" + content)
+            + "\nsleep 2\ndone\n")
+        shell.chmod(0o700)
+        run(str(ROOT / "core/target/debug/examples/keys"), "--socket", str(socket),
+            "--new-session", str(cwd), "--shell", str(shell), stdout=subprocess.DEVNULL)
+
+
+def shoot(helper, env, out, name, size, runtime):
+    env = dict(env, PIGEON_WINDOW_SIZE=size, XDG_RUNTIME_DIR=str(runtime))
+    with (out / f"{name}.log").open("w") as log:
+        app = subprocess.Popen([str(ROOT / "core/target/debug/pigeon-gpui")],
+                               env=env, stdout=log, stderr=log)
+    try:
+        deadline = time.monotonic() + 15
+        while not run(str(helper), str(app.pid), capture_output=True, text=True).stdout.strip():
+            if app.poll() is not None or time.monotonic() > deadline:
+                raise RuntimeError(f"UI window did not appear ({name})")
+            time.sleep(0.1)
+        # Let the first frames (sessions, status, snapshot) land, then capture.
+        time.sleep(4.0)
+        capture_window(helper, app, out / f"{name}.png")
+    finally:
+        stop(app)
+
+
+def capture(out, quick):
     env = dict(os.environ, TERM="xterm-256color")
     with tempfile.TemporaryDirectory(prefix="pigeon-gpui-ui-", dir="/tmp") as temporary:
         work = Path(temporary)
@@ -88,9 +157,7 @@ def capture(out):
         # the same shape as the reference header path.
         env.update(
             HOME=str(work),
-            PIGEON_WINDOW_SIZE="1536x712",
             PIGEON_CONFIG_DIR=str(work / "config"),
-            XDG_RUNTIME_DIR=str(work),
             XDG_CONFIG_HOME=str(work / "config"),
             PIGEON_SERVER=str(ROOT / "core/target/debug/pigeon-server"),
         )
@@ -98,70 +165,44 @@ def capture(out):
         helper = work / "window-id"
         run("swiftc", str(ROOT / "tools/checks/helpers/window-id-of-pid.swift"),
             "-o", str(helper))
-
-        socket = work / "pigeon.sock"
-        host = app = None
+        hosts = []
         try:
-            with (out / "host.log").open("w") as log:
-                host = subprocess.Popen(
-                    [str(ROOT / "core/target/debug/pigeon-server"), "--socket", str(socket),
-                     "--shell", "/bin/sh"], env=env, stdout=log, stderr=log)
-            deadline = time.monotonic() + 5
-            while not socket.exists():
-                if host.poll() is not None or time.monotonic() > deadline:
-                    raise RuntimeError("isolated host did not start")
-                time.sleep(0.05)
-
-            for index, (group, name, state, message) in enumerate(SESSIONS):
-                cwd = work / "code" / group
-                cwd.mkdir(parents=True, exist_ok=True)
-                status = f"state={state}:app={name}"
-                if state == "blocked":
-                    status += ":kind=permission"
-                if message:
-                    status += ":msg=" + base64.b64encode(message.encode()).decode()
-                content = TRANSCRIPT if index == 0 else f"\n  {name}\n\n  {message}\n"
-                report = f"\033]0;{name}\007\033]7501;{status}\007\033[?25l"
-                shell = work / f"session-{index}.sh"
-                shell.write_text(
-                    "#!/bin/sh\nprintf '%s' " + shlex.quote(report)
-                    + "\nwhile :; do\nprintf '%s' " + shlex.quote("\033[H\033[2J" + content)
-                    + "\nsleep 2\ndone\n")
-                shell.chmod(0o700)
-                run(str(ROOT / "core/target/debug/examples/keys"), "--socket", str(socket),
-                    "--new-session", str(cwd), "--shell", str(shell), stdout=subprocess.DEVNULL)
-
+            main_runtime = work / "main"
+            narrow_runtime = work / "narrow"
+            for runtime in (main_runtime, narrow_runtime):
+                runtime.mkdir()
+            host, socket = start_host(main_runtime, dict(env, XDG_RUNTIME_DIR=str(main_runtime)),
+                                      out, "main")
+            hosts.append(host)
+            started = time.monotonic()
+            seed(work, socket, "main", SESSIONS, lambda group: work / "code" / group,
+                 0 if quick else BLOCKED_DELAY)
+            host, socket = start_host(narrow_runtime,
+                                      dict(env, XDG_RUNTIME_DIR=str(narrow_runtime)),
+                                      out, "narrow")
+            hosts.append(host)
+            seed(work, socket, "narrow", SESSIONS[:1], lambda _: work.joinpath(*NARROW_CWD), 0)
+            if not quick:
+                time.sleep(max(0.0, AGE_WAIT - (time.monotonic() - started)))
             for appearance in ["light", "dark"]:
-                env["PIGEON_APPEARANCE"] = appearance
-                with (out / f"{appearance}.log").open("w") as log:
-                    app = subprocess.Popen([str(ROOT / "core/target/debug/pigeon-gpui")],
-                                           env=env, stdout=log, stderr=log)
-                deadline = time.monotonic() + 15
-                window_id = ""
-                while not window_id:
-                    if app.poll() is not None or time.monotonic() > deadline:
-                        raise RuntimeError(f"UI window did not appear ({appearance})")
-                    window_id = run(str(helper), str(app.pid),
-                                    capture_output=True, text=True).stdout.strip()
-                    time.sleep(0.1)
-                # Let the first frames (sessions, status, snapshot) land, then capture. The window
-                # id can resolve before the window is composited, which makes screencapture fail
-                # with "could not create image from window", so re-resolve and retry.
-                time.sleep(4.0)
-                capture_window(helper, app, out / f"{appearance}.png")
-                stop(app)
-                app = None
+                shoot(helper, dict(env, PIGEON_APPEARANCE=appearance), out, appearance,
+                      "1536x712", main_runtime)
+            # Minimum window size: the header path must give way from its start (`…/launchpad`).
+            shoot(helper, dict(env, PIGEON_APPEARANCE="light"), out, "narrow", "0x0",
+                  narrow_runtime)
         finally:
-            stop(app)
-            stop(host)
+            for host in hosts:
+                stop(host)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, default=Path("/tmp/pigeon-gpui"))
+    parser.add_argument("--quick", action="store_true",
+                        help="skip the minute of real time that ages the fixture reports")
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
-    capture(args.out.resolve())
+    capture(args.out.resolve(), args.quick)
     print(f"Screenshots: {args.out.resolve()}")
-    for appearance in ["light", "dark"]:
-        print(f"  {appearance}: {args.out.resolve() / (appearance + '.png')}")
+    for name in ["light", "dark", "narrow"]:
+        print(f"  {name}: {args.out.resolve() / (name + '.png')}")
