@@ -1,7 +1,6 @@
 //! Key events → terminal bytes, xterm's legacy encoding.
 //!
-//! This is the counterpart of the macOS client's `KeyEncoder` (which is unit-tested on that
-//! side); the kitty keyboard protocol is a later step (`docs/renderer.md` §5.4).
+//! Modern events are mapped by `keyboard`; this module retains legacy input and UI actions.
 //! Source of the sequences: xterm's ctlseqs, as every readline/vim binding expects them.
 
 use gtk4::gdk::{Key, ModifierType};
@@ -36,6 +35,7 @@ pub fn action(key: Key, modifiers: ModifierType) -> Option<Action> {
 }
 
 /// Only the unconsumed event may fall back to legacy encoding.
+#[cfg(test)]
 pub fn fallback(
     key: Key,
     modifiers: ModifierType,
@@ -49,6 +49,7 @@ pub fn fallback(
     encode(key, modifiers, app_cursor)
 }
 
+#[cfg(test)]
 pub fn commit(pane_id: PaneId, text: &str) -> Option<Message> {
     if text.is_empty() {
         return None;

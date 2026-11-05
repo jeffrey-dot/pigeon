@@ -291,7 +291,9 @@ while True:
         command("\x1b[?1007h\x1b[?1000h")
         run("xdotool", "click", "4")
         settle()
-        assert pane.read_bytes() == before, "mouse-reporting apps must not receive fake arrows"
+        reported = pane.read_bytes()[len(before):]
+        assert reported.startswith(b"\x1b[M"), reported
+        assert b"\x1bOA" not in reported, "mouse-reporting apps must not receive fake arrows"
         command("\x1b[?1000l\x1b[?1049l\x1b[?1l")
         print("PASS alternate screen forwards page keys and mode-controlled wheel arrows; no history requests", flush=True)
 

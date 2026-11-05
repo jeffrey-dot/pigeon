@@ -66,7 +66,8 @@ impl SidebarView {
         new.connect_clicked(move |_| {
             if let Some(work) = work.upgrade() {
                 work.borrow_mut().new_session();
-                work.borrow().area.grab_focus();
+                let area = work.borrow().area.clone();
+                area.grab_focus();
             }
         });
         let weak = Rc::downgrade(&view);
@@ -114,7 +115,8 @@ impl SidebarView {
             }
             dialog.close();
             if let Some(work) = work.upgrade() {
-                work.borrow().area.grab_focus();
+                let area = work.borrow().area.clone();
+                area.grab_focus();
             }
         });
         dialog.present();
@@ -178,7 +180,8 @@ impl SidebarView {
                 button.connect_clicked(move |_| {
                     if let Some(work) = weak.upgrade() {
                         work.borrow_mut().select(session);
-                        work.borrow().area.grab_focus();
+                        let area = work.borrow().area.clone();
+                        area.grab_focus();
                     }
                 });
                 self.list.append(&button);
@@ -200,7 +203,9 @@ impl SidebarView {
         let weak = Rc::downgrade(self);
         controller.connect_key_pressed(move |_, key, _, modifiers| {
             use gtk::gdk::{Key, ModifierType as M};
-            if !modifiers.contains(M::CONTROL_MASK | M::SHIFT_MASK) {
+            if !modifiers.contains(M::CONTROL_MASK | M::SHIFT_MASK)
+                || modifiers.intersects(M::ALT_MASK | M::SUPER_MASK | M::META_MASK)
+            {
                 return gtk::glib::Propagation::Proceed;
             }
             let Some(view) = weak.upgrade() else {
@@ -213,7 +218,8 @@ impl SidebarView {
                 Key::t => work.borrow_mut().new_session(),
                 Key::b => {
                     view.root.set_visible(!view.root.is_visible());
-                    work.borrow().area.grab_focus();
+                    let area = work.borrow().area.clone();
+                    area.grab_focus();
                 }
                 Key::j => {
                     let target = {
@@ -238,7 +244,8 @@ impl SidebarView {
                     };
                     if let Some(target) = target {
                         work.borrow_mut().select(target);
-                        work.borrow().area.grab_focus();
+                        let area = work.borrow().area.clone();
+                        area.grab_focus();
                     }
                 }
                 _ => return gtk::glib::Propagation::Proceed,

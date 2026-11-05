@@ -8,7 +8,10 @@
 mod host;
 mod input;
 mod input_context;
+mod keyboard;
+mod links;
 mod placement;
+mod pointer;
 mod render;
 mod screen;
 mod scroll;
@@ -86,7 +89,8 @@ fn start(application: &gtk::Application) {
         gtk::glib::ControlFlow::Continue
     });
     window.present();
-    workspace.borrow().area.grab_focus();
+    let area = workspace.borrow().area.clone();
+    area.grab_focus();
 
     let receiver = host.receiver();
     let host_for_pump = host.clone();

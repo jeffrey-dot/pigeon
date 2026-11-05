@@ -4,20 +4,28 @@ use super::Workspace;
 use crate::input::{self, Action};
 use crate::render::Renderer;
 use crate::screen::Screen;
-use gtk4::{glib, prelude::*};
+use gtk4::prelude::*;
 use pigeon_core::api::{Message, SplitAxis};
 
 const SPLIT_RATIO: f32 = 0.5;
 
 impl Workspace {
-    pub(super) fn update_input(&self) {
+    pub(super) fn update_input(&mut self) {
         let pane = self.focus().filter(|pane| {
             self.model
                 .panes
                 .get(pane)
                 .is_some_and(|screen| screen.exited.is_none())
         });
+        if self.input.target() != pane {
+            self.cancel_input();
+        }
         self.input.set_target(pane);
+        self.input.set_modes(
+            pane.and_then(|p| self.model.panes.get(&p))
+                .map_or(0, |s| s.modes),
+        );
+        self.update_terminal_focus();
         let Some(screen) = pane.and_then(|pane| self.model.panes.get(&pane)) else {
             return;
         };
@@ -92,37 +100,71 @@ impl Workspace {
         self.host.send(message);
     }
 
-    pub fn key(
-        &mut self,
-        key: gtk4::gdk::Key,
-        modifiers: gtk4::gdk::ModifierType,
-        handled: bool,
-        committed: bool,
-    ) -> glib::Propagation {
-        let Some(pane) = self.focus() else {
-            return glib::Propagation::Proceed;
-        };
-        let Some(screen) = self
-            .model
-            .panes
-            .get(&pane)
-            .filter(|screen| screen.exited.is_none())
-        else {
-            return glib::Propagation::Stop;
-        };
-        if let Some(bytes) =
-            input::fallback(key, modifiers, screen.app_cursor(), handled, committed)
-        {
-            self.send_input(Message::Keys {
-                pane_id: pane,
-                bytes,
-            });
-            return glib::Propagation::Stop;
+    pub fn cancel_input(&mut self) {
+        let bytes = self.input.cancel_keys();
+        if let Some(pane_id) = self.input.target() {
+            if !bytes.is_empty()
+                && self.model.connected
+                && self
+                    .model
+                    .panes
+                    .get(&pane_id)
+                    .is_some_and(|s| s.exited.is_none())
+            {
+                self.host.send(Message::Keys { pane_id, bytes });
+            }
         }
-        if handled || committed {
-            glib::Propagation::Stop
-        } else {
-            glib::Propagation::Proceed
+        self.cancel_pointer();
+    }
+
+    pub fn send_key_release(&self, pane_id: u32, bytes: Vec<u8>) {
+        // A press may already be queued behind return-live, before its snapshot arrives.
+        if self.model.input_pane() == Some(pane_id) {
+            self.host.send(Message::Keys { pane_id, bytes });
+        }
+    }
+
+    pub fn send_report(&self, pane_id: u32, bytes: Vec<u8>) {
+        if self.model.input_pane() == Some(pane_id)
+            && self
+                .model
+                .panes
+                .get(&pane_id)
+                .is_some_and(|s| !s.scroll.active())
+        {
+            self.host.send(Message::Keys { pane_id, bytes });
+        }
+    }
+
+    pub fn update_terminal_focus(&mut self) {
+        let next = self.model.input_pane().filter(|pane| {
+            self.area.has_focus()
+                && self
+                    .model
+                    .panes
+                    .get(pane)
+                    .is_some_and(|s| !s.scroll.active() && s.modes & 64 != 0)
+        });
+        if self.terminal_focus == next {
+            return;
+        }
+        if let Some(pane_id) = self.terminal_focus.take() {
+            if self.model.connected
+                && self
+                    .model
+                    .panes
+                    .get(&pane_id)
+                    .is_some_and(|s| s.exited.is_none() && s.modes & 64 != 0 && !s.scroll.active())
+            {
+                self.host.send(Message::Keys {
+                    pane_id,
+                    bytes: b"\x1b[O".to_vec(),
+                });
+            }
+        }
+        self.terminal_focus = next;
+        if let Some(pane_id) = next {
+            self.send_report(pane_id, b"\x1b[I".to_vec());
         }
     }
 }

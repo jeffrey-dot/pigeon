@@ -126,7 +126,10 @@ impl RecordsView {
         self.updating.set(false);
         self.root.set_visible(true);
         self.refresh(workspace);
-        self.chooser.grab_focus();
+        let chooser = self.chooser.clone();
+        gtk::glib::idle_add_local_once(move || {
+            chooser.grab_focus();
+        });
     }
 
     fn visible(&self, workspace: &Workspace, row: &RecordRow) -> bool {
@@ -165,7 +168,10 @@ impl RecordsView {
             || !workspace.model.connected
         {
             self.hide();
-            workspace.area.grab_focus();
+            let area = workspace.area.clone();
+            gtk::glib::idle_add_local_once(move || {
+                area.grab_focus();
+            });
             return;
         }
         let rows = workspace

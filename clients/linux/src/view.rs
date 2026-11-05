@@ -23,6 +23,8 @@ use crate::session_model::SessionModel;
 use crate::sidebar::SidebarModel;
 
 mod input;
+mod links;
+mod pointer;
 mod protocol;
 mod scroll;
 
@@ -45,6 +47,9 @@ pub struct Workspace {
     scroll_label: gtk::Label,
     scroll_controls: gtk::Box,
     scroll_bar: gtk::DrawingArea,
+    terminal_focus: Option<PaneId>,
+    pointer: pointer::Pointer,
+    link_press: crate::links::LinkPress,
 }
 
 impl Workspace {
@@ -117,6 +122,9 @@ impl Workspace {
             scroll_label,
             scroll_controls,
             scroll_bar,
+            terminal_focus: None,
+            pointer: Default::default(),
+            link_press: Default::default(),
         }));
 
         let weak = Rc::downgrade(&workspace);
@@ -138,15 +146,7 @@ impl Workspace {
         crate::input_context::install(&workspace);
         scroll::install(&workspace, &bottom);
 
-        let click = gtk::GestureClick::new();
-        click.set_button(gtk::gdk::BUTTON_PRIMARY);
-        let weak = Rc::downgrade(&workspace);
-        click.connect_pressed(move |_, _, x, y| {
-            if let Some(workspace) = weak.upgrade() {
-                workspace.borrow_mut().click(x, y);
-            }
-        });
-        area.add_controller(click);
+        pointer::install(&workspace);
 
         workspace
     }
@@ -230,6 +230,7 @@ impl Workspace {
                         .map(|screen| (*pane, screen.revision))
                 }));
         }
+        self.refresh_hover(self.pointer.modifiers);
     }
 
     /// One line per split, in device pixels: without it two panes of the same background
@@ -276,7 +277,6 @@ impl Workspace {
 
     /// Focus follows the click, and the host is told so `latest` sizing follows it too.
     fn click(&mut self, x: f64, y: f64) {
-        self.area.grab_focus();
         let scale = f64::from(self.scale.max(1.0));
         let point = [x * scale, y * scale];
         let width = (self.area.width() as f32 * self.scale.max(1.0)) as i32;
@@ -293,6 +293,7 @@ impl Workspace {
             .map(|(pane, _, _)| pane);
         if let Some(pane) = hit {
             if self.model.focus != Some(pane) {
+                self.cancel_input();
                 self.wheel.reset();
                 self.model.focus = Some(pane);
                 self.host.send(Message::Focus { pane_id: pane });

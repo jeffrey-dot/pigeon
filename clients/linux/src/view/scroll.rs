@@ -14,6 +14,9 @@ impl Workspace {
         if !self.host.scrollback() {
             return;
         }
+        if offset != 0 {
+            self.cancel_input();
+        }
         let Some(screen) = self.model.panes.get_mut(&pane) else {
             return;
         };
@@ -25,6 +28,7 @@ impl Workspace {
                 pane_id: pane,
                 offset,
             });
+            self.update_terminal_focus();
             self.update_scroll();
         }
     }
@@ -64,6 +68,9 @@ impl Workspace {
         surface: bool,
         modifiers: gdk::ModifierType,
     ) -> glib::Propagation {
+        if self.mouse_wheel(delta, surface, modifiers) {
+            return glib::Propagation::Stop;
+        }
         if modifiers.intersects(
             gdk::ModifierType::CONTROL_MASK
                 | gdk::ModifierType::ALT_MASK
@@ -143,9 +150,9 @@ pub fn install(workspace: &Rc<RefCell<Workspace>>, bottom: &gtk::Button) {
     let weak = Rc::downgrade(workspace);
     bottom.connect_clicked(move |_| {
         if let Some(workspace) = weak.upgrade() {
-            let mut workspace = workspace.borrow_mut();
-            workspace.prepare_input();
-            workspace.area.grab_focus();
+            workspace.borrow_mut().prepare_input();
+            let area = workspace.borrow().area.clone();
+            area.grab_focus();
         }
     });
     let area = workspace.borrow().area.clone();

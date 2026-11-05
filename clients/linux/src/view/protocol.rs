@@ -68,12 +68,14 @@ impl Workspace {
         {
             self.presented.clear();
         }
+        self.validate_link_press();
         self.update_input();
         self.update_scroll();
         self.area.queue_render();
     }
 
     fn reset_selection(&mut self) {
+        self.cancel_input();
         self.input.set_target(None);
         self.presented.clear();
         self.sized.clear();
@@ -84,9 +86,11 @@ impl Workspace {
         if self.model.selected == Some(session) {
             return;
         }
+        self.cancel_input();
         let effects = self.model.select(session);
         self.reset_selection();
         self.send_effects(effects);
+        self.validate_link_press();
         self.update_input();
         self.update_scroll();
         self.area.queue_render();
@@ -112,6 +116,7 @@ impl Workspace {
 
     pub fn disconnect(&mut self) {
         self.model.disconnect();
+        self.cancel_input();
         self.input.set_target(None);
         self.presented.clear();
     }

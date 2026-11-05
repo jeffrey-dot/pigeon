@@ -8,11 +8,19 @@ use gtk::{gdk, glib};
 use gtk4 as gtk;
 use pigeon_core::api::{Message, PaneId};
 
-use crate::input::{self, Action};
+use crate::input;
+use crate::keyboard::{self, Keyboard};
+
+mod events;
 use crate::view::Workspace;
 
 pub struct InputContext {
     context: gtk::IMMulticontext,
+    keyboard: RefCell<Keyboard>,
+    modes: Cell<u32>,
+    filtering: Cell<bool>,
+    filtered_text: RefCell<String>,
+    preedits: Cell<u64>,
     preedit: gtk::Label,
     area: gtk::GLArea,
     workspace: RefCell<Weak<RefCell<Workspace>>>,
@@ -53,6 +61,11 @@ impl InputContext {
         root.set_clip_overlay(&preedit, true);
         let input = Rc::new(Self {
             context,
+            keyboard: RefCell::default(),
+            modes: Cell::new(0),
+            filtering: Cell::new(false),
+            filtered_text: RefCell::default(),
+            preedits: Cell::new(0),
             preedit,
             area: area.clone(),
             workspace: RefCell::new(Weak::new()),
@@ -67,10 +80,10 @@ impl InputContext {
             if let Some(input) = weak.upgrade() {
                 input.commits.set(input.commits.get().wrapping_add(1));
                 input.preedit.set_visible(false);
-                if let Some(pane) = input.target.get().filter(|_| input.focused.get()) {
-                    if let Some(message) = input::commit(pane, text) {
-                        input.send(message);
-                    }
+                if input.filtering.get() {
+                    input.filtered_text.borrow_mut().push_str(text);
+                } else {
+                    input.commit_text(text);
                 }
             }
         });
@@ -78,6 +91,9 @@ impl InputContext {
         input.context.connect_preedit_changed(move |context| {
             if let Some(input) = weak.upgrade() {
                 let (text, _, caret) = context.preedit_string();
+                if !text.is_empty() {
+                    input.preedits.set(input.preedits.get().wrapping_add(1));
+                }
                 let offset = text
                     .char_indices()
                     .nth(caret.max(0) as usize)
@@ -92,6 +108,24 @@ impl InputContext {
             }
         });
         input
+    }
+
+    fn commit_text(&self, text: &str) {
+        if let Some(pane_id) = self.target.get().filter(|_| self.focused.get()) {
+            if let Some(bytes) = keyboard::commit_text(text, self.modes.get()) {
+                self.send(Message::Keys { pane_id, bytes });
+            }
+        }
+    }
+
+    pub fn target(&self) -> Option<PaneId> {
+        self.target.get()
+    }
+    pub fn set_modes(&self, modes: u32) {
+        self.modes.set(modes);
+    }
+    pub fn cancel_keys(&self) -> Vec<u8> {
+        self.keyboard.borrow_mut().cancel(self.modes.get())
     }
 
     fn send(&self, message: Message) {
@@ -201,67 +235,5 @@ impl InputContext {
 }
 
 pub fn install(workspace: &Rc<RefCell<Workspace>>) {
-    *workspace.borrow().input.workspace.borrow_mut() = Rc::downgrade(workspace);
-    let area = workspace.borrow().area.clone();
-    area.set_tooltip_text(Some(
-        "Ctrl+Shift+C: Copy visible pane screen (including scrollback)\nCtrl+Shift+V: Paste\nShift+PageUp/PageDown: Scroll\nShift+Home/End: Oldest / live",
-    ));
-    let weak = Rc::downgrade(&workspace.borrow().input);
-    area.connect_has_focus_notify(move |area| {
-        if let Some(input) = weak.upgrade() {
-            input.set_focused(area.has_focus());
-        }
-    });
-    let weak = Rc::downgrade(&workspace.borrow().input);
-    area.connect_unrealize(move |_| {
-        if let Some(input) = weak.upgrade() {
-            input.set_focused(false);
-            input.set_target(None);
-            input.context.set_client_widget(None::<&gtk::Widget>);
-        }
-    });
-    let keys = gtk::EventControllerKey::new();
-    let weak = Rc::downgrade(workspace);
-    keys.connect_key_pressed(move |controller, key, _, modifiers| {
-        let Some(workspace) = weak.upgrade() else {
-            return glib::Propagation::Proceed;
-        };
-        let input = workspace.borrow().input.clone();
-        if let Some(action) = input::action(key, modifiers) {
-            match action {
-                Action::Paste => input.paste(),
-                Action::CopyScreen => {
-                    if let Some(text) = workspace.borrow().copy_screen() {
-                        input.copy_screen(&text);
-                    }
-                }
-                action => workspace.borrow_mut().action(action),
-            }
-            return glib::Propagation::Stop;
-        }
-        if !input.preedit.is_visible() && workspace.borrow_mut().scroll_key(key, modifiers) {
-            input.cancel_preedit();
-            return glib::Propagation::Stop;
-        }
-        if input::encode(key, modifiers, false).is_some() {
-            workspace.borrow_mut().prepare_input();
-        }
-        // filter_keypress may synchronously emit commit/preedit: no Workspace borrow here.
-        let before = input.commits.get();
-        let handled = input.filter(controller);
-        let committed = input.commits.get() != before;
-        let result = workspace
-            .borrow_mut()
-            .key(key, modifiers, handled, committed);
-        result
-    });
-    let weak = Rc::downgrade(&workspace.borrow().input);
-    keys.connect_key_released(move |controller, key, _, modifiers| {
-        if input::action(key, modifiers).is_none() {
-            if let Some(input) = weak.upgrade() {
-                input.filter(controller);
-            }
-        }
-    });
-    area.add_controller(keys);
+    events::install(workspace);
 }
