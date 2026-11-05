@@ -148,5 +148,6 @@
 - legacy 单条路径中，更高 seq 或新的 live 状态不能证明旧终态已被查看，因此保留旧未读。完整集合路径按 revision 原子替换当前集合：同 id 更新、clear 或其它客户端确认使旧记录缺失时，撤下对应活动项和未读，但不写入本客户端 seen，也不因此发送 ack。
 - 复制利用核心软换行标志合并自动折行、保留真实换行；macOS OSC 8 纯文本悬停和 Cmd+click 已接入，只允许 http/https，拖动或期间目标变化取消，见 [OSC 8](osc8.md)。macOS 已接搜索条与同代次定位高亮（AppKit/GUI 待验），见 [搜索进展](search-progress.md)。OSC 52、跨历史选择仍未实现。
 - macOS 已接 Kitty keyboard protocol、应用小键盘与编程连字；Linux 完整操作对齐见 [Linux README](../clients/linux/README.md)。
+- 两端可见网格选词/行/矩形和文本拼接共用核心选择接口；macOS Option+拖动矩形、⌘C 复制选区、⌘A 选择当前屏幕。源画面更新清除旧选区；文本/span 缓存到端点或画面变化，见 [选择语义与验收](selection.md)。
 
 本轮合并后的代码/测试结果见 [优化执行记录](optimization-progress.md)；旧截图不作为新行为的验收证据。

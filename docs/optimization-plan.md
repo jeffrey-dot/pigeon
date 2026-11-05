@@ -122,7 +122,7 @@ Windows、内置模型服务、嵌入浏览器、插件市场、云协作不进�
   正则有计算预算，搜索可取消，不把全部历史反复传给客户端。
   核心/宿主 literal、ASCII 大小写选项与 generation 绑定的分页范围查询已实现；macOS 搜索条/取消/定位高亮已接，AppKit CI 已通过、真实 GUI 待验；Linux 搜索浮层也已接并经 Xvfb/真实 PTY 验收；regex、稳定锚点待接，见 [文本查询](text-query.md)。
 - [ ] 拖选跨历史、自动滚动选择、矩形选择、键盘选择；明确 Select All 的范围；用稳定锚点处理新输出、resize 和淘汰。
-  选区语义通过核心接口提供，客户端只映射输入并绘制。可见网格 select_grid/API/C ABI 与 Linux 拖选/词/行/矩形已接；跨历史/自动滚动/键盘选择仍待补。
+  选区语义通过核心接口提供，客户端只映射输入并绘制。可见网格 select_grid/API/C ABI 与两端拖选/词/行/矩形已接，macOS 共享桥接的真实 GUI 待验；跨历史/自动滚动/键盘选择仍待补。
 - [ ] OSC 8 完整保留链接表，支持明确的打开动作；链接当纯文本显示，URI 不交给 shell 拼接。
   核心/宿主/双外形接口和 macOS hover/Cmd+click 已实现；Linux Ctrl+click/hover 已接并通过隔离 GIO 验收，macOS GUI 验收仍待补，见 [OSC 8](osc8.md)。
 - [ ] OSC 52 写剪贴板，默认不允许读取；多客户端明确接收目标、事件去重和用户设置，重连不重放旧剪贴板副作用。

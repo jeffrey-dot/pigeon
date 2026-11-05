@@ -22,7 +22,15 @@
 - 分隔线和 Ctrl 链接手势优先处理；选区拖动不会向应用发送孤立 mouse release。
 - 尚未实现跨屏自动滚动选择、持久历史锚点、键盘扩展选择；拖出当前 pane 时不会选中另一个 pane。
 
-macOS 现有选择仍使用其已实现路径；共享 C 接口可供迁移，本片没有宣称两端已全面合并选择模型。
+## macOS 接入
+
+macOS 的 `TerminalSelection` 仅保存手势端点/单位，`SelectionGrid` 将当前 Swift-owned 格子和附加文本借用为 PgSnapshot，调用同一 `pg_select_grid`，在释放 C handle 前复制文本与高亮范围。
+普通拖选、双击词、三击行继续可用，Option+拖动选择矩形；⌘C 复制选区，⌘A 仅选择当前可见屏幕。
+鼠标命中先夹到可见格子，核心处理字宽、词边界与换行。源 snapshot 或 delta 行更新会清空旧选区，避免同一坐标悄悄选择新文字。
+
+每次手势端点变化最多计算一次选择并缓存文本/span；光标闪烁、Metal 重绘、菜单验证、复制读取缓存，不重复转换整屏。
+手势计算仍需把可见网格转为 C 外形，并由 FFI 构造安全快照；没有宣称零拷贝或通过超大网格拖动性能验收。
+桥接限制与核心一致，非法尺寸/过长文本不产生部分成功副本。此迁移没有改 wire 或生成头文件。
 
 ## 验证
 
@@ -34,7 +42,12 @@ cargo test --test selection --test abi --locked
 cargo test --no-default-features --locked
 cargo test -p pigeon-linux --locked
 python3 -B tools/checks/linux-selection-check.py
+tools/checks/swift-selection.sh
 ```
 
 真实 Xvfb/PTY 检查拖选、反向、CJK/组合文本、双/三击、矩形、Select All、更新清除与 Shift 覆盖应用鼠标。
-现代输入、回看、搜索、侧栏与分隔线脚本通过。真实 Wayland/不同双击设置、硬件多 DPI、AppKit 接入与跨历史操作尚未验收。
+现代输入、回看、搜索、侧栏与分隔线脚本通过。真实 Wayland/不同双击设置、硬件多 DPI 与跨历史操作尚未验收。
+
+macOS 迁移本机验证：真实 Swift 6.1.2 源码链接核心 C ABI 的 13 项测试通过，覆盖原选择行为、续格端点、矩形、临时存储释放、非法尺寸/超长文本。
+侧栏/链接等 Foundation 回归 93 项通过，搜索/ABI 7 项、状态/链接 ABI 3 项通过；选择测试从不链接 Rust 的 swift-logic.sh 移至 swift-selection.sh，不能把两类验证混写。
+新增 AppKit 用例检查 Option 手势、缓存和 delta 清除，Linux 仅做语法解析；完整 AppKit 构建/测试等待 macOS CI，真实 GUI 拖动与剪贴板仍待平台验收。

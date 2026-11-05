@@ -13,7 +13,8 @@
 | `bench/host-bench.py --out /tmp/pigeon-bench-result` | 隔离 release 宿主，记录协议回显、快照重连和多 pane 短时输出原始样本；[测量边界](../docs/host-benchmark.md) |
 | `checks/swift-search.sh` | 编译 Foundation 搜索状态模型与真实 C ABI adapter，验证取消/过期/隔离和定位快照所有权；不替代 AppKit/GUI |
 | `checks/swift-status-wire.sh` | 编译真实 Swift 状态快照 adapter，链接 Rust 库验证 C handle 所有权与 UInt64 字段 |
-| `checks/swift-logic.sh` | 在临时 SwiftPM 包运行真实的 Foundation-only 侧栏/选择测试（可用 `SWIFT` 指定编译器）；不替代 AppKit 验收 |
+| `checks/swift-logic.sh` | 在临时 SwiftPM 包运行真实的 Foundation-only 侧栏/链接等测试（可用 `SWIFT` 指定编译器）；不替代 AppKit 验收 |
+| `checks/swift-selection.sh` | 编译真实 Swift 选择桥接并链接 Rust C ABI，验证两端共用的选择/复制文本与生命周期；不替代 AppKit 验收 |
 | `checks/linux-scroll-check.py` | 独立桌面与真实宿主验收回看、延迟答复、输入回实时屏、备用屏和分屏；可选 47s 保活/能力退化 |
 | `checks/linux-gl-check.sh` | 独立 Xvfb 软件 GL 检查资源删除、上下文恢复和非法上传拒绝；CI 单独运行 |
 | `checks/linux-search-check.py` | 隔离 GTK/真实 PTY 搜索定位、取消、Unicode 与旧宿主退化验收 |

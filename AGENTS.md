@@ -40,7 +40,7 @@ tools/vt-parity/run.sh          # 8 条 VT 语料与已提交的 tmux golden 对
 ```
 
 新增功能须先确定模块归属，不要为了跑通而把逻辑塞进 `main.rs` 或 `PigeonApp.swift`。
-宿主为新 pane 固定声明 `TERM=xterm-256color` 与 `COLORTERM=truecolor`；`new_session.env` 覆盖普通环境变量并由分屏继承，不允许覆盖这两个能力变量或 `PI_PROGRAM_STATUS`，见 `docs/protocol.md`；真实 PTY 测试使用独立 HOME/配置目录，不继承用户 rc。`tools/checks/swift-logic.sh` 可在有 Swift 的 Linux/macOS 上复跑侧栏和选择纯逻辑，但不替代 macOS AppKit 验收。
+宿主为新 pane 固定声明 `TERM=xterm-256color` 与 `COLORTERM=truecolor`；`new_session.env` 覆盖普通环境变量并由分屏继承，不允许覆盖这两个能力变量或 `PI_PROGRAM_STATUS`，见 `docs/protocol.md`；真实 PTY 测试使用独立 HOME/配置目录，不继承用户 rc。`tools/checks/swift-logic.sh` 可在有 Swift 的 Linux/macOS 上复跑侧栏/链接纯逻辑；选择测试经 `tools/checks/swift-selection.sh` 链接真实 C ABI，两者均不替代 macOS AppKit 验收。两端可见选择规则统一由 `api::select_grid` / `pg_select_grid` 决定，客户端只保存手势并绘制 span，见 `docs/selection.md`。
 `tools/bench/host-bench.py --out /tmp/pigeon-bench-result` 记录隔离 release 宿主的协议回显、快照重连和短时输出样本，不代表 GUI 显示延迟；见 `docs/host-benchmark.md`。
 `swift test` 需要完整 Xcode（`xcode-select` 指向 CommandLineTools 时用 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`）。
 

@@ -40,8 +40,9 @@
 | `bcb7337` | [42001191110](https://github.com/jeffrey-dot/pigeon/actions/runs/42001191110) | 六作业全部通过，含 Linux 有界传输、握手与静默期限 |
 | `fa61805` | [42009346310](https://github.com/jeffrey-dot/pigeon/actions/runs/42009346310) | 六作业全部通过，含本地自动重连、增量续传和状态查看隔离 |
 | `5bf8737` | [42010929968](https://github.com/jeffrey-dot/pigeon/actions/runs/42010929968) | 六作业全部通过，含 Linux 嵌套分隔线拖动及绘线位置修复 |
+| `cd04714` | [42014499338](https://github.com/jeffrey-dot/pigeon/actions/runs/42014499338) | 六作业全部通过，含共享选择 Rust/C ABI 与 Linux 选择复制 |
 
-已通过的平台 CI 对应 `5bf8737`，含 session env、OSC 8、文本查询、Linux 侧栏和宿主基线 smoke；共享选择接口/Linux 选择复制新 CI 待核对。`8ccaeb3` 的 macOS 15 Intel `swift build` 与 `swift test` 通过：执行 352 项、跳过 7 项、0 failures；独立 Foundation 测试 98 项通过。
+已通过的平台 CI 对应 `cd04714`，含 session env、OSC 8、文本查询、Linux 侧栏和宿主基线 smoke；macOS 共享选择桥接新 CI 待核对。`8ccaeb3` 的 macOS 15 Intel `swift build` 与 `swift test` 通过：执行 352 项、跳过 7 项、0 failures；独立 Foundation 测试 98 项通过。
 Apple Silicon 的最终提交尚未完成验收；不能用 Intel 结果代替。CI 构建和测试也不等于真实状态面板/SSH/GPU 呈现验收。
 
 ## 主线程本地验证
@@ -104,3 +105,5 @@ Linux 增量续传：同实例实时屏保留 seq，attach.since 后用顺序 po
 Linux 分隔线：核心矩形/ratio 的像素映射、左右与嵌套上下拖动、zoom 禁用和全手势消费已接；同步修正绘线位置。GTK 97 passed / 2 ignored，fmt/clippy/build 通过；真实鼠标模式应用未收到拖动字节，极端比例由核心钳制。见 [分隔线说明](linux-divider.md)。
 
 可见网格选择：核心统一 Cell/Word/Line/rectangle、文本和 span，安全 Rust/C ABI 同步；Linux 拖选/反向/双三击/矩形/Shift 应用鼠标覆盖与复制优先级已接。默认 core 334 passed / 2 ignored，无默认 227 / 1，GTK 98 / 2；选择与现代输入/回看/搜索/侧栏/分隔线桌面验收通过。新 ABI 由 cbindgen0.27 生成；跨历史自动滚动和 macOS 迁移尚未完成，见 [选择说明](selection.md)。
+
+macOS 共享选择：删除本地选词/行拼接实现，经 SelectionGrid 借用 C 外形调用核心并复制 owned 文本/span；Option 矩形、宽续格端点一致，缓存避免帧重绘重复计算，画面更新清除旧选区。实际 Swift/C ABI 13 tests、Foundation 93、搜索 ABI 7、状态/链接 ABI 3 通过。新增 AppKit 手势/cache/失效测试待 CI；未以 Linux 语法解析替代 macOS 类型/GUI 验收。
