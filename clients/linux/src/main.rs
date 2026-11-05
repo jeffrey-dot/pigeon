@@ -19,6 +19,7 @@ mod screen;
 mod scroll;
 mod scroll_input;
 mod search;
+mod selection;
 mod session_model;
 mod shell;
 mod sidebar;

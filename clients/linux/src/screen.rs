@@ -18,6 +18,7 @@ pub struct Screen {
     pub search_picture: Option<Snapshot>,
     pub search_highlight: Vec<(usize, usize, usize)>,
     pub search_returning: bool,
+    pub selection: Option<pigeon_core::api::Selection>,
     pub scroll: ScrollState,
     /// Mode bits from docs/protocol.md §3.3.
     pub modes: u32,
@@ -64,6 +65,7 @@ impl Screen {
             search_picture: None,
             search_highlight: vec![],
             search_returning: false,
+            selection: None,
             scroll,
             modes,
             exited: None,
@@ -92,6 +94,7 @@ impl Screen {
             _ => {}
         }
         self.snapshot = next.snapshot;
+        self.selection = None;
         self.seq = next.seq;
         self.modes = next.modes;
         if self.search_returning && !self.scroll.active() {
@@ -128,6 +131,7 @@ impl Screen {
         for (y, cells) in delta.rows {
             self.snapshot.screen[usize::from(y)] = cells;
         }
+        self.selection = None;
         if let Some(cursor) = delta.cursor {
             self.snapshot.cursor = cursor;
         }
@@ -169,23 +173,23 @@ impl Screen {
 
     /// Only the visible live or scrolled screen; other history rows and panes are excluded.
     pub fn visible_text(&self) -> String {
-        let mut text = String::new();
-        for (index, row) in self.picture().screen.iter().enumerate() {
-            let start = text.len();
-            for cell in row {
-                text.push_str(&cell.text());
-            }
-            // The core supplies both continuation cells and logical line boundaries.
-            let wrapped = row
-                .last()
-                .is_some_and(|cell| cell.attrs & pigeon_core::api::ATTR_WRAP != 0);
-            if !wrapped {
-                text.truncate(start + text[start..].trim_end_matches(' ').len());
-                if index + 1 < self.snapshot.screen.len() {
-                    text.push('\n');
-                }
-            }
+        let picture = self.picture();
+        if picture.cols == 0 || picture.rows == 0 {
+            return String::new();
         }
-        text
+        pigeon_core::api::select_grid(
+            picture,
+            &pigeon_core::api::GridSelection {
+                anchor: pigeon_core::api::GridPoint { row: 0, col: 0 },
+                head: pigeon_core::api::GridPoint {
+                    row: picture.rows - 1,
+                    col: picture.cols - 1,
+                },
+                unit: pigeon_core::api::SelectionUnit::Cell,
+                rectangle: false,
+            },
+        )
+        .map(|selected| selected.text)
+        .unwrap_or_default()
     }
 }

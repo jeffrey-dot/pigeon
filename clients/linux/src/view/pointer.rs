@@ -68,6 +68,7 @@ impl Workspace {
             .map(|s| s.modes)
     }
     pub(super) fn cancel_pointer(&mut self) {
+        self.selection_drag = None;
         self.divider_drag = None;
         self.link_press.cancel();
         for (button, (pane, point, modes)) in self.pointer.buttons.drain().collect::<Vec<_>>() {
@@ -109,6 +110,15 @@ impl Workspace {
                 return;
             }
         }
+        if button == 1
+            && (modifiers.contains(M::SHIFT_MASK)
+                || self
+                    .pointer_modes(pane)
+                    .is_none_or(|m| m & pointer::ANY_MOUSE == 0))
+            && self.start_selection(pane, point, modifiers)
+        {
+            return;
+        }
         if !(1..=3).contains(&button) {
             return;
         }
@@ -124,6 +134,9 @@ impl Workspace {
     }
     fn pointer_release(&mut self, button: u32, x: f64, y: f64, modifiers: M) {
         if button == 1 && self.move_divider(x, y, true) {
+            return;
+        }
+        if button == 1 && self.move_selection(x, y, true) {
             return;
         }
         let hit = self.hit_cell(x, y);
@@ -149,6 +162,9 @@ impl Workspace {
     }
     fn pointer_motion(&mut self, x: f64, y: f64, modifiers: M) {
         if self.move_divider(x, y, false) {
+            return;
+        }
+        if self.move_selection(x, y, false) {
             return;
         }
         if self.pointer.position != Some((x, y)) {

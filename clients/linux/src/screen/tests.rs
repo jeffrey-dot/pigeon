@@ -130,6 +130,27 @@ fn search_picture_survives_live_deltas_until_recovery_snapshot() {
 }
 
 #[test]
+fn copied_selection_is_invalidated_when_the_source_grid_changes() {
+    let mut screen = screen();
+    screen.selection = pigeon_core::api::select_grid(
+        screen.picture(),
+        &pigeon_core::api::GridSelection {
+            anchor: pigeon_core::api::GridPoint { row: 0, col: 0 },
+            head: pigeon_core::api::GridPoint { row: 0, col: 1 },
+            unit: pigeon_core::api::SelectionUnit::Cell,
+            rectangle: false,
+        },
+    )
+    .ok();
+    assert_eq!(
+        screen.selection.as_ref().map(|s| s.text.as_str()),
+        Some("aa")
+    );
+    assert!(screen.apply_delta(&delta(5)));
+    assert!(screen.selection.is_none());
+}
+
+#[test]
 fn missing_or_malformed_frames_leave_the_previous_screen_intact() {
     let mut screen = screen();
     let before = screen.snapshot.clone();

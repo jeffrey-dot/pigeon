@@ -14,6 +14,7 @@ pub enum Action {
     Zoom,
     CopyScreen,
     Paste,
+    SelectAll,
 }
 
 pub fn action(key: Key, modifiers: ModifierType) -> Option<Action> {
@@ -30,6 +31,7 @@ pub fn action(key: Key, modifiers: ModifierType) -> Option<Action> {
         Key::z => Some(Action::Zoom),
         Key::c => Some(Action::CopyScreen),
         Key::v => Some(Action::Paste),
+        Key::a => Some(Action::SelectAll),
         _ => None,
     }
 }

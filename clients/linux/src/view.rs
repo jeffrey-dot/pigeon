@@ -30,6 +30,7 @@ mod protocol;
 mod recovery;
 mod scroll;
 mod search;
+mod selection;
 
 pub struct Workspace {
     pub area: gtk::GLArea,
@@ -62,6 +63,8 @@ pub struct Workspace {
     pub host_identity: String,
     pub recovery_notice: String,
     divider_drag: Option<divider::Drag>,
+    selection_drag: Option<crate::selection::Drag>,
+    selection_clicks: crate::selection::Clicks,
 }
 
 impl Workspace {
@@ -155,6 +158,8 @@ impl Workspace {
             },
             recovery_notice: String::new(),
             divider_drag: None,
+            selection_drag: None,
+            selection_clicks: Default::default(),
             search_supported: pigeon_core::api::offers_feature(hello, "text_query")
                 .unwrap_or(false)
                 && pigeon_core::api::offers_feature(hello, "text_viewport").unwrap_or(false),

@@ -94,6 +94,16 @@ pub fn build(draw: &mut Draw<'_>, screen: &Screen, origin: [f32; 2], cursor_on: 
                 bg = 0xf2d07a;
                 fg = 0x1d1d1f;
             }
+            if screen.selection.as_ref().is_some_and(|s| {
+                s.spans.iter().any(|span| {
+                    usize::from(span.row) == y
+                        && x >= usize::from(span.first)
+                        && x < usize::from(span.end)
+                })
+            }) {
+                bg = 0xb7d5f2;
+                fg = 0x111111;
+            }
             let left = origin_x + x as f32 * metrics.cell_w;
             let width = metrics.cell_w * f32::from(cell.width.max(1));
 

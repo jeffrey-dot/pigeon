@@ -136,6 +136,7 @@ impl Workspace {
                         } = result
                         {
                             if let Some(screen) = self.model.panes.get_mut(pane_id) {
+                                screen.selection = None;
                                 screen.search_highlight =
                                     highlight(*range, viewport.offset, &picture);
                                 screen.search_picture = Some(picture);

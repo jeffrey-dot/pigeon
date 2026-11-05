@@ -3,7 +3,6 @@
 use super::Workspace;
 use crate::input::{self, Action};
 use crate::render::Renderer;
-use crate::screen::Screen;
 use gtk4::prelude::*;
 use pigeon_core::api::{Message, SplitAxis};
 
@@ -52,6 +51,7 @@ impl Workspace {
     }
 
     pub fn prepare_input(&mut self) {
+        self.clear_selection();
         self.close_search(true);
         if let Some(pane) = self.focus() {
             self.return_live(pane);
@@ -59,6 +59,7 @@ impl Workspace {
     }
 
     pub fn send_input(&mut self, message: Message) {
+        self.clear_selection();
         self.close_search(true);
         match &message {
             Message::Keys { pane_id, .. } | Message::Paste { pane_id, .. } => {
@@ -75,7 +76,12 @@ impl Workspace {
     pub fn copy_screen(&self) -> Option<String> {
         self.focus()
             .and_then(|pane| self.model.panes.get(&pane))
-            .map(Screen::visible_text)
+            .map(|screen| {
+                screen
+                    .selection
+                    .as_ref()
+                    .map_or_else(|| screen.visible_text(), |s| s.text.clone())
+            })
     }
 
     pub fn action(&mut self, action: Action) {
@@ -98,6 +104,10 @@ impl Workspace {
             Action::Zoom if self.model.zoom == Some(pane) => Message::Unzoom { id, pane_id: pane },
             Action::Zoom => Message::ZoomPane { id, pane_id: pane },
             Action::CopyScreen | Action::Paste => return,
+            Action::SelectAll => {
+                self.select_visible();
+                return;
+            }
         };
         self.host.send(message);
     }
