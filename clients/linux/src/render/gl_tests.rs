@@ -31,6 +31,12 @@ fn resources_are_released_on_their_owner_and_uploads_are_checked() {
             RectInstance::STRIDE,
         )
         .expect("pipeline");
+        pipeline.set_kind(0);
+        assert_eq!(
+            gl.alpha_blend_source(),
+            glow::ONE as i32,
+            "coverage must not reduce an opaque framebuffer alpha"
+        );
         let texture = Texture::new(&gl, 8, false).expect("texture");
         assert!(texture.upload(0, 0, 2, 2, &[1, 2, 3, 4]));
         assert!(!texture.upload(0, 0, 2, 2, &[1, 2, 3]));
@@ -59,4 +65,23 @@ fn resources_are_released_on_their_owner_and_uploads_are_checked() {
     gdk::GLContext::clear_current();
     drop(gl);
     window.destroy();
+}
+
+impl Gl {
+    fn alpha_blend_source(&self) -> i32 {
+        let _current = self.current();
+        // SAFETY: a value-only query in the owning current context.
+        unsafe { self.context.get_parameter_i32(glow::BLEND_SRC_ALPHA) }
+    }
+    fn resources_alive(&self, names: (glow::Texture, glow::Program, glow::Buffer)) -> [bool; 3] {
+        let _current = self.current();
+        // SAFETY: is_* queries check names without dereferencing client memory.
+        unsafe {
+            [
+                self.context.is_texture(names.0),
+                self.context.is_program(names.1),
+                self.context.is_buffer(names.2),
+            ]
+        }
+    }
 }

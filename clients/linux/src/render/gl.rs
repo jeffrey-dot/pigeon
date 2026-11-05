@@ -75,8 +75,12 @@ impl Gl {
                 .clear_color(clear[0], clear[1], clear[2], clear[3]);
             self.context.clear(glow::COLOR_BUFFER_BIT);
             self.context.enable(glow::BLEND);
-            self.context
-                .blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+            self.context.blend_func_separate(
+                glow::SRC_ALPHA,
+                glow::ONE_MINUS_SRC_ALPHA,
+                glow::ONE,
+                glow::ONE_MINUS_SRC_ALPHA,
+            );
         }
     }
 
@@ -103,19 +107,6 @@ impl Gl {
                 self.context.bind_texture(glow::TEXTURE_2D, None);
             }
             self.context.use_program(None);
-        }
-    }
-
-    #[cfg(test)]
-    fn resources_alive(&self, names: (glow::Texture, glow::Program, glow::Buffer)) -> [bool; 3] {
-        let _current = self.current();
-        // SAFETY: is_* queries check names without dereferencing client memory.
-        unsafe {
-            [
-                self.context.is_texture(names.0),
-                self.context.is_program(names.1),
-                self.context.is_buffer(names.2),
-            ]
         }
     }
 }
@@ -320,12 +311,14 @@ impl Pipeline {
         unsafe {
             self.gl.context.use_program(Some(self.program));
             self.gl.context.uniform_1_i32(self.kind.as_ref(), kind);
-            self.gl.context.blend_func(
+            self.gl.context.blend_func_separate(
                 if kind == 1 {
                     glow::ONE
                 } else {
                     glow::SRC_ALPHA
                 },
+                glow::ONE_MINUS_SRC_ALPHA,
+                glow::ONE,
                 glow::ONE_MINUS_SRC_ALPHA,
             );
         }

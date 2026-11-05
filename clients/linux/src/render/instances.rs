@@ -158,13 +158,16 @@ pub fn build(draw: &mut Draw<'_>, screen: &Screen, origin: [f32; 2], cursor_on: 
                             let baseline = top + metrics.baseline;
                             // A wide cell is two cells; a fallback face's glyph is often
                             // narrower than that, so centre it instead of stretching it.
-                            let inset = if slot.w as f32 > width {
+                            let inset = if cell.width < 2 || slot.w as f32 > width {
                                 0.0
                             } else {
                                 (width - slot.w as f32) / 2.0
                             };
                             let instance = GlyphInstance {
-                                pos: [left + inset + slot.left as f32, baseline - slot.top as f32],
+                                pos: [
+                                    (left + inset + slot.left as f32).round(),
+                                    baseline - slot.top as f32,
+                                ],
                                 size: [slot.w as f32, slot.h as f32],
                                 uv: slot.uv(),
                                 color: text,
