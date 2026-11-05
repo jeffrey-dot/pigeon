@@ -44,7 +44,7 @@ final class PaneDeltaTests: XCTestCase {
                     cols: 3, rows: 2, alt_screen: 0, cursor: cursor(x: 0, y: 0),
                     scroll_region: PgScrollRegion(
                         size: UInt32(MemoryLayout<PgScrollRegion>.size), top: 0, bottom: 1),
-                    screen: rowBuffer.baseAddress, history: nil, history_count: 0, text_count: 0, text: nil)
+                    screen: rowBuffer.baseAddress, history: nil, history_count: 0, text_count: 0, text: nil, link_count: 0, links: nil)
                 view.apply(snapshot: &snapshot)
             }
         }
@@ -68,7 +68,7 @@ final class PaneDeltaTests: XCTestCase {
                         var delta = PgDelta(
                             size: UInt32(MemoryLayout<PgDelta>.size), pane_id: 1, seq: 1, row_count: 1,
                             rows: rowPointer, has_cursor: 1, cursor: cursor(x: 2, y: y), alt_screen: alt,
-                            text_count: cellText == nil ? 0 : 1, text: cellText == nil ? nil : entryPointer)
+                            text_count: cellText == nil ? 0 : 1, text: cellText == nil ? nil : entryPointer, link_count: 0, links: nil)
                         return view.apply(delta: &delta)
                     }
                 }

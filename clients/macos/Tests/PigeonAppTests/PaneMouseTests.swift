@@ -19,7 +19,7 @@ final class PaneMouseTests: XCTestCase {
                     cols: 4, rows: 1, alt_screen: 1,
                     cursor: PgCursor(size: UInt32(MemoryLayout<PgCursor>.size), x: 0, y: 0, visible: 1, shape: 0),
                     scroll_region: PgScrollRegion(size: UInt32(MemoryLayout<PgScrollRegion>.size), top: 0, bottom: 0),
-                    screen: rowBuffer.baseAddress, history: nil, history_count: 0, text_count: 0, text: nil)
+                    screen: rowBuffer.baseAddress, history: nil, history_count: 0, text_count: 0, text: nil, link_count: 0, links: nil)
                 view.apply(snapshot: &snapshot)
             }
         }
