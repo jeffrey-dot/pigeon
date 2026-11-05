@@ -11,6 +11,7 @@
 | 基线/CI | GTK 构建、clippy、逻辑测试；独立 HOME/配置的宿主测试；环境记录、FFI import 与生成头文件检查 |
 | 宿主性能工具 | 隔离 release 宿主与 API 客户端，保留协议回显、快照重连、多 pane 短时输出原始样本及二进制 hash；无 GUI 显示延迟承诺 |
 | OSC 8 | 核心、宿主、Rust/C 接口保留拥有型 URI；macOS hover/Cmd+click 已接，http/https 白名单；链接取消和点击期间变化有回归，Linux 点击待接 |
+| 文本查询 | 核心/宿主 literal 搜索、ASCII 大小写选项、有界分页和文本范围提取；独立 generation 拒绝陈旧坐标；两端 UI 与 regex 待接 |
 | 宿主 TERM | pane 固定 xterm-256color/truecolor；linux/dumb/xterm-kitty/未设置四种外部环境回归 |
 | 客户端接口 | `api::delta_of` 与 C ABI 共用校验，FFI 只经 api；Linux 消费连续 delta，缺序/非法行重新 attach |
 | 文本 | 附加码点跨快照/delta/历史/接口保留，软换行复制；历史按预算先预检再转换，FFI 校验后转移所有权；Linux 有界整形缓存、字体随所有者释放 |
@@ -52,6 +53,7 @@ Apple Silicon 的最终提交尚未完成验收；不能用 Intel 结果代替�
 - Linux GL 边界：编译 deny 先报告 atlas/renderer 的 8 处越界 unsafe，统一封装后 fmt/clippy 通过；GTK 常规 42 passed / 2 ignored，独立 driver 测试通过，输入/延迟回看桌面脚本全通过。详见 [资源验证](linux-gl-resources.md)，对应 `662644e` CI 已全部通过。
 - 宿主基线工具：release 单 pane 与 16 pane 各 1 MiB 短时输出、100 次回显和完整快照重连校验通过；纯工具 fmt/clippy 通过。测量边界、产物与复跑见 [host-benchmark.md](host-benchmark.md)。
 - OSC 8 整合复审：规范轴发现 CAN/SUB 前缀取消没有关闭旧链接及校验重复；行为轴另发现重复 `flagsChanged` 声明和点击期间目标恢复后仍可打开。父线程修复并共用表校验；Rust 默认 293 passed / 2 ignored、无默认 195 passed / 1 ignored，Foundation 102 tests、两种配置 clippy、VT 8/8 通过。完整 AppKit/GUI 和整合提交 CI 待验，见 [OSC 8](osc8.md)。
+- 文本查询整合：两轴均复现行尾 TAB 未归一化导致额外空格和跨行漏匹配，先失败后修复；PTY 阻塞读写装配拆至 `pty_io.rs`，actor 保持串行状态所有权且降至 361 行。默认 core 314 passed / 2 ignored，无默认 211 passed / 1 ignored，GTK 42 passed / 2 ignored；查询专题 15/15。专题契约与边界见 [文本查询](text-query.md)。
 - 验证脚本在 `tools/checks/`；本机测试不修改用户 shell/tmux 配置或操作用户已有终端。
 
 ## 尚未完成的验收与能力

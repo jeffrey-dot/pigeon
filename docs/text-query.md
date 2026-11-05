@@ -52,3 +52,8 @@ regex、Unicode case folding、稳定行锚点、反向扫描、上下一个命�
 - 文档相对链接与 `git diff --check` 通过。
 
 macOS/Ubuntu CI、Swift 构建、两端 GUI、其它发布架构、长期负载和搜索 p95 延迟尚未验证；有界工作量回归不替代真实性能基准。静态 musl 产物只做构建与启动 smoke，真实 PTY suite 使用本机 GNU 构建。
+
+2026-11-05 主线程与 OSC 8 整合后的复验：默认 core 314 passed / 2 ignored，无默认 211 passed / 1 ignored；
+GTK 42 passed / 2 ignored。TAB 行尾范围提取和跨硬换行搜索回归先失败，修复后查询专题 15/15；
+附着组合码点的 tab 仍保留完整文本。行尾测量和格子导出共用 `ExportedText` 空格判定。
+宿主阻塞读写装配独立到 `pane/pty_io.rs`，有界队列与 actor 的串行 `PaneState` 所有权不变。
