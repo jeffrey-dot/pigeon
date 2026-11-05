@@ -293,7 +293,7 @@ M0–M1 可以直接复用现有代码：内核的对账语料（来自 tmux 阶
 | 现代终端协议 | 两端已接 Kitty keyboard protocol 与应用小键盘；Linux 鼠标/焦点上报已接，真实 Wayland/非美式布局与 TUI 验收待补；DEC 2026 同步输出与超时已接；图片协议、OSC 9;4 进度、完整 OSC 133 命令边界/命令输出导航未实现。不能把底层 VT 库的能力当成产品端到端能力 |
 | agent 记录同步 | 多 pane 状态聚合、来源 ack、跨应用重启事件身份持久化和重播去重已实现；按 host/instance/pane/seq/record 隔离，缓存报告/旧屏幕不作查看依据。宿主与双外形接口已提供同 pane 完整未确认集合及独立 revision，ack/clear/退出立即广播；macOS 已协商完整集合并提供 Status Records 面板逐条查看/显式确认，旧宿主仍走单条路径；Linux 本地侧栏也已接完整集合与逐条确认，尚无跨重启 seen。身份集合有界存储、多进程写入一致性和 AppKit 交互仍待验收 |
 | agent 接入与通知 | 注入 `PI_PROGRAM_STATUS=1`，已有通用 `pigeon-report`、`pigeon-run` 与 [主动接入指南](agent-integration.md)，程序仍须主动上报 OSC 7501。第三方程序版本适配矩阵和桌面通知未验/未实现；不能把“能运行 agent”写成“能自动显示其状态” |
-| Linux 功能对齐 | Harp 单行侧栏、浅深色终端卡片、本地会话选择、未读/needs-you、逐条确认与尺寸来源已接；缺 SSH 连接管理、选择复制、拖动分隔线、渲染脏行复用与自动断线恢复；delta、IME、复制当前屏幕、宿主括号粘贴、滚动回看、15s ping/45s 完整帧静默超时与有界传输已接。Xvfb/fcitx5 输入与延迟回看验收通过，Wayland/IBus/日文/混合 DPI 未验；GTK CI 已运行，GUI 发布产物未做 |
+| Linux 功能对齐 | Harp 单行侧栏、浅深色终端卡片、本地会话选择、未读/needs-you、逐条确认与尺寸来源已接；缺 SSH 连接管理、选择复制、拖动分隔线、渲染脏行复用与增量续传；delta、IME、复制当前屏幕、宿主括号粘贴、滚动回看、15s ping/45s 完整帧静默超时、有界传输及本地自动重连/完整快照恢复已接。Xvfb/fcitx5 输入与延迟回看验收通过，Wayland/IBus/日文/混合 DPI 未验；GTK CI 已运行，GUI 发布产物未做 |
 | DECSTBM 元数据 | VT 引擎处理滚动区，但 `Snapshot.scroll` 导出为整屏；不是 VT 不支持滚动区。真正边界未暴露给客户端 |
 | C 档远端尺寸 | 退化模式本地 VT 会 resize，尚无本地 PTY 向 ssh 转发 `TIOCSWINSZ`，远端尺寸不能随窗口可靠更新 |
 | 配置与易用性 | 字体配置仅启动时读取；未提供完整自定义键位、主题配置与热重载、命令面板。宿主回看固定 10,000 行；嵌入接口的 100,000 行上限并非宿主可配置项 |
@@ -307,4 +307,4 @@ M0–M1 可以直接复用现有代码：内核的对账语料（来自 tmux 阶
 **优化前核对证据**：8 条已提交 VT golden 通过。用 `vt-dump` 输入 `e\u0301` 得到 `e`，输入 `👩\u200d💻` 得到 `👩💻`，确认组合码点在快照转换时丢失；预组字符 `é` 保留。
 Linux 默认环境 `TERM=linux` 下，`cargo test --manifest-path core/Cargo.toml --offline` 的 `vim_alternate_screen_survives_a_reconnect` 超时。
 改用 `TERM=xterm-256color cargo test --manifest-path core/Cargo.toml --offline --quiet` 后全量通过：194 passed，2 ignored（含文档测试）。
-上述 TERM 问题已在本轮修复；后续实现与验证见 [优化执行记录](optimization-progress.md)。`a92a079` 的 Rust 双平台、GTK/GL 资源、宿主基线 smoke 和 macOS 15 Intel Swift 完整构建/测试已由 CI 全部通过；Linux 传输边界新切片、Apple Silicon 最终版本与真实 GUI 仍待验。
+上述 TERM 问题已在本轮修复；后续实现与验证见 [优化执行记录](optimization-progress.md)。`bcb7337` 的 Rust 双平台、GTK/GL 资源、宿主基线 smoke 和 macOS 15 Intel Swift 完整构建/测试已由 CI 全部通过；Linux 自动重连新切片、Apple Silicon 最终版本与真实 GUI 仍待验。

@@ -16,7 +16,7 @@
 - `status_snapshot` 已实现完整未确认记录集合与独立修订号；macOS 已请求该能力，并通过 C ABI 读取；Linux 已通过安全 API 接入本地侧栏和逐条显式确认。
 - `status_all` 通过独立 `status` 帧补发状态，协商 `status_snapshot` 后改用完整集合；`sessions` 本身不包含状态记录。未协商 `status_all` 的连接仍接收已 attach pane 的状态，不能靠未请求 `osc7501` 推断不会收到 `status`。
 - 心跳当前由 macOS 客户端实现：15s 未收到宿主消息后 ping，45s 无消息重连；宿主响应 pong。
-  Linux 握手后每 15s ping，45s 无完整合法帧时关闭连接并报告原因；已连接 socket 握手上限 5s，队列边界见 [Linux 传输](linux-transport.md)。自动恢复待补。
+  Linux 握手后每 15s ping，45s 无完整合法帧时关闭连接并报告原因；已连接 socket 握手上限 5s，队列边界见 [Linux 传输](linux-transport.md)。本地完整快照自动恢复已接，Linux 增量续传待补。
 - 握手当前拒绝不同 major 并返回自身 `PROTO_VERSION`；“minor 取较小值”的目标尚未实现。
 - `scroll` 及历史发送的宿主处理尚未完整按 `scrollback` 握手能力门控；官方客户端通过 `history:false` 避免 attach 传整段历史。
 - 尺寸投票当前存在 `SessionState.vote`，同会话 pane 共用；尚未达到 §6 的 pane 级策略契约。首次投票者决定策略，仍有投票者时重新 attach 不会修改它。
@@ -33,7 +33,7 @@
 | 帧 | `u32` 小端长度 `L` + 恰好 `L` 字节 payload。`L` **不含自身**；payload 为单个 CBOR map。不用换行分隔 |
 | 上限 | 单帧 ≤ 8 MiB（8388608）。超限即断开并回 `error{code:"frame_too_large"}`，payload 不进解析器 |
 | 半包 | 读端必须能处理“长度够但 payload 不足”的中间态，累积到 `L` 字节再解 |
-| 心跳 | macOS 客户端 15s 无入站帧时发 `ping`，45s 无入站帧视为断线；宿主回 `pong`；Linux 每 15s ping，45s 完整帧静默断线，自动恢复待接 |
+| 心跳 | macOS 客户端 15s 无入站帧时发 `ping`，45s 无入站帧视为断线；宿主回 `pong`；Linux 每 15s ping，45s 完整帧静默断线，本地自动恢复已接 |
 | 版本 | 握手期协商；**大版本不同即拒绝**，小版本向下兼容 |
 | 压缩 | 只有双方 `features` 都含 `zstd` 时启用。启用后 payload 首字节是 tag：`0x00` = 原文，`0x01` = 其后为 zstd 帧。tag 计入 `L` |
 
