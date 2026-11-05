@@ -2,6 +2,7 @@
 
 pub mod actor;
 pub mod cmd;
+mod pty_io;
 pub mod query;
 
 pub mod status;

@@ -2,7 +2,6 @@
 //! state. Everything that touches `PaneState` goes through this task's `Cmd` queue.
 
 use std::collections::VecDeque;
-use std::io::{Read, Write};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
@@ -17,19 +16,13 @@ use pigeon_core::term::Palette;
 use crate::host::event::{encode, Event};
 use crate::host::state::{Exits, HostState, Meta};
 use crate::pane::cmd::Cmd;
+use crate::pane::pty_io::PtyIo;
 use crate::pane::status::StatusBroadcast;
 
 const SCROLLBACK: usize = 10_000;
-/// One PTY read. Big enough that `cat` of a large file takes a few reads per frame, not
-/// dozens; the buffer is reused, and each read becomes one owned chunk of exactly its size.
-const READ_CHUNK: usize = 64 * 1024;
 /// At most this many bytes are fed per batch before the per-batch work (metadata, status,
 /// replies, frame) runs, so a flood still yields to commands and frames regularly.
 const BATCH_BYTES: usize = 256 * 1024;
-/// Chunks of input waiting for the PTY. A child that stops reading its input (busy, or
-/// stopped with ^Z) fills this; the actor then stops taking commands until it drains, which
-/// pushes back through the bounded command queue to the client instead of growing memory.
-const INPUT_QUEUE: usize = 64;
 /// At most one delta per pane per frame. A burst of output (`cat`, a build log) arrives in
 /// many small PTY reads, and one delta each would repaint the whole screen dozens of times
 /// per frame and flood an ssh link; a lone keystroke still goes out immediately.
@@ -73,8 +66,10 @@ pub fn spawn_pane(
     let reader = pair.master.try_clone_reader().ok()?;
     let writer = pair.master.take_writer().ok()?;
     let master: Master = Arc::new(StdMutex::new(pair.master));
-    let pty_rx = start_reader(reader);
-    let write_tx = start_writer(writer);
+    let PtyIo {
+        output: pty_rx,
+        input: write_tx,
+    } = PtyIo::start(reader, writer);
 
     let pane_id = NEXT_PANE.fetch_add(1, Ordering::Relaxed);
     let (cmd_tx, cmd_rx) = mpsc::channel::<Cmd>(64);
@@ -97,52 +92,13 @@ pub fn spawn_pane(
     Some((pane_id, cmd_tx))
 }
 
-/// PTY output, read on a thread because the PTY reader is blocking.
-fn start_reader(mut reader: Box<dyn Read + Send>) -> mpsc::Receiver<Vec<u8>> {
-    let (pty_tx, pty_rx) = mpsc::channel::<Vec<u8>>(64);
-    let debug = crate::debug();
-    std::thread::spawn(move || {
-        let mut buffer = vec![0u8; READ_CHUNK];
-        loop {
-            match reader.read(&mut buffer) {
-                Ok(0) | Err(_) => break,
-                Ok(count) => {
-                    if debug {
-                        eprintln!(
-                            "pigeon-server: pty {:?}",
-                            String::from_utf8_lossy(&buffer[..count])
-                        );
-                    }
-                    if pty_tx.blocking_send(buffer[..count].to_vec()).is_err() {
-                        break;
-                    }
-                }
-            }
-        }
-    });
-    pty_rx
-}
-
-/// PTY input, written on a thread so a stalled child never blocks the actor.
-fn start_writer(mut writer: Box<dyn Write + Send>) -> mpsc::Sender<Vec<u8>> {
-    let (write_tx, mut write_rx) = mpsc::channel::<Vec<u8>>(INPUT_QUEUE);
-    std::thread::spawn(move || {
-        while let Some(chunk) = write_rx.blocking_recv() {
-            if writer.write_all(&chunk).is_err() {
-                break;
-            }
-        }
-    });
-    write_tx
-}
-
 struct PaneActor {
     pane: PaneState,
     child: Box<dyn Child + Send + Sync>,
     master: Master,
     write_tx: mpsc::Sender<Vec<u8>>,
     /// Input the writer had no room for yet, in order. While it is not empty the actor
-    /// takes no commands (see `INPUT_QUEUE`), so at most one command's worth waits here
+    /// takes no commands (see `pty_io::INPUT_QUEUE`), so at most one command's worth waits here
     /// besides query answers.
     unwritten: VecDeque<Vec<u8>>,
     events: broadcast::Sender<Event>,
