@@ -31,8 +31,7 @@ impl AlacrittyTerm {
             .rev()
             .find(|col| {
                 let cell = &grid[Point::new(Line(row), Column(*col))];
-                cell.c != ' '
-                    || cell.zerowidth().is_some_and(|marks| !marks.is_empty())
+                !super::cell::ExportedText::new(cell).is_plain_space()
                     || cell.flags.contains(Flags::WIDE_CHAR_SPACER)
             })
             .map_or(0, |col| col + 1);

@@ -61,6 +61,30 @@ fn history_soft_and_hard_breaks_preserve_wide_and_combining_text() {
 }
 
 #[test]
+fn trailing_tabs_match_exported_spaces_for_ranges_and_cross_line_search() {
+    for input in ["a\t\r\nb", "a       \r\nb"] {
+        let (core, pane) = core(12, 3, input);
+        let info = core.text_query(pane, &TextQuery::Info).unwrap().info();
+        let range = TextRange {
+            start: TextPoint {
+                row: 0,
+                col: 0,
+                byte: 0,
+            },
+            end: TextPoint {
+                row: 1,
+                col: 1,
+                byte: 0,
+            },
+        };
+        assert_eq!(extract(&core, pane, info.generation, range), "a\nb");
+        assert_eq!(hits(&core, pane, &search("a\nb")).1.len(), 1);
+    }
+    let (core, pane) = core(12, 3, "a\t\r\x1b[2C\u{301}\r\nb");
+    assert_eq!(hits(&core, pane, &search("a \u{301}\nb")).1.len(), 1);
+}
+
+#[test]
 fn leading_wide_spacer_does_not_add_a_space() {
     let (core, pane) = core(5, 3, "abcd你X");
     let (info, found, _) = hits(&core, pane, &search("abcd你X"));

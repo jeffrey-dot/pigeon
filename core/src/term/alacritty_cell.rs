@@ -46,6 +46,10 @@ impl<'a> ExportedText<'a> {
         (!self.marks.is_empty()).then_some(self.len)
     }
 
+    pub(super) fn is_plain_space(&self) -> bool {
+        self.base == ' ' && self.marks.is_empty()
+    }
+
     pub(super) fn text(&self) -> String {
         let mut text = String::with_capacity(self.len);
         text.push(self.base);
