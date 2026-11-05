@@ -68,3 +68,5 @@ GTK 客户端已有 Ubuntu CI 作业（构建/clippy/逻辑测试），尚无 GU
 **主界面**：Harp 风格单行侧栏、状态图标、白色/近黑终端卡片与会话顶部栏；记录详情通过顶部小图标按需打开。`PIGEON_APPEARANCE=light|dark` 固定外观，否则跟随 GTK 深色偏好。默认优先 DejaVu Sans Mono，`PIGEON_FONT` 可覆盖。复跑截图与平台限制见 [Linux Harp 主界面](../../docs/linux-harp.md)。
 
 **现代输入与链接**：Kitty 五个 flag、事件配对、应用小键盘、鼠标/焦点报告已接；OSC 8 纯文本 hover 与完整同格 Ctrl+左键打开 http/https，拖动/滚动/失焦/画面变化取消。规范、回归和硬件限制见 [现代输入与链接](../../docs/linux-modern-input.md)。
+
+**搜索**：`Ctrl+Shift+F` 或顶部放大镜搜索全部历史/当前屏幕，literal/ASCII 大小写、分页/Stop、上下命中与同代次高亮。Escape 关闭回实时屏，缺能力显示不可用；见 [Linux 搜索](../../docs/linux-search.md)。

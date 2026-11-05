@@ -8,7 +8,7 @@ Linux GTK4 客户端已有 [Harp 风格浅深色界面](docs/linux-harp.md)、�
 本轮实现与验证见 [优化执行记录](docs/optimization-progress.md)。
 
 会话保存在宿主内存中：关闭客户端后任务继续运行；宿主退出或机器重启后不恢复。
-核心与宿主已提供有界 literal 搜索、文本范围分页和同代次原子定位；macOS `⌘F` 搜索条、上下命中和高亮已接入，AppKit/GUI 待验（见 [搜索进展](docs/search-progress.md)）。Linux 搜索 UI、跨历史选择、regex 与稳定锚点待接。[OSC 8 链接](docs/osc8.md) 已接核心/接口与 macOS Cmd+click（macOS GUI 待验，Linux Ctrl+click 已接）；OSC 52 剪贴板与完整字素仍待补。两端已接 Kitty keyboard protocol；编程连字仅 macOS 已接，完整现状见
+核心与宿主已提供有界 literal 搜索、文本范围分页和同代次原子定位；macOS `⌘F` 搜索条、上下命中和高亮已接入，AppKit CI 通过、真实 GUI 待验（见 [搜索进展](docs/search-progress.md)）。Linux 已接 [Ctrl+Shift+F 搜索浮层](docs/linux-search.md)，跨历史选择、regex 与稳定锚点待接。[OSC 8 链接](docs/osc8.md) 已接核心/接口与 macOS Cmd+click（macOS GUI 待验，Linux Ctrl+click 已接）；OSC 52 剪贴板与完整字素仍待补。两端已接 Kitty keyboard protocol；编程连字仅 macOS 已接，完整现状见
 [当前能力与缺口](docs/plan.md#11-当前能力与已知缺口)。
 
 - [AGENTS.md](AGENTS.md) —— 给编码 agent 的工作说明：**模块划分**、风格、测试、不变量

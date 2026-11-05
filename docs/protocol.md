@@ -8,7 +8,7 @@
 
 本文保留字段契约；定义了字段不等于所有路径已实现。当前差异如下：
 
-- 宿主提供 `delta`、`scrollback`、`osc7501`、`status_all`、`status_snapshot`、`text_query`、`session_env`；macOS 请求 `delta`、`scrollback`、`status_all`、`status_snapshot`，Linux 请求 `delta`、`scrollback`、`status_all`、`status_snapshot`，首帧快照之后应用连续增量，回看由宿主 `scroll` 切片。
+- 宿主提供 `delta`、`scrollback`、`osc7501`、`status_all`、`status_snapshot`、`text_query`、`session_env`；macOS 请求 `delta`、`scrollback`、`status_all`、`status_snapshot`，Linux 请求 `delta`、`scrollback`、`status_all`、`status_snapshot`、`text_query`、`text_viewport`，首帧快照之后应用连续增量，回看由宿主 `scroll` 切片。
 - `zstd` 是预留能力，宿主不提供，当前 payload 为裸 CBOR，无压缩 tag。
 - `snapshot`/`delta` 已下发 OSC 8 链接，含历史、回看与续传；每帧独立解析为格子拥有的 URI，macOS 可 Cmd+click，Linux 可 Ctrl+click。设计/限制见 [OSC 8](osc8.md)。基础 cell 仍为单码点，附加码点通过 `text` 稀疏表传递。
 - `new_session.env` 已应用到该会话及后续分屏，独立于宿主/其它会话；终端能力变量保留、输入上限及失败行为见 §3.2。结构化 `mouse` 仍返回 `unsupported`。

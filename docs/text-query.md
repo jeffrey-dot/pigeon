@@ -1,6 +1,6 @@
 # 文本查询纵向切片
 
-> 2026-11-05 设计及实现说明。S3 的核心/宿主查询与原子定位接口；macOS 搜索/同画面高亮接入见 [搜索进展](search-progress.md)，AppKit/GUI 待验；完整选择尚未接入。
+> 2026-11-05 设计及实现说明。S3 的核心/宿主查询与原子定位接口；macOS 搜索/同画面高亮接入见 [搜索进展](search-progress.md)，AppKit CI 已通过、真实 GUI 待验；Linux 接入见 [Linux 搜索](linux-search.md)，完整选择尚未接入。
 
 ## 坐标与生命周期
 
@@ -26,7 +26,7 @@ Rust API 与 C ABI 共用语义，见 [ADR-0003](adr/0003-one-semantics-two-shap
 
 ## 明确未完成
 
-regex、Unicode case folding、稳定行锚点、反向扫描、跨历史拖选/自动滚动/矩形选择及 Linux 搜索 UI 未完成。macOS 已接上下命中、分页、取消及高亮，AppKit 类型检查和真实 GUI 由 macOS 验证，不能把 Linux Foundation 测试当成端到端验收。
+regex、Unicode case folding、稳定行锚点、反向扫描、跨历史拖选/自动滚动/矩形选择未完成；Linux 搜索 UI 已接并经隔离桌面验收。macOS 已接上下命中、分页、取消及高亮，AppKit 类型检查和真实 GUI 由 macOS 验证，不能把 Linux Foundation 测试当成端到端验收。
 
 `TextQuery::Viewport {generation,range}` / C kind=3 在同一次串行 pane 查询内校验代次和范围后生成一屏画面。
 结果 `TextResult::Viewport {info,range,viewport}` 不包含全历史；历史起点位于顶行，实时命中保持实时屏几何。

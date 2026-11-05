@@ -11,7 +11,7 @@
 | 基线/CI | GTK 构建、clippy、逻辑测试；独立 HOME/配置的宿主测试；环境记录、FFI import 与生成头文件检查 |
 | 宿主性能工具 | 隔离 release 宿主与 API 客户端，保留协议回显、快照重连、多 pane 短时输出原始样本及二进制 hash；无 GUI 显示延迟承诺 |
 | OSC 8 | 核心、宿主、Rust/C 接口保留拥有型 URI；macOS hover/Cmd+click 已接，http/https 白名单；链接取消和点击期间变化有回归，Linux Ctrl+click/hover 已接 |
-| 文本查询 | 核心/宿主 literal 搜索、ASCII 大小写选项、有界分页和文本范围提取；独立 generation 拒绝陈旧坐标；macOS 搜索条/取消/上下命中/原子定位高亮已接，Linux UI 与 regex 待接 |
+| 文本查询 | 核心/宿主 literal 搜索、ASCII 大小写选项、有界分页和文本范围提取；独立 generation 拒绝陈旧坐标；两端搜索/取消/上下命中/原子定位高亮已接，regex 待接 |
 | 宿主 TERM | pane 固定 xterm-256color/truecolor；linux/dumb/xterm-kitty/未设置四种外部环境回归 |
 | 客户端接口 | `api::delta_of` 与 C ABI 共用校验，FFI 只经 api；Linux 消费连续 delta，缺序/非法行重新 attach |
 | 文本 | 附加码点跨快照/delta/历史/接口保留，软换行复制；历史按预算先预检再转换，FFI 校验后转移所有权；Linux 有界整形缓存、字体随所有者释放 |
@@ -35,8 +35,9 @@
 | `73813d5` | [41946816404](https://github.com/jeffrey-dot/pigeon/actions/runs/41946816404) | 全部通过，含 Ubuntu/macOS 宿主基线 smoke 与原始样本 artifact |
 | `03b1a41` | [41951970329](https://github.com/jeffrey-dot/pigeon/actions/runs/41951970329) | 全部通过，含 OSC 8 复审、文本查询、Linux 侧栏/订阅隔离与 Swift ABI 夹具修复 |
 | `61acd11` | [41953937127](https://github.com/jeffrey-dot/pigeon/actions/runs/41953937127) | 全部通过，含会话环境覆盖、分屏继承、API/C ABI 与真实 PTY 校验 |
+| `aad62a6` | [41992679920](https://github.com/jeffrey-dot/pigeon/actions/runs/41992679920) | 六作业全部通过，含 Linux Harp 外观、GL alpha、鼠标坐标和静默查询夹具 |
 
-已通过的平台 CI 对应 `61acd11`，含 session env、OSC 8、文本查询、Linux 侧栏和宿主基线 smoke；上报工具/架构检查新 CI 待核对。`8ccaeb3` 的 macOS 15 Intel `swift build` 与 `swift test` 通过：执行 352 项、跳过 7 项、0 failures；独立 Foundation 测试 98 项通过。
+已通过的平台 CI 对应 `aad62a6`，含 session env、OSC 8、文本查询、Linux 侧栏和宿主基线 smoke；Linux 搜索新 CI 待核对。`8ccaeb3` 的 macOS 15 Intel `swift build` 与 `swift test` 通过：执行 352 项、跳过 7 项、0 failures；独立 Foundation 测试 98 项通过。
 Apple Silicon 的最终提交尚未完成验收；不能用 Intel 结果代替。CI 构建和测试也不等于真实状态面板/SSH/GPU 呈现验收。
 
 ## 主线程本地验证
@@ -87,3 +88,5 @@ OSC 7501 上报工具：pigeon-report/pigeon-run 与接入指南已整合。规�
 2026-11-05 按用户 Harp 参考图补 Linux 界面：浅灰窄侧栏、单行名称/时间/状态槽、悬停关闭、选中白色圆角、终端卡片与顶部栏、按需记录浮层、浅深色。真实 GTK 截图已检查；GTK 79 passed / 2 ignored，clippy/fmt 与 GL driver 检查通过；input/scroll/modern-input/sidebar 桌面脚本通过。浅色暴露的 framebuffer alpha 与单格字形定位已修；标题栏 surface 偏移纳入鼠标坐标。见 [Linux Harp](linux-harp.md)。
 
 6489ca6 的 Swift 完整构建/测试、Ubuntu Rust、GTK、header/docs 已通过；macOS Rust 的真实文本查询测试在 READY 后收到交互 shell 启动序列而正确返回 stale_text。测试夹具改为 READY 后安静读取的非交互进程，专题本机通过，待新 CI。
+
+Linux 搜索：Ctrl+Shift+F/顶部放大镜、ASCII 大小写、分页/Stop、上下命中与冻结定位高亮已接。GTK 84 passed / 2 ignored，fmt/clippy/build 通过；真实 Xvfb/PTY 搜索与延迟答复、Unicode/跨会话隔离、旧能力退化及 input/sidebar/scroll/modern-input 回归通过。截图检查通过，见 [Linux 搜索](linux-search.md)。未改核心/ABI；新 CI 待验。

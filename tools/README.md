@@ -16,6 +16,7 @@
 | `checks/swift-logic.sh` | 在临时 SwiftPM 包运行真实的 Foundation-only 侧栏/选择测试（可用 `SWIFT` 指定编译器）；不替代 AppKit 验收 |
 | `checks/linux-scroll-check.py` | 独立桌面与真实宿主验收回看、延迟答复、输入回实时屏、备用屏和分屏；可选 47s 保活/能力退化 |
 | `checks/linux-gl-check.sh` | 独立 Xvfb 软件 GL 检查资源删除、上下文恢复和非法上传拒绝；CI 单独运行 |
+| `checks/linux-search-check.py` | 隔离 GTK/真实 PTY 搜索定位、取消、Unicode 与旧宿主退化验收 |
 | `checks/linux-harp-check.py` | 真实宿主/GTK 的 Harp 浅色深色截图，独立桌面与 fixture；见 [界面验收](../docs/linux-harp.md) |
 | `checks/linux-input-check.py` | 独立 Xvfb/fcitx5/宿主验收 IME、复制当前屏幕、异步粘贴与分屏焦点；不操作用户桌面 |
 | `checks/ffi-imports.sh` | 禁止 FFI 直接引用核心内部模块 |

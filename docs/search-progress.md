@@ -1,6 +1,6 @@
 # macOS 搜索与同代次定位
 
-2026-11-05 核对。S3 的 macOS 搜索切片，基于 [文本查询](text-query.md)；完整 S3（Linux 搜索、regex、跨历史选择等）尚未完成。当前实现已落地，Linux 上核心/宿主和 Foundation/真实 C ABI 可验证；AppKit 类型检查与 GUI 待 macOS 验证，不能按语法解析或核心测试宣称通过。
+2026-11-05 核对。S3 的 macOS 搜索切片，基于 [文本查询](text-query.md)；Linux 搜索接入见 [Linux 搜索](linux-search.md)；完整 S3（regex、跨历史选择等）尚未完成。当前实现已落地，Linux 上核心/宿主和 Foundation/真实 C ABI 可验证；AppKit 构建/测试已在 aad62a6 CI 通过，真实 GUI 待验证，不能按语法解析或核心测试宣称通过。
 
 ## 操作
 
@@ -31,7 +31,7 @@ Rust 提供 `text_viewport_snapshot` / `text_viewport_of`；C 提供 `pg_text_re
 
 ## 未完成与限制
 
-regex、完整 Unicode case folding、稳定锚点、宿主反向扫描、跨历史拖选/自动滚动/矩形选择、Linux 搜索 UI 未实现。持续输出会让查询频繁过期，用户需暂停程序或重查；不会自动不断重试。当前匹配导航只覆盖已收到的前 10,000 个范围。超大/密集附加文本画面仍受既有 8 MiB 帧上限限制。
+regex、完整 Unicode case folding、稳定锚点、宿主反向扫描、跨历史拖选/自动滚动/矩形选择未实现。持续输出会让查询频繁过期，用户需暂停程序或重查；不会自动不断重试。当前匹配导航只覆盖已收到的前 10,000 个范围。超大/密集附加文本画面仍受既有 8 MiB 帧上限限制。
 
 搜索条占用 64pt，会触发 pane resize；真实字体/窄窗口、IME 组合输入、分屏焦点、鼠标/滚轮、SSH 延迟和实际 Metal 高亮均需 macOS GUI 验收。只做 Linux Foundation 和真实 C ABI 测试不等于 `swift build && swift test` 已通过。
 
