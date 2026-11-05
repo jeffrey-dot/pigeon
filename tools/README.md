@@ -31,6 +31,7 @@
 | `checks/m2-gui-check.sh` | M2：宿主崩溃恢复、多客户端尺寸、真键盘（[m2-checklist](../docs/m2-checklist.md)） |
 | `checks/m3-gui-check.sh` | M3：侧栏、状态、未读（[m3-checklist](../docs/m3-checklist.md)） |
 | `checks/harp-ui-check.py --out /tmp/pigeon-ui` | 临时宿主与真实 OSC 会话，截取 Harp 风格浅色 / 深色主界面 |
+| `checks/gpui-ui-check.py --out /tmp/pigeon-gpui` | 同一 fixture 驱动 GPUI 客户端（`core/target/debug/pigeon-gpui`），独立 HOME/宿主，按参考图尺寸开窗，截取浅色 / 深色；需完整 Xcode + Metal Toolchain |
 | `checks/metal-gui-check.sh` | Metal 渲染：两种外观各截一张 |
 | `checks/quit-on-last-session-check.sh` | 最后一个会话退出后宿主结束、应用退出 |
 | `checks/helpers/` | 上面脚本用的 Swift 小工具：按 pid 点窗口、取窗口号 |
