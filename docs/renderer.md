@@ -247,7 +247,7 @@ shader 用 `gl_VertexID` 生成单位四边形（6 顶点，`draw_arrays_instanc
 
 1. 脏行增量 + 行复用（对齐 macOS 的 `DirtyRows`）；
 2. 侧栏（`GtkListBox`/`GtkTreeListModel`）+ 分组 + 未读/`needs you`；
-3. 拖动分隔线与多会话选择（分屏、zoom、布局绘制和焦点命中已接）；
+3. 拖动分隔线与多会话选择已接，真实 Wayland/混合 DPI 验收待补；
 4. 选择与 OSC 52 剪贴板写入（宿主回看和当前屏幕复制已接）；
 5. IME（`GtkIMContext`）与 kitty keyboard protocol；
 6. 若 CPU 帧时间成为瓶颈：后台渲染线程 + DMABUF 导出（Ghostty 的 `render_surface.zig` 是蓝本）。

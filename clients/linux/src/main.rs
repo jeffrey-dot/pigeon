@@ -5,6 +5,7 @@
 //! session at its rect, handle IME/keys/clipboard, follow layout changes and window resizes.
 //! Scrollback slices and complete status records come from the host.
 
+mod divider;
 mod host;
 mod input;
 mod input_context;

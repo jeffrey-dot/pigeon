@@ -38,6 +38,18 @@ impl Workspace {
     }
     pub fn refresh_hover(&mut self, modifiers: M) {
         self.pointer.modifiers = modifiers;
+        if let Some(axis) = self.dragging_divider() {
+            self.divider_cursor(axis);
+            return;
+        }
+        if let Some(split) = self
+            .pointer
+            .position
+            .and_then(|(x, y)| self.divider_at(x, y))
+        {
+            self.divider_cursor(split.axis);
+            return;
+        }
         let target = self
             .pointer
             .position

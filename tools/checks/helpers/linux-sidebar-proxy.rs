@@ -84,6 +84,9 @@ fn record(log: &Arc<Mutex<File>>, direction: &str, message: &Message) {
         ),
         Message::AckStatus { pane_id, seq } => format!("ack {pane_id} {seq}"),
         Message::ClosePane { pane_id, .. } => format!("close {pane_id}"),
+        Message::ResizeSplit {
+            split_id, ratio, ..
+        } => format!("resize_split {split_id} {ratio}"),
         Message::SizeState {
             pane_id,
             clients,

@@ -22,6 +22,7 @@ use crate::render::{self, GridMetrics, PaneFrame, Renderer};
 use crate::session_model::SessionModel;
 use crate::sidebar::SidebarModel;
 
+mod divider;
 mod input;
 mod links;
 mod pointer;
@@ -60,6 +61,7 @@ pub struct Workspace {
     pub host_instance: Option<String>,
     pub host_identity: String,
     pub recovery_notice: String,
+    divider_drag: Option<divider::Drag>,
 }
 
 impl Workspace {
@@ -152,6 +154,7 @@ impl Workspace {
                 _ => String::new(),
             },
             recovery_notice: String::new(),
+            divider_drag: None,
             search_supported: pigeon_core::api::offers_feature(hello, "text_query")
                 .unwrap_or(false)
                 && pigeon_core::api::offers_feature(hello, "text_viewport").unwrap_or(false),
@@ -288,17 +291,7 @@ impl Workspace {
         self.model
             .splits
             .iter()
-            .map(|split| {
-                let x = split.rect.x * canvas[0];
-                let y = split.rect.y * canvas[1];
-                let w = split.rect.w * canvas[0];
-                let h = split.rect.h * canvas[1];
-                let line = (self.scale.max(1.0)).round();
-                match split.axis {
-                    pigeon_core::api::Axis::Vertical => [x - line / 2.0, y, line, h],
-                    pigeon_core::api::Axis::Horizontal => [x, y - line / 2.0, w, line],
-                }
-            })
+            .map(|split| crate::divider::line(split, canvas, self.scale.max(1.0).round()))
             .collect()
     }
 

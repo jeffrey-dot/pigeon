@@ -52,7 +52,9 @@ cargo test -p pigeon-linux                   # 纯逻辑单测（会话路由 / 
 旧宿主仅显示实际发来的单条报告，保留已收到的旧终态；同 id 新报告撤销旧身份，已确认记录可回收；不保证发现旧宿主未发送的记录，长期未确认集合的资源预算待补。
 无跨客户端重启 seen 持久化、无 SSH；本地 socket 已接自动重连、实时屏增量续传和全量退化，见 [恢复说明](../../docs/linux-reconnect.md)。详见 [侧栏验证记录](../../docs/linux-sidebar-progress.md)。
 
-**未做**：SSH 连接管理、拖动分隔线改比例、拖选/选择复制、
+**分隔线**：左键拖动左右/上下分隔线调整比例，嵌套布局按核心矩形命中；zoom 隐藏分隔线，拖动不向应用发送鼠标字节。见 [验收说明](../../docs/linux-divider.md)。
+
+**未做**：SSH 连接管理、拖选/选择复制、
 渲染脏行增量、DMABUF、emoji ZWJ 序列整形。
 GTK 客户端已有 Ubuntu CI 作业（构建/clippy/逻辑测试），尚无 GUI 发布产物。输入切片通过独立 Xvfb + fcitx5 拼音验收；Wayland、IBus、日文 IME、非美式键盘和混合 DPI 仍未验。见 [输入验证记录](../../docs/linux-input-progress.md)。
 

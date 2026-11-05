@@ -68,6 +68,7 @@ impl Workspace {
             .map(|s| s.modes)
     }
     pub(super) fn cancel_pointer(&mut self) {
+        self.divider_drag = None;
         self.link_press.cancel();
         for (button, (pane, point, modes)) in self.pointer.buttons.drain().collect::<Vec<_>>() {
             if self.model.connected
@@ -90,6 +91,9 @@ impl Workspace {
         self.pointer.last_motion = None;
     }
     fn pointer_press(&mut self, button: u32, x: f64, y: f64, modifiers: M) {
+        if button == 1 && self.begin_divider(x, y) {
+            return;
+        }
         self.click(x, y);
         self.pointer.position = Some((x, y));
         self.refresh_hover(modifiers);
@@ -119,6 +123,9 @@ impl Workspace {
         }
     }
     fn pointer_release(&mut self, button: u32, x: f64, y: f64, modifiers: M) {
+        if button == 1 && self.move_divider(x, y, true) {
+            return;
+        }
         let hit = self.hit_cell(x, y);
         if button == 1 && self.link_press.consumed {
             let target = hit.and_then(|(pane, point)| self.link_at(pane, point));
@@ -141,6 +148,9 @@ impl Workspace {
         }
     }
     fn pointer_motion(&mut self, x: f64, y: f64, modifiers: M) {
+        if self.move_divider(x, y, false) {
+            return;
+        }
         if self.pointer.position != Some((x, y)) {
             self.link_press.cancel();
         }
