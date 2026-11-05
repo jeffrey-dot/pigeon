@@ -154,7 +154,7 @@ impl Workspace {
                     .model
                     .panes
                     .get(&pane_id)
-                    .is_some_and(|s| s.exited.is_none() && s.modes & 64 != 0 && !s.scroll.active())
+                    .is_some_and(|s| s.exited.is_none() && s.modes & 64 != 0)
             {
                 self.host.send(Message::Keys {
                     pane_id,

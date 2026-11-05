@@ -16,6 +16,23 @@ pub enum Event {
     Release,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum CommitRoute {
+    Text,
+    Key,
+    Consumed,
+}
+
+pub fn route_commit(handled: bool, committed: bool, direct_text: bool) -> CommitRoute {
+    if committed && !direct_text {
+        CommitRoute::Text
+    } else if !handled || direct_text {
+        CommitRoute::Key
+    } else {
+        CommitRoute::Consumed
+    }
+}
+
 #[derive(Clone)]
 pub struct Stroke {
     pub key: Key,
@@ -43,7 +60,7 @@ impl Keyboard {
         self.held.contains(&code)
     }
     pub fn sent(&mut self, code: u32, stroke: Stroke, modes: u32) {
-        self.sent.insert(code, (stroke, modes));
+        self.sent.entry(code).or_insert((stroke, modes));
     }
     pub fn release(&mut self, code: u32, modifiers: M, modes: u32) -> Option<Vec<u8>> {
         self.held.remove(&code);
@@ -95,6 +112,9 @@ pub fn modifier_state(key: Key, state: M, pressed: bool, other_held: bool) -> M 
 pub fn encode(stroke: &Stroke, event: Event, modes: u32) -> Option<Vec<u8>> {
     encode_event(stroke, event, modes, false)
 }
+pub fn is_modifier(key: Key) -> bool {
+    table::modifier(key).is_some()
+}
 fn encode_event(stroke: &Stroke, event: Event, modes: u32, paired: bool) -> Option<Vec<u8>> {
     let flags = (modes >> 10) & 31;
     if event == Event::Release && flags & 2 == 0 {
@@ -142,7 +162,11 @@ fn encode_event(stroke: &Stroke, event: Event, modes: u32, paired: bool) -> Opti
         }
         ("27".into(), 'u')
     } else if let Some(code) = table::functional(key) {
-        if !all && code.1 != 'u' && event == Event::Press && (modifiers - M::LOCK_MASK).is_empty() {
+        if !all
+            && code.1 != 'u'
+            && (event == Event::Press || (event == Event::Repeat && flags & 2 == 0))
+            && (modifiers - M::LOCK_MASK).is_empty()
+        {
             return legacy(stroke, modes);
         }
         (code.0.to_string(), code.1)

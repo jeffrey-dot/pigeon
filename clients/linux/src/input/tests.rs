@@ -48,34 +48,22 @@ fn window_chords_accept_shifted_keyvals_and_ignore_lock() {
 }
 
 #[test]
-fn consumed_preedit_and_synchronous_commit_never_send_the_raw_key_again() {
-    let none = ModifierType::empty();
-    assert_eq!(fallback(Key::a, none, false, true, false), None);
-    assert_eq!(fallback(Key::a, none, false, false, true), None);
-    assert_eq!(
-        fallback(Key::a, none, false, false, false),
-        Some(b"a".to_vec())
-    );
-    assert_eq!(
-        fallback(Key::c, ModifierType::CONTROL_MASK, false, false, false),
-        Some(vec![3])
-    );
-    assert_eq!(
-        fallback(Key::b, ModifierType::ALT_MASK, false, false, false),
-        Some(b"\x1bb".to_vec())
-    );
+fn preedit_commit_routing_never_duplicates_text_and_key_events() {
+    use crate::keyboard::{route_commit, CommitRoute};
+    assert_eq!(route_commit(true, false, false), CommitRoute::Consumed);
+    assert_eq!(route_commit(false, true, false), CommitRoute::Text);
+    assert_eq!(route_commit(true, true, false), CommitRoute::Text);
+    assert_eq!(route_commit(true, true, true), CommitRoute::Key);
+    assert_eq!(route_commit(false, false, false), CommitRoute::Key);
 }
 
 #[test]
 fn committed_text_is_sent_once_as_utf8_and_empty_commit_is_ignored() {
     assert_eq!(
-        commit(7, "你好e\u{301}"),
-        Some(Message::Keys {
-            pane_id: 7,
-            bytes: "你好e\u{301}".as_bytes().to_vec(),
-        })
+        crate::keyboard::commit_text("你好e\u{301}", 0),
+        Some("你好e\u{301}".as_bytes().to_vec())
     );
-    assert_eq!(commit(7, ""), None);
+    assert_eq!(crate::keyboard::commit_text("", 0), None);
 }
 
 #[test]

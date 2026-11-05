@@ -166,6 +166,23 @@ with (Path(os.environ['TEST_ROOT']) / 'opened').open('a') as out:
         assert modifier == b"\x1b[57441;2u\x1b[57441;1:3u", modifier
         print("PASS Kitty query / disambiguation / press-repeat-release / modifier", flush=True)
 
+        command("\x1b[<u\x1b[>3u")
+        def chord_repeat():
+            run("xdotool", "keydown", "ctrl", "keydown", "a", "keyup", "ctrl")
+            settle(.8)
+            run("xdotool", "keyup", "a")
+        repeated = capture(chord_repeat)
+        assert repeated.endswith(b"\x1b[97;1:3u"), repeated
+        command("\x1b[<u\x1b[?1h\x1b[>1u")
+        def cursor_repeat():
+            run("xdotool", "keydown", "Up")
+            settle(.8)
+            run("xdotool", "keyup", "Up")
+        repeated = capture(cursor_repeat)
+        assert repeated.count(b"\x1bOA") > 1 and b"\x1b[A" not in repeated, repeated
+        command("\x1b[<u\x1b[?1l\x1b[>31u")
+        print("PASS repeats retain original release and DECCKM without event types", flush=True)
+
         run("fcitx5-remote", "-o")
         run("fcitx5-remote", "-s", "pinyin")
         expect(lambda: key("n", "i", "h", "a", "o"), b"")
@@ -204,8 +221,17 @@ with (Path(os.environ['TEST_ROOT']) / 'opened').open('a') as out:
         key("shift+End")
         command("\x1b[?1000l\x1b[>11u")
         key("shift+Prior")
+        copied = []
+        key("ctrl+shift+c")
+        clipboard.read_text_async(None, lambda c, t: copied.append(c.read_text_finish(t)))
+        pump(lambda: bool(copied))
+        assert "HISTORY-99" not in copied[0], copied
         expect(lambda: key("a"), b"\x1b[97u\x1b[97;1:3u")
         command("\x1b[<u")
+        command("\x1b[?1004h")
+        expect(lambda: key("shift+Prior"), b"\x1b[O")
+        expect(lambda: key("shift+End"), b"\x1b[I")
+        command("\x1b[?1004l")
         print("PASS history clicks/wheel stay local; Kitty typing returns live with paired release", flush=True)
 
         def link(uri):
@@ -225,6 +251,9 @@ with (Path(os.environ['TEST_ROOT']) / 'opened').open('a') as out:
         expect(click, b"")
         pump(lambda: len(opened()) == 2)
         command("\x1b[?1000l")
+        run("xdotool", "keydown", "ctrl", "mousedown", "1", "click", "4", "mouseup", "1", "keyup", "ctrl")
+        settle()
+        assert len(opened()) == 2, opened()
         run("xdotool", "click", "1")
         run("xdotool", "keydown", "ctrl", "mousedown", "1", "mousemove", "--window", window, "13", "8", "mouseup", "1", "keyup", "ctrl")
         run("xdotool", "keydown", "ctrl", "mousedown", "1")

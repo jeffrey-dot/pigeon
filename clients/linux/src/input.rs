@@ -34,32 +34,6 @@ pub fn action(key: Key, modifiers: ModifierType) -> Option<Action> {
     }
 }
 
-/// Only the unconsumed event may fall back to legacy encoding.
-#[cfg(test)]
-pub fn fallback(
-    key: Key,
-    modifiers: ModifierType,
-    app_cursor: bool,
-    im_handled: bool,
-    im_committed: bool,
-) -> Option<Vec<u8>> {
-    if im_handled || im_committed {
-        return None;
-    }
-    encode(key, modifiers, app_cursor)
-}
-
-#[cfg(test)]
-pub fn commit(pane_id: PaneId, text: &str) -> Option<Message> {
-    if text.is_empty() {
-        return None;
-    }
-    Some(Message::Keys {
-        pane_id,
-        bytes: text.as_bytes().to_vec(),
-    })
-}
-
 pub fn paste(pane_id: PaneId, text: &str) -> Option<Message> {
     if text.is_empty() {
         return None;

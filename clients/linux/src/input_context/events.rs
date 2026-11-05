@@ -72,9 +72,10 @@ pub fn install(workspace: &Rc<RefCell<Workspace>>) {
         let direct_text = !was_preedit
             && input.preedits.get() == before_preedit
             && key.to_unicode().is_some_and(|c| text == c.to_string());
-        if committed && !direct_text {
+        let route = keyboard::route_commit(handled, committed, direct_text);
+        if route == keyboard::CommitRoute::Text {
             input.commit_text(&text);
-        } else if !handled || direct_text {
+        } else if route == keyboard::CommitRoute::Key {
             if committed {
                 stroke.text = Some(text);
             } else if !modifiers.intersects(
@@ -90,7 +91,11 @@ pub fn install(workspace: &Rc<RefCell<Workspace>>) {
             }
             if let Some(bytes) = keyboard::encode(&stroke, event, input.modes.get()) {
                 if let Some(pane_id) = input.target.get() {
-                    input.send(Message::Keys { pane_id, bytes });
+                    if keyboard::is_modifier(key) {
+                        work.borrow().send_key_release(pane_id, bytes);
+                    } else {
+                        input.send(Message::Keys { pane_id, bytes });
+                    }
                     input
                         .keyboard
                         .borrow_mut()

@@ -115,6 +115,27 @@ fn chord_release_is_reported_even_when_modifier_was_released_first() {
 }
 
 #[test]
+fn unmodified_repeat_keeps_the_original_chord_release() {
+    let mut keys = Keyboard::default();
+    keys.sent(38, stroke(Key::a, M::CONTROL_MASK), 3 << 10);
+    keys.sent(38, stroke(Key::a, M::empty()), 3 << 10);
+    assert_eq!(
+        keys.release(38, M::empty(), 3 << 10),
+        Some(b"\x1b[97;1:3u".to_vec())
+    );
+}
+
+#[test]
+fn repeats_without_event_types_keep_application_cursor_encoding() {
+    for event in [Event::Press, Event::Repeat] {
+        assert_eq!(
+            encode(&stroke(Key::Up, M::empty()), event, (1 << 10) | 1),
+            Some(b"\x1bOA".to_vec())
+        );
+    }
+}
+
+#[test]
 fn paired_releases_survive_local_cancellation_and_never_add_associated_text() {
     let mut keys = Keyboard::default();
     let mut key = stroke(Key::a, M::CONTROL_MASK);

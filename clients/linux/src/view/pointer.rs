@@ -237,27 +237,42 @@ pub fn install(workspace: &Rc<RefCell<Workspace>>) {
     let weak = Rc::downgrade(workspace);
     motion.connect_enter(move |controller, x, y| {
         if let Some(work) = weak.upgrade() {
-            work.borrow_mut()
-                .pointer_motion(x, y, controller.current_event_state());
+            let modifiers = controller.current_event_state();
+            dispatch_pointer(&work, move |work| work.pointer_motion(x, y, modifiers));
         }
     });
     let weak = Rc::downgrade(workspace);
     motion.connect_motion(move |controller, x, y| {
         if let Some(work) = weak.upgrade() {
-            work.borrow_mut()
-                .pointer_motion(x, y, controller.current_event_state());
+            let modifiers = controller.current_event_state();
+            dispatch_pointer(&work, move |work| work.pointer_motion(x, y, modifiers));
         }
     });
     let weak = Rc::downgrade(workspace);
     motion.connect_leave(move |_| {
         if let Some(work) = weak.upgrade() {
-            let mut work = work.borrow_mut();
-            work.link_press.cancel();
-            work.pointer.position = None;
-            work.refresh_hover(M::empty());
+            dispatch_pointer(&work, |work| {
+                work.link_press.cancel();
+                work.pointer.position = None;
+                work.refresh_hover(M::empty());
+            });
         }
     });
     area.add_controller(motion);
+}
+
+fn dispatch_pointer(work: &Rc<RefCell<Workspace>>, action: impl FnOnce(&mut Workspace) + 'static) {
+    if let Ok(mut borrowed) = work.try_borrow_mut() {
+        action(&mut borrowed);
+    } else {
+        // Hiding a scroll overlay emits enter/leave synchronously inside screen application.
+        let weak = Rc::downgrade(work);
+        glib::idle_add_local_once(move || {
+            if let Some(work) = weak.upgrade() {
+                action(&mut work.borrow_mut());
+            }
+        });
+    }
 }
 fn local_position(area: &gtk::GLArea, event: &gtk::gdk::Event) -> Option<(f64, f64)> {
     let (x, y) = event.position()?;

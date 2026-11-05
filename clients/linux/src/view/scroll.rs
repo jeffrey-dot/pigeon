@@ -68,6 +68,7 @@ impl Workspace {
         surface: bool,
         modifiers: gdk::ModifierType,
     ) -> glib::Propagation {
+        self.link_press.cancel();
         if self.mouse_wheel(delta, surface, modifiers) {
             return glib::Propagation::Stop;
         }
