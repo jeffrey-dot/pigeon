@@ -7,6 +7,7 @@
 
 | 范围 | 实现 |
 |---|---|
+| Linux GL | unsafe 编译期限定在 gl.rs；拥有型纹理/pipeline 自动释放、检查上传范围、恢复上下文；隔离 Xvfb driver 资源测试 |
 | 基线/CI | GTK 构建、clippy、逻辑测试；独立 HOME/配置的宿主测试；环境记录、FFI import 与生成头文件检查 |
 | 宿主 TERM | pane 固定 xterm-256color/truecolor；linux/dumb/xterm-kitty/未设置四种外部环境回归 |
 | 客户端接口 | `api::delta_of` 与 C ABI 共用校验，FFI 只经 api；Linux 消费连续 delta，缺序/非法行重新 attach |
@@ -44,6 +45,7 @@ Apple Silicon 的最终提交尚未完成验收；不能用 Intel 结果代替�
 - macOS 完整集合客户端复审：规范轴仅发现 UI 文档未区分 legacy/完整集合，已修正；行为轴无可确认新增缺陷。Foundation-only 98 tests、Swift ↔ C ABI 2 tests 通过，真实面板交互未验。
 - CI 默认使用明确的 `macos-15-intel`，手动 workflow_dispatch 可选择 `macos-latest` 运行 Apple Silicon 验证。切换原因是 latest 作业连续没有分配 runner 并被取消，不属于代码测试失败；两个架构的结果分别记录。
 - 窗口按系统可点击内容边界安置侧栏按钮，原生标题栏命中测试通过；历史转换计数使用稳定线程局部接口，macOS Rust clippy/test 通过。
+- Linux GL 边界：编译 deny 先报告 atlas/renderer 的 8 处越界 unsafe，统一封装后 fmt/clippy 通过；GTK 常规 42 passed / 2 ignored，独立 driver 测试通过，输入/延迟回看桌面脚本全通过。详见 [资源验证](linux-gl-resources.md)，对应新 CI 待核对。
 - 验证脚本在 `tools/checks/`；本机测试不修改用户 shell/tmux 配置或操作用户已有终端。
 
 ## 尚未完成的验收与能力

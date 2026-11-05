@@ -249,3 +249,8 @@ shader 用 `gl_VertexID` 生成单位四边形（6 顶点，`draw_arrays_instanc
 4. 选择与 OSC 52 剪贴板写入（宿主回看和当前屏幕复制已接）；
 5. IME（`GtkIMContext`）与 kitty keyboard protocol；
 6. 若 CPU 帧时间成为瓶颈：后台渲染线程 + DMABUF 导出（Ghostty 的 `render_surface.zig` 是蓝本）。
+
+## 7. Linux GL 资源与上下文
+
+原始 GL 调用、加载器和字节上传只在 `render/gl.rs`，由编译器强制 unsafe 边界。纹理与 pipeline 拥有资源并自动释放，清理时恢复调用前的 GDK context。
+图集分配/上传、实例布局与错误路径的验证见 [Linux GL 资源边界](linux-gl-resources.md)。图形上下文变更后 renderer 重建；硬件 context loss 与长期运行仍需平台验收。

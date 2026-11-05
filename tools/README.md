@@ -9,6 +9,7 @@
 | `checks/swift-status-wire.sh` | 编译真实 Swift 状态快照 adapter，链接 Rust 库验证 C handle 所有权与 UInt64 字段 |
 | `checks/swift-logic.sh` | 在临时 SwiftPM 包运行真实的 Foundation-only 侧栏/选择测试（可用 `SWIFT` 指定编译器）；不替代 AppKit 验收 |
 | `checks/linux-scroll-check.py` | 独立桌面与真实宿主验收回看、延迟答复、输入回实时屏、备用屏和分屏；可选 47s 保活/能力退化 |
+| `checks/linux-gl-check.sh` | 独立 Xvfb 软件 GL 检查资源删除、上下文恢复和非法上传拒绝；CI 单独运行 |
 | `checks/linux-input-check.py` | 独立 Xvfb/fcitx5/宿主验收 IME、复制当前屏幕、异步粘贴与分屏焦点；不操作用户桌面 |
 | `checks/ffi-imports.sh` | 禁止 FFI 直接引用核心内部模块 |
 | `bench/render-bench.sh` | 渲染基准：大文件 `cat` + 5 秒持续输出，读 `PIGEON_FRAME_STATS` |

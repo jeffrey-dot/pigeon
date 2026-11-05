@@ -70,7 +70,7 @@ Rust 客户端走 `pigeon_core::api`。客户端不认识 `core` 的内部类型
   （`cargo build`/`cargo test` 在根上仍然只跑 `core`，macOS 不需要 GTK）。只依赖 `pigeon_core::api`
   （`default-features = false`）与 `docs/protocol.md`；不 import `PigeonApp`。
   网格走 `GtkGLArea` + OpenGL（ES 3 / 3.3 core 两套 shader 头），字体 `fontdb` + `swash`，
-  `unsafe` 只允许在 `clients/linux/src/render/gl.rs`（GL 加载与上传边界）。见 `docs/renderer.md`。
+  `unsafe` 只允许在 `clients/linux/src/render/gl.rs`（GL 加载与上传边界），由 crate 级 deny 和该模块的定点放行强制；拥有型 GL 资源与隔离测试见 `docs/linux-gl-resources.md`。
 
 ```
 pigeon/

@@ -300,7 +300,7 @@ M0–M1 可以直接复用现有代码：内核的对账语料（来自 tmux 阶
 | 多客户端尺寸设置 | 三种策略已有测试，但实现的 `SizeVote` 存在会话级，与协议的 pane 级契约有差异；macOS 默认 latest，缺策略选择 UI，Linux 未展示尺寸来源 |
 | 协议保留项与接口一致性 | `zstd` 尚未协商/实现；`new_session.env` 被宿主忽略，结构化 `mouse` 消息返回 unsupported（macOS 用 `keys` 发送编码后的鼠标字节）。`api::delta_of` 与 FFI 已统一，新增静态 import 检查 |
 | 安装控制与分发 | 远端安装层有 `allowInstall` 参数，但首次安装确认、`--no-remote-install` / `--remote-dir` 未接用户入口；macOS 缺 Developer ID 签名/公证，Linux GUI 无发布包。见 [update.md](update.md) |
-| 验收深度 | 未形成完整的 `vttest`/属性对账、fuzz、跨平台 GUI/IME/无障碍、16 pane 持续输出、弱网时延和功耗基线。8 条文本 golden 只覆盖基础场景；core 的 unsafe/生产 panic 已有编译 lint；平台依赖静态检查和 Linux unsafe 边界仍待补 |
+| 验收深度 | 未形成完整的 `vttest`/属性对账、fuzz、跨平台 GUI/IME/无障碍、16 pane 持续输出、弱网时延和功耗基线。8 条文本 golden 只覆盖基础场景；core 的 unsafe/生产 panic 已有编译 lint；Linux unsafe 边界也由编译器限制在 gl.rs，新增 Xvfb 真实资源回收检查；平台依赖静态检查仍待补 |
 | TERM/terminfo 后续 | 已修复继承外部 TERM：新 pane 固定 xterm-256color/truecolor，四种外部环境回归通过；专用 terminfo 随现代能力完善 |
 | 其它限制 | 无 OSC 7501 的会话不显示虚构活动时间；宿主状态不写盘（既定取舍）；`swift test` 需要完整 Xcode |
 
