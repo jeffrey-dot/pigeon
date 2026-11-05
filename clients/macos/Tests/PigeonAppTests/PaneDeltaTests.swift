@@ -1,3 +1,4 @@
+import AppKit
 import PigeonCore
 import XCTest
 @testable import PigeonApp
@@ -121,5 +122,30 @@ final class PaneDeltaTests: XCTestCase {
         XCTAssertFalse(apply("xyz", y: 2, to: view), "row outside the grid")
         XCTAssertEqual(text(view), "abcdef", "a refused frame leaves the screen alone")
         XCTAssertFalse(apply("xyz", y: 0, to: PaneView(frame: .zero)), "no snapshot yet")
+    }
+
+    func testSelectionCacheMatchesCoreAndExpiresWithTheGrid() {
+        let view = pane()
+        view.selectAll(nil)
+        XCTAssertEqual(view.selectedText, "abc\ndef")
+        XCTAssertEqual(view.selectionSpans(), [.init(row: 0, first: 0, last: 2), .init(row: 1, first: 0, last: 2)])
+        XCTAssertEqual(view.selectionSpans(), view.resolvedSelection.spans)
+        XCTAssertTrue(apply("xyz", y: 1, to: view))
+        XCTAssertFalse(view.selectionActive)
+        XCTAssertEqual(view.selectedText, "")
+        XCTAssertTrue(view.selectionSpans().isEmpty)
+        view.selectAll(nil)
+        XCTAssertEqual(view.selectedText, "abc\nxyz")
+    }
+
+    func testOptionDragUsesRectangleSelection() throws {
+        let view = pane()
+        let event = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseDown, location: .zero, modifierFlags: [.option], timestamp: 0,
+            windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 0))
+        view.beginSelection(with: event)
+        XCTAssertEqual(view.selection?.rectangle, true)
+        XCTAssertFalse(view.selectionActive)
+        XCTAssertEqual(view.resolvedSelection, .empty)
     }
 }

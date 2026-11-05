@@ -22,19 +22,22 @@ extension PaneView {
         case 3...: unit = .line
         default: unit = .cell
         }
-        selection = TerminalSelection(at: gridPoint(for: event), unit: unit)
+        selection = TerminalSelection(at: gridPoint(for: event), unit: unit,
+                                      rectangle: event.modifierFlags.contains(.option))
         // A plain click only places the anchor; nothing is selected until the pointer moves.
         selectionActive = unit != .cell
+        resolveSelection()
         screenChanged()
     }
 
     func extendSelection(with event: NSEvent) {
         guard var current = selection else { return }
         let point = gridPoint(for: event)
-        guard point != current.head || selectionActive else { return }
+        guard point != current.head else { return }
         current.head = point
         selection = current
         selectionActive = true
+        resolveSelection()
         screenChanged()
     }
 
@@ -42,25 +45,22 @@ extension PaneView {
         guard selection != nil else { return }
         selection = nil
         selectionActive = false
+        resolvedSelection = .empty
         screenChanged()
     }
 
     /// What the renderer highlights, one span per selected row.
     func selectionSpans() -> [SelectionSpan] {
-        guard selectionActive, let selection, cols > 0 else { return [] }
-        let (start, end) = selection.range(cells: cells, cols: cols)
-        guard start.row <= end.row else { return [] }
-        return (max(start.row, 0)...min(end.row, rows - 1)).map { row in
-            SelectionSpan(
-                row: row,
-                first: row == start.row ? start.column : 0,
-                last: row == end.row ? end.column : cols - 1)
-        }
+        selectionActive ? resolvedSelection.spans : []
     }
 
     var selectedText: String {
-        guard selectionActive, let selection else { return "" }
-        return selection.text(cells: cells, cols: cols, rows: rows)
+        selectionActive ? resolvedSelection.text : ""
+    }
+
+    func resolveSelection() {
+        guard selectionActive, let selection else { resolvedSelection = .empty; return }
+        resolvedSelection = selection.resolve(cells: cells, cols: cols, rows: rows)
     }
 
     @objc func copy(_ sender: Any?) {
@@ -82,6 +82,7 @@ extension PaneView {
         all.head = .init(row: rows - 1, column: cols - 1)
         selection = all
         selectionActive = true
+        resolveSelection()
         screenChanged()
     }
 

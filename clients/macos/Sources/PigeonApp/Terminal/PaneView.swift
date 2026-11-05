@@ -63,6 +63,7 @@ final class PaneView: NSView {
     /// The drag in progress or last made; `selectionActive` once it covers any text.
     var selection: TerminalSelection?
     var selectionActive = false
+    var resolvedSelection = SelectionGrid.Result.empty
     var searchFrozen = false
     var searchHighlight: [SelectionSpan] = []
     var linkTracking: NSTrackingArea?
@@ -250,6 +251,7 @@ final class PaneView: NSView {
     }
 
     func apply(snapshot: UnsafePointer<PgSnapshot>) {
+        clearSelection()
         searchHighlight = []
         let view = snapshot.pointee
         let links = TerminalLinks.read(view.links, count: view.link_count)
@@ -317,6 +319,7 @@ final class PaneView: NSView {
         let frame = delta.pointee
         let links = TerminalLinks.read(frame.links, count: frame.link_count)
         guard cols > 0, cells.count == cols * rows else { return false }
+        if frame.row_count > 0 { clearSelection() }
         if let changed = frame.rows {
             for index in 0..<Int(frame.row_count) {
                 let row = changed[index]

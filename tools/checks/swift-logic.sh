@@ -15,7 +15,7 @@ for file in TerminalCell TerminalSelection TerminalLinks TerminalLinkPress; do
     cp "$root/clients/macos/Sources/PigeonApp/Terminal/$file.swift" "$work/Sources/PigeonApp/"
 done
 cp "$root/clients/macos/Sources/PigeonApp/Terminal/Render/CellAttrs.swift" "$work/Sources/PigeonApp/"
-for file in SessionReducerTests SessionRefTests AgentRowTests HostConnectionTests SelectionTests SidebarTests StatusPersistenceTests StatusVisibilityTests StatusSnapshotTests TerminalLinksTests; do
+for file in SessionReducerTests SessionRefTests AgentRowTests HostConnectionTests SidebarTests StatusPersistenceTests StatusVisibilityTests StatusSnapshotTests TerminalLinksTests; do
     cp "$root/clients/macos/Tests/PigeonAppTests/$file.swift" "$work/Tests/PigeonAppTests/"
 done
 cat > "$work/Package.swift" <<'SWIFT'

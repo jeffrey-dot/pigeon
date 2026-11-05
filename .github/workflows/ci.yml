@@ -161,3 +161,4 @@ jobs:
       - if: steps.swiftpm.outputs.exists == 'true'
         run: swift test
       - run: tools/checks/swift-logic.sh
+      - run: tools/checks/swift-selection.sh

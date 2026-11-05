@@ -92,4 +92,46 @@ final class SelectionTests: XCTestCase {
         XCTAssertEqual(selection.text(cells: cells, cols: 4, rows: 1), "abc")
         XCTAssertEqual(TerminalSelection(at: point(0, 0)).text(cells: [], cols: 4, rows: 1), "")
     }
+
+    func testDragStartingOnWideContinuationIncludesTheWholeCharacter() {
+        var cells = grid(["a中e"], cols: 8)
+        cells[3].extraText = "e\u{301}"
+        var selection = TerminalSelection(at: point(0, 2))
+        selection.head = point(0, 3)
+        let result = selection.resolve(cells: cells, cols: 8, rows: 1)
+        XCTAssertEqual(result.text, "中e\u{301}")
+        XCTAssertEqual(result.spans, [SelectionSpan(row: 0, first: 1, last: 3)])
+    }
+
+    func testRectangleKeepsColumnsAndSpacesWithoutLinearWrapJoining() {
+        var cells = grid(["ab  ", "cd  "], cols: 4)
+        cells[3].attrs |= CellAttrs.wrap
+        var selection = TerminalSelection(at: point(0, 1), rectangle: true)
+        selection.head = point(1, 3)
+        let result = selection.resolve(cells: cells, cols: 4, rows: 2)
+        XCTAssertEqual(result.text, "b  \nd  ")
+        XCTAssertEqual(result.spans, [.init(row: 0, first: 1, last: 3), .init(row: 1, first: 1, last: 3)])
+    }
+
+    func testCopiedSelectionOutlivesTemporaryCellAndTextStorage() {
+        func selected() -> SelectionGrid.Result {
+            var cells = grid(["e"], cols: 4)
+            cells[0].extraText = "e\u{301}"
+            return TerminalSelection(at: point(0, 0)).resolve(cells: cells, cols: 4, rows: 1)
+        }
+        let result = selected()
+        XCTAssertEqual(result.text, "e\u{301}")
+        XCTAssertEqual(result.spans, [.init(row: 0, first: 0, last: 0)])
+    }
+
+    func testMalformedGeometryAndOversizedCellTextFailWithoutPartialCopy() {
+        let selection = TerminalSelection(at: point(Int.min, Int.min))
+        let cells = grid(["abc"], cols: 4)
+        for (cols, rows) in [(0, 1), (-1, 1), (4, -1), (Int.max, Int.max), (4, 2)] {
+            XCTAssertEqual(selection.resolve(cells: cells, cols: cols, rows: rows), .empty)
+        }
+        var oversized = cells
+        oversized[0].extraText = String(repeating: "x", count: 4097)
+        XCTAssertEqual(selection.resolve(cells: oversized, cols: 4, rows: 1), .empty)
+    }
 }
