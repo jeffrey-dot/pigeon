@@ -2,7 +2,7 @@
 
 GTK4 客户端，与 `clients/macos/` 对位。**Rust + `gtk4-rs`**，网格走 `GtkGLArea` + OpenGL ES 3 / 3.3 core。
 
-**2026-11-05 更新**：首片可运行，但尚不具备 macOS 的完整日常操作与远端管理能力；当前缺口见下文。
+**2026-11-05 更新**：已接本地多会话、GTK 原生侧栏和逐条状态确认；仍不具备 macOS 的完整日常操作与远端管理能力；当前缺口见下文。
 
 只依赖 `pigeon_core::api`（`default-features = false`）；不 import `PigeonApp`，不进 `core/`。
 渲染形状见 [docs/renderer.md](../../docs/renderer.md)，选型理由见
@@ -11,32 +11,48 @@ GTK4 客户端，与 `clients/macos/` 对位。**Rust + `gtk4-rs`**，网格走 
 
 ```sh
 cargo build -p pigeon-linux                  # 从仓库根（或 cd clients/linux && cargo build）
-cargo run   -p pigeon-linux                  # 自动拉起本机 pigeon-server 并接上第一个 pane
+cargo run   -p pigeon-linux                  # 自动拉起本机 pigeon-server，列出会话并附加选中会话
 PIGEON_FRAME_STATS=1 cargo run -p pigeon-linux   # 打印 GL 版本与每秒帧统计
 PIGEON_FONT="Fira Code" cargo run -p pigeon-linux  # 换字体（默认按固定名单挑）
-cargo test -p pigeon-linux                   # 纯逻辑单测（按键编码 / 调色板 / 实例布局）
+cargo test -p pigeon-linux                   # 纯逻辑单测（会话路由 / 状态集合 / 按键 / 回看 / 渲染）
 ```
 
 环境变量：`PIGEON_SERVER` 指定 `pigeon-server` 路径；`PIGEON_FONT` 指定字体族；
 `PIGEON_FRAME_STATS=1` 打开帧统计；`PIGEON_FONT_DEBUG=1` 打印选中的字体。
 
-快捷键（窗口级，先于 shell 生效）：`Ctrl+Shift+D` 左右分屏 · `Ctrl+Shift+E` 上下分屏 ·
+会话操作：顶部 **New Session** 在选中会话目录新建，**Close Session…** 确认后关闭该会话的全部 panes；
+点击侧栏会话恢复终端焦点。`Ctrl+Shift+T` 新建，`Ctrl+Shift+[` / `]` 循环切换，
+`Ctrl+Shift+B` 隐藏/显示侧栏，`Ctrl+Shift+J` 循环选择 needs-you 会话并打开记录查看器。
+首次空宿主自动建会话；关闭最后一个会话后保留空窗口，可用 New Session 再建。关闭窗口不关闭宿主/PTY。
+
+快捷键（终端焦点下，先于 shell 生效）：`Ctrl+Shift+D` 左右分屏 · `Ctrl+Shift+E` 上下分屏 ·
 `Ctrl+Shift+W` 关闭焦点 pane · `Ctrl+Shift+Z` 放大/还原 · `Ctrl+Shift+C` 复制焦点 pane 当前可见屏幕（含回看屏幕） · `Ctrl+Shift+V` 粘贴。
 
 回看快捷键：`Shift+PageUp/PageDown` 翻页（回看中裸 `PageUp/PageDown` 也翻页）；`Shift+Home` 到最旧历史、
 `Shift+End` 或 “Return to live” 按钮回实时屏。裸 PageUp/PageDown 在实时屏上仍发给程序；Ctrl/Alt 修饰不触发回看。
 滚轮每档三行，触控板按行高累积；操作焦点 pane。备用屏不回看，PageUp/PageDown 发给程序，
 滚轮仅在 `?1007` 开启且没有鼠标上报模式时发送方向键。鼠标协议上报仍未实现。
-输入（含 IME preedit 开始）、有效粘贴或 resize/zoom 改变网格尺寸时回实时屏；切 pane 保留各自回看位置。
+输入（含 IME preedit 开始）、有效粘贴或 resize/zoom 改变网格尺寸时回实时屏；切 pane 保留各自回看位置；**切会话明确请求回实时屏**，同时取消 preedit 和待完成粘贴。
 
-**已实现**：连接/自动拉起宿主、握手、每个 pane 一次 `attach`、一个 GLArea 画所有 pane（含分割线与 zoom）、
+**已实现**：连接/自动拉起宿主、握手、仅为选中会话 `attach`（切回时重新建立布局订阅）、一个 GLArea 画所有 pane（含分割线与 zoom）、
 整屏网格渲染（背景/字形/下划线/删除线/反色/暗色/
 光标三种形状）、R8 掩码图集 + RGBA 彩色图集（emoji）、CJK/全角/符号 fallback、制表符与方块元素
 用矩形画（不接缝）、宽字符居中、xterm legacy 按键编码（含 DECCKM）、窗口缩放 → `resize_pane` → PTY 尺寸；协议 delta 更新（核心导出格宽，校验 seq/网格后原子应用，缺序重新 attach）。
 
 **输入与剪贴板**：GtkIMMulticontext preedit/commit 与候选窗定位；异步剪贴板粘贴经宿主包装括号粘贴，切换 pane/失焦取消待完成粘贴。复制仅包含当前 pane 屏幕，保留附加码点和软换行，不含可见屏幕之外的历史或选择。
 
-**未做**：侧栏与会话选择、SSH 连接管理、自动断线恢复、拖动分隔线改比例、拖选/选择复制、
+**本地侧栏与状态**：按本地 git 根/cwd 分组、列出所有会话、紧急度排序、未读记录数、needs-you 会话计数及尺寸来源。
+无 OSC 7501 报告时不给状态或虚构活动时间。hello 请求 `status_all` + `status_snapshot`，仅按协商路径读取；
+后台状态观察不 attach 未访问 pane，不为它们投尺寸票。已访问会话受现协议无 detach 的限制仍留有屏幕订阅/尺寸票，
+客户端只 resize 当前画面。完整集合按本连接、宿主 instance 和 pane 的 revision 原子替换。
+
+**Status Records…** 可逐条查看 pane、id、state、app、kind、完整纯文本 msg；选择记录会聚焦来源 pane并解除隐藏它的 zoom，
+不会自动退出回看。仅 done/error 可点 **Mark This Record as Read**；确认要求当前连接屏幕已绘制、目标 pane 可见且实时、窗口前台。
+后台/隐藏/回看不确认，working/blocked/idle 不 ack。切会话、断线、记录被替换/clear 后旧确认目标失效。
+旧宿主仅显示实际发来的单条报告，保留已收到的旧终态；每 pane 最多保存 256 条，不保证发现旧宿主未发送的记录。
+无跨客户端重启 seen 持久化、无 SSH、无自动断线恢复。详见 [侧栏验证记录](../../docs/linux-sidebar-progress.md)。
+
+**未做**：SSH 连接管理、自动断线恢复、拖动分隔线改比例、拖选/选择复制、
 鼠标/焦点上报、Kitty keyboard protocol、渲染脏行增量、DMABUF、emoji ZWJ 序列整形。
 GTK 客户端已有 Ubuntu CI 作业（构建/clippy/逻辑测试），尚无 GUI 发布产物。输入切片通过独立 Xvfb + fcitx5 拼音验收；Wayland、IBus、日文 IME、非美式键盘和混合 DPI 仍未验。见 [输入验证记录](../../docs/linux-input-progress.md)。
 

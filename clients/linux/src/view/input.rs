@@ -12,12 +12,13 @@ const SPLIT_RATIO: f32 = 0.5;
 impl Workspace {
     pub(super) fn update_input(&self) {
         let pane = self.focus().filter(|pane| {
-            self.panes
+            self.model
+                .panes
                 .get(pane)
                 .is_some_and(|screen| screen.exited.is_none())
         });
         self.input.set_target(pane);
-        let Some(screen) = pane.and_then(|pane| self.panes.get(&pane)) else {
+        let Some(screen) = pane.and_then(|pane| self.model.panes.get(&pane)) else {
             return;
         };
         let Some(metrics) = self.renderer.as_ref().map(Renderer::metrics) else {
@@ -51,6 +52,9 @@ impl Workspace {
     pub fn send_input(&mut self, message: Message) {
         match &message {
             Message::Keys { pane_id, .. } | Message::Paste { pane_id, .. } => {
+                if self.model.input_pane() != Some(*pane_id) {
+                    return;
+                }
                 self.return_live(*pane_id)
             }
             _ => return,
@@ -60,7 +64,7 @@ impl Workspace {
 
     pub fn copy_screen(&self) -> Option<String> {
         self.focus()
-            .and_then(|pane| self.panes.get(&pane))
+            .and_then(|pane| self.model.panes.get(&pane))
             .map(Screen::visible_text)
     }
 
@@ -68,8 +72,7 @@ impl Workspace {
         let Some(pane) = self.focus() else {
             return;
         };
-        self.request += 1;
-        let id = self.request;
+        let id = self.model.request_id();
         let message = match action {
             Action::SplitVertical | Action::SplitHorizontal => Message::SplitPane {
                 id,
@@ -82,7 +85,7 @@ impl Workspace {
                 ratio: SPLIT_RATIO,
             },
             Action::Close => Message::ClosePane { id, pane_id: pane },
-            Action::Zoom if self.zoom == Some(pane) => Message::Unzoom { id, pane_id: pane },
+            Action::Zoom if self.model.zoom == Some(pane) => Message::Unzoom { id, pane_id: pane },
             Action::Zoom => Message::ZoomPane { id, pane_id: pane },
             Action::CopyScreen | Action::Paste => return,
         };
@@ -100,6 +103,7 @@ impl Workspace {
             return glib::Propagation::Proceed;
         };
         let Some(screen) = self
+            .model
             .panes
             .get(&pane)
             .filter(|screen| screen.exited.is_none())

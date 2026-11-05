@@ -13,15 +13,17 @@ use std::rc::Rc;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk4 as gtk;
-use pigeon_core::api::{layout_focus, layout_rects, layout_splits, Message, PaneId, Rect, Split};
+use pigeon_core::api::{Message, PaneId};
 
 use crate::host::HostLink;
 use crate::input_context::InputContext;
 use crate::placement::place;
 use crate::render::{self, GridMetrics, PaneFrame, Renderer};
-use crate::screen::Screen;
+use crate::session_model::SessionModel;
+use crate::sidebar::SidebarModel;
 
 mod input;
+mod protocol;
 mod scroll;
 
 pub struct Workspace {
@@ -29,18 +31,14 @@ pub struct Workspace {
     pub root: gtk::Overlay,
     pub input: Rc<InputContext>,
     host: HostLink,
-    panes: HashMap<PaneId, Screen>,
-    /// `layout` came through normalized (0…1) and in tree order.
-    layout: Vec<(PaneId, Rect)>,
-    /// Dividers between panes, for hit-testing later and for the visible seam now.
-    splits: Vec<Split>,
-    zoom: Option<PaneId>,
-    focus: Option<PaneId>,
+    pub model: SessionModel,
+    pub status: SidebarModel,
+    pub sizes: HashMap<PaneId, (String, u8)>,
+    presented: std::collections::HashSet<PaneId>,
     scale: f32,
     renderer: Option<Renderer>,
     /// The size each pane was last told, so a resize storm sends one message per change.
     sized: HashMap<PaneId, (u16, u16)>,
-    request: u32,
     reported_failure: bool,
     wheel: crate::scroll_input::Wheel,
     wheel_target: Option<(PaneId, bool)>,
@@ -50,7 +48,7 @@ pub struct Workspace {
 }
 
 impl Workspace {
-    pub fn new(first: Screen, host: HostLink, scale: f32) -> Rc<RefCell<Self>> {
+    pub fn new(hello: &Message, host: HostLink, scale: f32) -> Rc<RefCell<Self>> {
         let area = gtk::GLArea::new();
         // 3.0 is the floor for instanced draws on both GLES and desktop GL as GDK hands them
         // out; the shader dialect follows whatever context we actually get (`gl::Dialect`).
@@ -86,22 +84,33 @@ impl Workspace {
         scroll_bar.set_can_target(false);
         root.add_overlay(&scroll_bar);
         root.add_overlay(&scroll_controls);
-        input.set_target(Some(first.pane_id));
-        let focus = Some(first.pane_id);
+        let mut status = SidebarModel::default();
+        if let Message::HelloAck {
+            host_id,
+            instance,
+            features,
+            ..
+        } = hello
+        {
+            status.begin_connection(
+                host_id,
+                instance.as_deref(),
+                features.iter().any(|f| f == "status_snapshot"),
+            );
+        }
+        let model = SessionModel::new(host.scrollback());
         let workspace = Rc::new(RefCell::new(Self {
             area: area.clone(),
             root,
             input,
             host,
-            panes: HashMap::from([(first.pane_id, first)]),
-            layout: Vec::new(),
-            splits: Vec::new(),
-            zoom: None,
-            focus,
+            model,
+            status,
+            sizes: HashMap::new(),
+            presented: Default::default(),
             scale,
             renderer: None,
             sized: HashMap::new(),
-            request: 10,
             reported_failure: false,
             wheel: Default::default(),
             wheel_target: None,
@@ -142,125 +151,20 @@ impl Workspace {
         workspace
     }
 
-    /// The pane the keyboard goes to.
+    /// Only the selected session's established layout can receive input.
     pub fn focus(&self) -> Option<PaneId> {
-        match self.focus {
-            Some(pane) => self.panes.contains_key(&pane).then_some(pane),
-            None => self.panes.keys().copied().min(),
-        }
-    }
-
-    /// Applies one host message; `false` means "attach again" for the pane it named.
-    pub fn apply(&mut self, message: &Message) -> bool {
-        let applied = match message {
-            Message::Layout { .. } => {
-                self.adopt_layout(message);
-                true
-            }
-            Message::Snapshot { pane_id, .. } => {
-                let applied = if let Some(screen) = self.panes.get_mut(pane_id) {
-                    screen.apply_snapshot(message)
-                } else if let Some(screen) = Screen::from_message(message) {
-                    // A late reply from a closed pane must not resurrect its input target.
-                    if self.layout.iter().any(|(id, _)| id == pane_id) {
-                        self.panes.insert(*pane_id, screen);
-                    }
-                    true
-                } else {
-                    false
-                };
-                self.area.queue_render();
-                applied
-            }
-            Message::SizeState {
-                pane_id,
-                cols,
-                rows,
-                ..
-            } => {
-                if self.panes.get(pane_id).is_some_and(|screen| {
-                    screen.cols() != usize::from(*cols) || screen.rows() != usize::from(*rows)
-                }) {
-                    self.return_live(*pane_id);
-                }
-                true
-            }
-            Message::PaneExited { pane_id, code } => {
-                if let Some(screen) = self.panes.get_mut(pane_id) {
-                    screen.exited = Some(*code);
-                    self.area.queue_render();
-                }
-                true
-            }
-            Message::Delta { pane_id, .. } => {
-                let applied = self
-                    .panes
-                    .get_mut(pane_id)
-                    .is_some_and(|screen| screen.apply_delta(message));
-                if applied {
-                    self.area.queue_render();
-                } else {
-                    self.attach(*pane_id);
-                }
-                true
-            }
-            _ => true,
-        };
-        self.update_input();
-        self.update_scroll();
-        applied
-    }
-
-    /// Asks the host for a pane's screen. Called for every leaf of a new layout, so a split
-    /// (`Ctrl+Shift+D`) only needs the `layout` message to appear.
-    fn attach(&mut self, pane_id: PaneId) {
-        self.return_live(pane_id);
-        self.request += 1;
-        self.host.send(Message::Attach {
-            id: self.request,
-            pane_id,
-            size_policy: None,
-            history: Some(false),
-            since: None,
-        });
-    }
-
-    fn adopt_layout(&mut self, message: &Message) {
-        let old_focus = self.focus;
-        if let Ok(rects) = layout_rects(message) {
-            self.layout = rects;
-        }
-        if let Ok(splits) = layout_splits(message) {
-            self.splits = splits;
-        }
-        if let Ok(Some(focus)) = layout_focus(message) {
-            self.focus = Some(focus);
-        } else if self.focus.is_none() {
-            self.focus = self.layout.first().map(|(pane, _)| *pane);
-        }
-        if old_focus != self.focus {
-            self.wheel.reset();
-        }
-        self.zoom = match message {
-            Message::Layout { zoom, .. } => *zoom,
-            _ => None,
-        };
-        self.panes
-            .retain(|pane, _| self.layout.iter().any(|(id, _)| id == pane));
-        for (pane_id, _) in self.layout.clone() {
-            if !self.panes.contains_key(&pane_id) {
-                self.attach(pane_id);
-            }
-        }
-        self.area.queue_render();
+        self.model.focused_pane()
     }
 
     /// The panes to draw and where, in device pixels. A zoomed pane takes the whole area.
     fn frames(&self, width: i32, height: i32) -> Vec<(PaneId, [f32; 2], [f32; 2])> {
-        let known: Vec<PaneId> = self.panes.keys().copied().collect();
+        if self.model.layout.is_empty() {
+            return Vec::new();
+        }
+        let known: Vec<PaneId> = self.model.panes.keys().copied().collect();
         place(
-            &self.layout,
-            self.zoom,
+            &self.model.layout,
+            self.model.zoom,
             [width as f32, height as f32],
             &known,
         )
@@ -307,7 +211,7 @@ impl Workspace {
         let panes: Vec<PaneFrame> = ordered
             .iter()
             .filter_map(|(pane, origin, size)| {
-                self.panes.get(pane).map(|screen| PaneFrame {
+                self.model.panes.get(pane).map(|screen| PaneFrame {
                     origin: *origin,
                     size: *size,
                     screen,
@@ -318,17 +222,20 @@ impl Workspace {
         let dividers = self.dividers(width, height);
         if let Some(renderer) = self.renderer.as_mut() {
             renderer.draw(&panes, &dividers, width, height);
+            self.presented
+                .extend(ordered.iter().map(|(pane, _, _)| *pane));
         }
     }
 
     /// One line per split, in device pixels: without it two panes of the same background
     /// look like one wide one.
     fn dividers(&self, width: i32, height: i32) -> Vec<[f32; 4]> {
-        if self.zoom.is_some() {
+        if self.model.zoom.is_some() {
             return Vec::new();
         }
         let canvas = [width as f32, height as f32];
-        self.splits
+        self.model
+            .splits
             .iter()
             .map(|split| {
                 let x = split.rect.x * canvas[0];
@@ -380,9 +287,9 @@ impl Workspace {
             })
             .map(|(pane, _, _)| pane);
         if let Some(pane) = hit {
-            if self.focus != Some(pane) {
+            if self.model.focus != Some(pane) {
                 self.wheel.reset();
-                self.focus = Some(pane);
+                self.model.focus = Some(pane);
                 self.host.send(Message::Focus { pane_id: pane });
                 self.area.queue_render();
             }

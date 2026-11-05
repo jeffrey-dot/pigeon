@@ -12,9 +12,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use async_channel::{Receiver, Sender};
-use pigeon_core::api::{decode_frame, encode_frame, Message, PaneId, PROTO_VERSION};
-
-use crate::screen::Screen;
+use pigeon_core::api::{decode_frame, encode_frame, Message, PROTO_VERSION};
 
 const CLIENT_NAME: &str = concat!("pigeon-linux ", env!("CARGO_PKG_VERSION"));
 
@@ -101,11 +99,12 @@ impl HostLink {
             let _ = writer.flush();
         });
 
+        let writer_tx = tx.clone();
         let mut reader = stream;
         thread::spawn(move || {
             let mut buffer = Vec::with_capacity(64 * 1024);
             let mut chunk = [0u8; 16 * 1024];
-            loop {
+            'read: loop {
                 match reader.read(&mut chunk) {
                     Ok(0) => break,
                     Ok(read) => {
@@ -115,13 +114,13 @@ impl HostLink {
                                 Ok(Some((message, used))) => {
                                     buffer.drain(..used);
                                     if reader_tx.send_blocking(message).is_err() {
-                                        return;
+                                        break 'read;
                                     }
                                 }
                                 Ok(None) => break,
                                 Err(error) => {
                                     eprintln!("pigeon: bad frame: {error}");
-                                    return;
+                                    break 'read;
                                 }
                             }
                         }
@@ -132,6 +131,8 @@ impl HostLink {
                     }
                 }
             }
+            writer_tx.close();
+            let _ = reader.shutdown(std::net::Shutdown::Both);
         });
 
         Self {
@@ -142,98 +143,35 @@ impl HostLink {
     }
 }
 
-/// `hello` → (`sessions` or a new session) → `attach`, ending with the pane's first screen.
-///
-/// Runs before the GTK loop starts, so a failure can be reported on the terminal instead of
-/// leaving an empty window behind.
-pub fn handshake(link: &HostLink) -> Result<Screen, String> {
+/// Only consumes hello_ack. Sessions, status and screens stay in order for the UI reducer.
+pub fn handshake(link: &HostLink) -> Result<Message, String> {
     link.send(Message::Hello {
         proto: PROTO_VERSION,
         client: CLIENT_NAME.to_owned(),
-        // Both snapshots and deltas use the core's safe cell conversion.
-        features: vec!["delta".to_owned(), "scrollback".to_owned()],
+        features: ["delta", "scrollback", "status_all", "status_snapshot"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
     });
-    loop {
-        match link.recv().ok_or("host closed during the handshake")? {
-            Message::HelloAck {
-                proto,
-                server,
-                features,
-                ..
-            } => {
+    match link.recv().ok_or("host closed during the handshake")? {
+        message @ Message::HelloAck { .. } => {
+            if let Message::HelloAck {
+                proto, features, ..
+            } = &message
+            {
                 if proto >> 8 != PROTO_VERSION >> 8 {
-                    return Err(format!("host speaks {proto:#06x}: {server}"));
+                    return Err(format!("host speaks {proto:#06x}"));
                 }
                 link.scrollback.store(
-                    features.iter().any(|feature| feature == "scrollback"),
+                    features.iter().any(|f| f == "scrollback"),
                     std::sync::atomic::Ordering::Relaxed,
                 );
-                break;
             }
-            Message::HelloError { reason, detail, .. } => {
-                return Err(format!("host refused the handshake: {reason} ({detail})"))
-            }
-            Message::Error { code, detail, .. } => return Err(format!("{code}: {detail}")),
-            _ => {}
+            link.keep_alive();
+            Ok(message)
         }
-    }
-
-    link.keep_alive();
-    link.send(Message::Sessions { items: Vec::new() });
-    let existing = loop {
-        match link.recv().ok_or("host closed before sending sessions")? {
-            Message::Sessions { items } => {
-                break items.first().and_then(|session| {
-                    session
-                        .active_pane
-                        .or_else(|| session.panes.first().copied())
-                });
-            }
-            Message::Error { code, detail, .. } => return Err(format!("{code}: {detail}")),
-            _ => {}
-        }
-    };
-
-    let pane_id = match existing {
-        Some(pane_id) => pane_id,
-        None => new_session(link)?,
-    };
-    attach(link, pane_id)
-}
-
-fn new_session(link: &HostLink) -> Result<PaneId, String> {
-    link.send(Message::NewSession {
-        id: 1,
-        cwd: None,
-        shell: None,
-        env: None,
-    });
-    loop {
-        match link.recv().ok_or("host closed before creating a session")? {
-            Message::Created { pane_id, .. } => return Ok(pane_id),
-            Message::Error { code, detail, .. } => return Err(format!("{code}: {detail}")),
-            _ => {}
-        }
-    }
-}
-
-fn attach(link: &HostLink, pane_id: PaneId) -> Result<Screen, String> {
-    link.send(Message::Attach {
-        id: 2,
-        pane_id,
-        size_policy: None,
-        // Scrolling requests one host slice; attach never transfers the entire history.
-        history: Some(false),
-        since: None,
-    });
-    loop {
-        let message = link.recv().ok_or("host closed before the first snapshot")?;
-        if let Message::Error { code, detail, .. } = &message {
-            return Err(format!("{code}: {detail}"));
-        }
-        if let Some(screen) = Screen::from_message(&message) {
-            return Ok(screen);
-        }
+        Message::HelloError { reason, detail } => Err(format!("host refused: {reason} ({detail})")),
+        other => Err(format!("expected hello_ack, got {}", other.name())),
     }
 }
 

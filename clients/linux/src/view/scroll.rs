@@ -14,7 +14,7 @@ impl Workspace {
         if !self.host.scrollback() {
             return;
         }
-        let Some(screen) = self.panes.get_mut(&pane) else {
+        let Some(screen) = self.model.panes.get_mut(&pane) else {
             return;
         };
         if screen.snapshot.alt && offset != 0 {
@@ -41,7 +41,7 @@ impl Workspace {
         let Some(pane) = self.focus() else {
             return false;
         };
-        let Some(screen) = self.panes.get(&pane) else {
+        let Some(screen) = self.model.panes.get(&pane) else {
             return false;
         };
         let Some(offset) = scroll_input::page(
@@ -76,7 +76,7 @@ impl Workspace {
         let Some(pane) = self.focus() else {
             return glib::Propagation::Proceed;
         };
-        let Some(screen) = self.panes.get(&pane) else {
+        let Some(screen) = self.model.panes.get(&pane) else {
             return glib::Propagation::Proceed;
         };
         let alt = screen.snapshot.alt;
@@ -125,7 +125,7 @@ impl Workspace {
     pub(super) fn update_scroll(&self) {
         let scroll = self
             .focus()
-            .and_then(|pane| self.panes.get(&pane))
+            .and_then(|pane| self.model.panes.get(&pane))
             .map(|screen| &screen.scroll);
         let active = self.host.scrollback() && scroll.is_some_and(|scroll| scroll.active());
         self.scroll_controls.set_visible(active);
@@ -190,7 +190,7 @@ pub fn install(workspace: &Rc<RefCell<Workspace>>, bottom: &gtk::Button) {
                 return;
             }
             for (pane, origin, size) in workspace.frames(width, height) {
-                let Some(screen) = workspace.panes.get(&pane) else {
+                let Some(screen) = workspace.model.panes.get(&pane) else {
                     continue;
                 };
                 let scroll = &screen.scroll;
