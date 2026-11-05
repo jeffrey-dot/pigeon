@@ -8,7 +8,9 @@ pub(crate) fn query(term: &dyn Term, info: TextInfo, query: &TextQuery) -> PgRes
     query.validate()?;
     let generation = match query {
         TextQuery::Info => return Ok(TextResult::Info { info }),
-        TextQuery::Search { generation, .. } | TextQuery::Range { generation, .. } => *generation,
+        TextQuery::Search { generation, .. }
+        | TextQuery::Range { generation, .. }
+        | TextQuery::Viewport { generation, .. } => *generation,
     };
     if generation != 0 && generation != info.generation {
         return Err(PgError::StaleText);
@@ -22,11 +24,12 @@ pub(crate) fn query(term: &dyn Term, info: TextInfo, query: &TextQuery) -> PgRes
             ..
         } => search(term, info, pattern, *case_sensitive, *max_results, *start),
         TextQuery::Range { range, .. } => extract(term, info, *range),
+        TextQuery::Viewport { .. } => Err(PgError::Unsupported),
         TextQuery::Info => Ok(TextResult::Info { info }),
     }
 }
 
-fn valid(term: &dyn Term, info: TextInfo, point: TextPoint) -> PgResult<()> {
+pub(crate) fn valid(term: &dyn Term, info: TextInfo, point: TextPoint) -> PgResult<()> {
     if point.row < info.first_row || point.row > info.last_row || point.col > info.cols {
         return Err(PgError::InvalidArg);
     }

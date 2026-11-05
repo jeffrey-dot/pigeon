@@ -157,3 +157,40 @@ fn text_result_from_wire_survives_message_free_and_rejects_wrong_type() {
     assert!(info.has_next);
     pg_text_result_free(handle);
 }
+
+#[test]
+fn viewport_snapshot_is_owned_and_wrong_kind_is_rejected() {
+    let core = pg_core_new(ptr::null());
+    let pane = pg_pane_new(core, ptr::null());
+    assert!(pg_pane_feed(core, pane, b"hello".as_ptr(), 5));
+    let mut query = request("hello");
+    let result = pg_text_query(core, pane, &query);
+    assert!(pg_text_result_snapshot(result).is_null());
+    let mut info: PgTextResultInfo = unsafe { zeroed() };
+    info.size = size_of::<PgTextResultInfo>() as u32;
+    assert!(pg_text_result_info(result, &mut info));
+    query.range.size = size_of::<PgTextRange>() as u32;
+    assert!(pg_text_result_hit(result, 0, &mut query.range));
+    query.kind = 3;
+    query.generation = info.generation;
+    pg_text_result_free(result);
+    let result = pg_text_query(core, pane, &query);
+    let snapshot = pg_text_result_snapshot(result);
+    assert!(!snapshot.is_null());
+    let mut viewport: PgTextViewportInfo = unsafe { zeroed() };
+    viewport.size = size_of::<PgTextViewportInfo>() as u32;
+    assert!(pg_text_result_viewport(result, &mut viewport));
+    assert_eq!(viewport.offset, 0);
+    assert_eq!(viewport.history_len, 0);
+    viewport.size = 4;
+    assert!(!pg_text_result_viewport(result, &mut viewport));
+    pg_text_result_free(result);
+    pg_core_free(core);
+    assert_eq!(unsafe { (*snapshot).history_count }, 0);
+    assert_eq!(
+        unsafe { (*(*snapshot).screen).cells.read().codepoint },
+        'h' as u32
+    );
+    pg_snapshot_free(snapshot);
+    assert!(pg_text_result_snapshot(ptr::null()).is_null());
+}

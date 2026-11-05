@@ -219,3 +219,54 @@ fn text_query_real_pty_history_eviction_expires_the_old_range() {
     client.send(&Message::Ping { ts: 82 });
     client.wait_for(|message| matches!(message, Message::Pong { ts: 82 }));
 }
+
+#[test]
+fn viewport_real_pty_is_negotiated_atomic_and_does_not_change_other_views() {
+    let _serial = one_at_a_time();
+    let fixture = script("#!/bin/sh\nstty -echo\nprintf 'OLD_TOKEN\\r\\n'\ni=0; while [ $i -lt 40 ]; do printf 'line %s\\r\\n' \"$i\"; i=$((i+1)); done\nprintf 'READY\\r\\n'\nexec env PS1= /bin/sh -i\n");
+    let host = start_host_with(fixture.to_str().unwrap());
+    let mut client = Client::connect(&host.socket);
+    hello_with(&mut client, &["text_query", "text_viewport"]);
+    let pane = attach_first(&mut client);
+    wait_for_pane_text(&mut client, pane, "READY");
+    let TextResult::Search { info, hits, .. } =
+        result(query(&mut client, pane, search("OLD_TOKEN")))
+    else {
+        panic!()
+    };
+    let request = TextQuery::Viewport {
+        generation: info.generation,
+        range: hits[0],
+    };
+    let located = result(query(&mut client, pane, request.clone()));
+    let picture = pigeon_core::api::text_viewport_snapshot(&located).unwrap();
+    assert!(picture.history.is_empty());
+    assert_eq!(picture.screen[0][0].codepoint, 'O' as u32);
+    let mut legacy = Client::connect(&host.socket);
+    hello_with(&mut legacy, &["text_query"]);
+    assert!(
+        matches!(query(&mut legacy, pane, request.clone()), Message::Error { id: Some(81), code, .. } if code == "unsupported")
+    );
+    // A location reads a picture, never changes another connection's scroll position.
+    legacy.send(&Message::Scroll {
+        pane_id: pane,
+        offset: 0,
+    });
+    legacy.wait_for(|m| {
+        matches!(
+            m,
+            Message::Snapshot {
+                offset: Some(0),
+                ..
+            }
+        )
+    });
+    client.send(&Message::Keys {
+        pane_id: pane,
+        bytes: b"printf 'CHANGED\\n'\n".to_vec(),
+    });
+    wait_for_pane_text(&mut client, pane, "CHANGED");
+    assert!(
+        matches!(query(&mut client, pane, request), Message::Error { id: Some(81), code, .. } if code == "stale_text")
+    );
+}

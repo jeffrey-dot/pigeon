@@ -17,6 +17,7 @@ const SERVER_FEATURES: &[&str] = &[
     "status_all",
     "status_snapshot",
     "text_query",
+    "text_viewport",
 ];
 
 /// Protocol §3.1: a connection that has not said `hello` by then is dropped.
@@ -61,6 +62,7 @@ pub fn hello(proto: u16, features: &[String], state: &mut ClientState) -> Messag
         .map(|feature| (*feature).to_owned())
         .collect();
     state.delta_ok = offered.iter().any(|f| f == "delta");
+    state.text_viewport = offered.iter().any(|f| f == "text_viewport");
     state.text_query = offered.iter().any(|f| f == "text_query");
     state.status_snapshot = offered.iter().any(|f| f == "status_snapshot");
     state.status_all = offered.iter().any(|f| f == "status_all");

@@ -336,9 +336,11 @@ typedef struct PgTextRange {
 } PgTextRange;
 
 /**
- * kind: 0 info, 1 literal search, 2 range. Search generation=0 starts fresh.
+ * kind: 0 info, 1 literal search, 2 range, 3 viewport. Search generation=0 starts fresh.
  * case_sensitive=false folds ASCII only. start_set uses range.start as a search
- * continuation. Range queries use both endpoints. Unused fields are ignored.
+ * continuation. Range and viewport queries use both endpoints and nonzero generation.
+ * Viewport requires text_query + text_viewport capabilities on the wire.
+ * Unused fields are ignored.
  */
 typedef struct PgTextQuery {
     uint32_t size;
@@ -356,7 +358,7 @@ typedef struct PgTextResultInfo {
     uint32_t size;
     uint32_t version;
     /**
-     * 0 info, 1 search, 2 range.
+     * 0 info, 1 search, 2 range, 3 viewport.
      */
     uint32_t kind;
     /**
@@ -378,6 +380,17 @@ typedef struct PgTextResultInfo {
     uint16_t next_col;
     uint16_t next_byte;
 } PgTextResultInfo;
+
+/**
+ * Metadata for the exact picture returned by pg_text_result_snapshot.
+ */
+typedef struct PgTextViewportInfo {
+    uint32_t size;
+    uint32_t version;
+    uint32_t offset;
+    uint32_t history_len;
+    uint32_t modes;
+} PgTextViewportInfo;
 
 typedef struct PgStatus {
     uint32_t size;
@@ -648,6 +661,14 @@ bool pg_text_result_hit(const PgTextResult *result, size_t index, struct PgTextR
 bool pg_text_result_text(const PgTextResult *result, struct PgStr *out);
 
 void pg_text_result_free(PgTextResult *result);
+
+/**
+ * Owns one viewport picture; free with pg_snapshot_free. Its row zero is
+ * range.start_row.min(0). Never apply live deltas to this immutable picture.
+ */
+struct PgSnapshot *pg_text_result_snapshot(const PgTextResult *result);
+
+bool pg_text_result_viewport(const PgTextResult *result, struct PgTextViewportInfo *out);
 
 /**
  * Legacy count of all stored records in the focused pane, including acked records.

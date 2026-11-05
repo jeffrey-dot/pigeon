@@ -8,7 +8,7 @@ pub mod alacritty;
 pub mod frozen;
 pub mod text_query;
 mod text_scan;
-pub(crate) use text_scan::query as query_text;
+pub(crate) use text_scan::{query as query_text, valid as valid_text_point};
 pub(crate) mod history_budget;
 pub mod sync_timeout;
 pub(crate) mod hyperlink;

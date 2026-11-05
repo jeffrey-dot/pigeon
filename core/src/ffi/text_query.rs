@@ -15,9 +15,11 @@ pub struct PgTextRange {
     pub end_byte: u16,
 }
 
-/// kind: 0 info, 1 literal search, 2 range. Search generation=0 starts fresh.
+/// kind: 0 info, 1 literal search, 2 range, 3 viewport. Search generation=0 starts fresh.
 /// case_sensitive=false folds ASCII only. start_set uses range.start as a search
-/// continuation. Range queries use both endpoints. Unused fields are ignored.
+/// continuation. Range and viewport queries use both endpoints and nonzero generation.
+/// Viewport requires text_query + text_viewport capabilities on the wire.
+/// Unused fields are ignored.
 #[repr(C)]
 pub struct PgTextQuery {
     pub size: u32,
@@ -42,7 +44,7 @@ pub struct PgTextResult {
 pub struct PgTextResultInfo {
     pub size: u32,
     pub version: u32,
-    /// 0 info, 1 search, 2 range.
+    /// 0 info, 1 search, 2 range, 3 viewport.
     pub kind: u32,
     /// Protocol request id, or 0 for an embedded query.
     pub id: u32,
@@ -119,6 +121,7 @@ pub extern "C" fn pg_text_result_info(
             api::TextResult::Info { .. } => (0, 0),
             api::TextResult::Search { hits, .. } => (1, hits.len()),
             api::TextResult::Range { .. } => (2, 0),
+            api::TextResult::Viewport { .. } => (3, 1),
         };
         write_sized(
             out,
@@ -151,10 +154,12 @@ pub extern "C" fn pg_text_result_hit(
     out: *mut PgTextRange,
 ) -> bool {
     ffi_call(false, || {
-        let api::TextResult::Search { hits, .. } = &handle(result)?.result else {
-            return Err(PgError::InvalidArg);
-        };
-        let range = hits.get(index).ok_or(PgError::InvalidArg)?;
+        let range = match &handle(result)?.result {
+            api::TextResult::Search { hits, .. } => hits.get(index),
+            api::TextResult::Viewport { range, .. } if index == 0 => Some(range),
+            _ => None,
+        }
+        .ok_or(PgError::InvalidArg)?;
         write_sized(
             out,
             PgTextRange {
@@ -264,6 +269,10 @@ fn query_of(query: *const PgTextQuery) -> PgResult<api::TextQuery> {
             generation: query.generation,
             range: range()?,
         }),
+        3 => Ok(api::TextQuery::Viewport {
+            generation: query.generation,
+            range: range()?,
+        }),
         _ => Err(PgError::InvalidArg),
     }
 }
@@ -291,4 +300,46 @@ fn write_sized<T>(out: *mut T, value: T) -> PgResult<()> {
         out.write(value);
     }
     Ok(())
+}
+
+/// Owns one viewport picture; free with pg_snapshot_free. Its row zero is
+/// range.start_row.min(0). Never apply live deltas to this immutable picture.
+#[no_mangle]
+pub extern "C" fn pg_text_result_snapshot(result: *const PgTextResult) -> *mut super::PgSnapshot {
+    ffi_call(ptr::null_mut(), || {
+        let result = handle(result)?;
+        let snapshot = api::text_viewport_snapshot(&result.result)?;
+        super::snapshot_to_ffi(result.pane_id, &snapshot, false)
+    })
+}
+
+/// Metadata for the exact picture returned by pg_text_result_snapshot.
+#[repr(C)]
+pub struct PgTextViewportInfo {
+    pub size: u32,
+    pub version: u32,
+    pub offset: u32,
+    pub history_len: u32,
+    pub modes: u32,
+}
+
+#[no_mangle]
+pub extern "C" fn pg_text_result_viewport(
+    result: *const PgTextResult,
+    out: *mut PgTextViewportInfo,
+) -> bool {
+    ffi_call(false, || {
+        let viewport = api::text_viewport_of(&handle(result)?.result)?;
+        write_sized(
+            out,
+            PgTextViewportInfo {
+                size: size_of::<PgTextViewportInfo>() as u32,
+                version: PG_CORE_ABI_VERSION,
+                offset: viewport.offset,
+                history_len: viewport.history_len,
+                modes: viewport.modes,
+            },
+        )?;
+        Ok(true)
+    })
 }

@@ -11,7 +11,7 @@ pub async fn query(
     pane_id: u32,
     query: TextQuery,
 ) -> Message {
-    if !state.text_query {
+    if !state.text_query || (matches!(query, TextQuery::Viewport { .. }) && !state.text_viewport) {
         return error(id, PgError::Unsupported);
     }
     if let Err(err) = query.validate() {

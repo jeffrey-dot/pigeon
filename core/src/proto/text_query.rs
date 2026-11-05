@@ -37,6 +37,24 @@ pub fn validate_result(result: &TextResult) -> PgResult<()> {
                 return Err(PgError::InvalidArg);
             }
         }
+        TextResult::Viewport {
+            range, viewport, ..
+        } => {
+            point(info, range.start)?;
+            point(info, range.end)?;
+            if range.start > range.end
+                || viewport.rows == 0
+                || i32::from(viewport.rows) - 1 != info.last_row
+                || viewport.offset != range.start.row.min(0).unsigned_abs()
+                || viewport.history_len != info.first_row.unsigned_abs()
+                || viewport.offset > viewport.history_len
+            {
+                return Err(PgError::InvalidArg);
+            }
+            let message = viewport.message(info);
+            super::links::validate(&message)?;
+            crate::session::snapshot_from_message(&message).ok_or(PgError::InvalidArg)?;
+        }
         TextResult::Info { .. } => {}
     }
     Ok(())

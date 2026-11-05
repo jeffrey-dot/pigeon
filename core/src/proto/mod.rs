@@ -19,6 +19,7 @@ use crate::error::{PgError, PgResult};
 pub(crate) mod links;
 mod message;
 pub(crate) mod text_query;
+pub(crate) mod text_viewport;
 pub use message::Message;
 mod status_snapshot;
 #[cfg(feature = "internals")]

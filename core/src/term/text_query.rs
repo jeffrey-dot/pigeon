@@ -45,6 +45,10 @@ pub enum TextQuery {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         start: Option<TextPoint>,
     },
+    Viewport {
+        generation: u64,
+        range: TextRange,
+    },
     Range {
         generation: u64,
         range: TextRange,
@@ -62,6 +66,11 @@ pub enum TextResult {
         hits: Vec<TextRange>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         next: Option<TextPoint>,
+    },
+    Viewport {
+        info: TextInfo,
+        range: TextRange,
+        viewport: Box<crate::proto::text_viewport::TextViewport>,
     },
     Range {
         info: TextInfo,
@@ -90,7 +99,7 @@ impl TextQuery {
                     return Err(PgError::InvalidArg);
                 }
             }
-            Self::Range { generation, range } => {
+            Self::Range { generation, range } | Self::Viewport { generation, range } => {
                 if *generation == 0 || range.start > range.end {
                     return Err(PgError::InvalidArg);
                 }
@@ -104,13 +113,16 @@ impl TextQuery {
 impl TextResult {
     pub fn info(&self) -> TextInfo {
         match self {
-            Self::Info { info } | Self::Search { info, .. } | Self::Range { info, .. } => *info,
+            Self::Info { info }
+            | Self::Search { info, .. }
+            | Self::Range { info, .. }
+            | Self::Viewport { info, .. } => *info,
         }
     }
 
     pub fn next(&self) -> Option<TextPoint> {
         match self {
-            Self::Info { .. } => None,
+            Self::Info { .. } | Self::Viewport { .. } => None,
             Self::Search { next, .. } | Self::Range { next, .. } => *next,
         }
     }

@@ -25,6 +25,7 @@ pub struct ClientState {
     /// Complete multi-record sets replace legacy status when negotiated.
     pub status_snapshot: bool,
     pub text_query: bool,
+    pub text_viewport: bool,
     /// How far each pane is scrolled back for *this* window; 0 is the live screen. Two
     /// windows on one session scroll independently because this lives per connection.
     pub views: HashMap<u32, usize>,
