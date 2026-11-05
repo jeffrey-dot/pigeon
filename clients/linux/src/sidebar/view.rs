@@ -123,16 +123,19 @@ impl SidebarView {
         let work = work.borrow();
         self.records.refresh(&work);
         self.connection.set_text(if work.model.connected {
-            ""
+            &work.recovery_notice
         } else {
             &work.disconnected_reason
         });
         self.connection
             .set_ellipsize(gtk::pango::EllipsizeMode::End);
         self.connection.set_tooltip_text(
-            (!work.model.connected)
-                .then(|| format!("{} · restart to connect", work.disconnected_reason))
-                .as_deref(),
+            if work.model.connected {
+                (!work.recovery_notice.is_empty()).then(|| work.recovery_notice.clone())
+            } else {
+                Some(work.disconnected_reason.clone())
+            }
+            .as_deref(),
         );
         self.projects
             .borrow_mut()

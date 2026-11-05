@@ -27,6 +27,7 @@ pub struct SessionModel {
     request: u32,
     creating: Option<u32>,
     initial_list: bool,
+    restore_session: Option<u32>,
 }
 
 impl SessionModel {
@@ -72,6 +73,27 @@ impl SessionModel {
 
     pub fn disconnect(&mut self) {
         self.connected = false;
+        self.received.clear();
+    }
+
+    /// A handshake is not a fresh picture. Keep selection intent only within one instance.
+    pub fn reconnect(&mut self, same_instance: bool, scrollback: bool) {
+        self.restore_session = if same_instance { self.selected } else { None };
+        self.connected = true;
+        self.scrollback = scrollback;
+        self.selection_generation = self.selection_generation.wrapping_add(1);
+        self.received.clear();
+        self.attached.clear();
+        self.barrier = None;
+        self.creating = None;
+        self.initial_list = true;
+        self.selected = None;
+        self.focus = None;
+        self.zoom = None;
+        self.layout.clear();
+        self.splits.clear();
+        self.panes.clear();
+        self.sessions.clear();
     }
 
     pub fn new_session(&mut self, cwd: Option<String>) -> Vec<Message> {
@@ -160,6 +182,13 @@ impl SessionModel {
             Message::Sessions { items } => {
                 self.sessions = items.clone();
                 self.sessions.sort_by_key(|s| s.session_id);
+                if let Some(restore) = self
+                    .restore_session
+                    .take()
+                    .filter(|id| self.sessions.iter().any(|s| s.session_id == *id))
+                {
+                    return self.select(restore);
+                }
                 let known: HashSet<_> =
                     items.iter().flat_map(|s| s.panes.iter().copied()).collect();
                 self.panes.retain(|pane, _| known.contains(pane));

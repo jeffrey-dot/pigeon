@@ -126,6 +126,11 @@ fn forward(mut reader: UnixStream, mut writer: UnixStream, log: Arc<Mutex<File>>
                         std::thread::sleep(Duration::from_millis(150));
                     }
                     record(&log, direction, &message);
+                    if matches!(message, Message::Snapshot { .. })
+                        && std::env::var_os("PIGEON_TEST_RECOVERY_DELAY").is_some()
+                    {
+                        std::thread::sleep(Duration::from_millis(350));
+                    }
                     // Exercise several GTK gestures before the first answer arrives.
                     if matches!(
                         message,

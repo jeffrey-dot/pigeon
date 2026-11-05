@@ -12,6 +12,7 @@ mod keyboard;
 mod links;
 mod placement;
 mod pointer;
+mod recovery;
 mod render;
 mod screen;
 mod scroll;
@@ -25,7 +26,6 @@ mod view;
 
 use gtk::prelude::*;
 use gtk4 as gtk;
-use pigeon_core::api::Message;
 
 use crate::view::Workspace;
 
@@ -72,39 +72,19 @@ fn start(application: &gtk::Application) {
         gtk::glib::ControlFlow::Continue
     });
     // The current host broadcasts metadata changes, but not every background tree removal.
-    let refresh_host = host.clone();
+    let refresh_work = std::rc::Rc::downgrade(&workspace);
     gtk::glib::timeout_add_local(std::time::Duration::from_secs(2), move || {
-        refresh_host.send(Message::Sessions { items: vec![] });
+        let Some(work) = refresh_work.upgrade() else {
+            return gtk::glib::ControlFlow::Break;
+        };
+        work.borrow().poll_sessions();
         gtk::glib::ControlFlow::Continue
     });
     window.present();
     let area = workspace.borrow().area.clone();
     area.grab_focus();
 
-    let receiver = host.clone();
-    let host_for_pump = host.clone();
-    let workspace_for_pump = workspace.clone();
-    gtk::glib::spawn_future_local(async move {
-        while let Some(message) = receiver.next().await {
-            match &message {
-                Message::Ping { ts } => host_for_pump.send(Message::Pong { ts: *ts }),
-                Message::Unsupported { t_of } => {
-                    eprintln!("pigeon: host does not know {t_of:?}");
-                }
-                Message::Error { code, detail, .. } => {
-                    eprintln!("pigeon: host error {code}: {detail}");
-                    workspace_for_pump.borrow_mut().apply(&message);
-                }
-                other => {
-                    // A pane that is out of step asks for a fresh snapshot; the window keeps
-                    // drawing the old one until it arrives.
-                    workspace_for_pump.borrow_mut().apply(other);
-                }
-            }
-        }
-        workspace_for_pump.borrow_mut().disconnect();
-        eprintln!("pigeon: {}", receiver.reason());
-    });
+    recovery::install(&workspace, &window, host);
 }
 
 /// The scale of the primary monitor, before any window exists.

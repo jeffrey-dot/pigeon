@@ -262,3 +262,45 @@ fn ignored_scroll_reply_cannot_certify_cached_history_as_current_screen() {
     model.apply(&snapshot(1));
     assert_eq!(model.input_pane(), Some(1));
 }
+
+#[test]
+fn reconnect_restores_selected_session_only_after_new_screen_and_layout() {
+    let mut model = model();
+    list(&mut model);
+    model.select(2);
+    barrier(&mut model);
+    model.apply(&snapshot(2));
+    model.apply(&layout(2, 2));
+    let old_generation = model.selection_generation;
+    model.disconnect();
+    model.reconnect(true, true);
+    assert_eq!(model.input_pane(), None);
+    let effects = model.apply(&Message::Sessions {
+        items: vec![session(1, &[1]), session(2, &[2])],
+    });
+    assert_eq!(model.selected, Some(2));
+    assert!(effects
+        .iter()
+        .any(|m| matches!(m, Message::Attach { pane_id: 2, .. })));
+    assert!(model.selection_generation > old_generation);
+    barrier(&mut model);
+    model.apply(&layout(2, 2));
+    assert_eq!(model.input_pane(), None);
+    model.apply(&snapshot(2));
+    assert_eq!(model.input_pane(), Some(2));
+}
+
+#[test]
+fn restarted_host_never_reuses_old_pane_or_automatically_creates_a_session() {
+    let mut model = model();
+    list(&mut model);
+    model.apply(&snapshot(1));
+    model.apply(&layout(1, 1));
+    model.disconnect();
+    model.reconnect(false, true);
+    assert!(model.panes.is_empty());
+    assert_eq!(model.selected, None);
+    let effects = model.apply(&Message::Sessions { items: vec![] });
+    assert!(effects.is_empty());
+    assert_eq!(model.input_pane(), None);
+}

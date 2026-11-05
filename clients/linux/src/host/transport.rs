@@ -202,6 +202,9 @@ impl Transport {
     pub fn connected(&self) -> bool {
         !self.state.closed.load(Ordering::Acquire)
     }
+    pub fn close(&self) {
+        self.state.close("Connection replaced or window closed");
+    }
     pub fn send(&self, message: Message) {
         if self.state.closed.load(Ordering::Acquire) {
             return;

@@ -22,6 +22,7 @@ const CLIENT_NAME: &str = concat!("pigeon-linux ", env!("CARGO_PKG_VERSION"));
 pub struct HostLink {
     transport: Transport,
     scrollback: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    socket: PathBuf,
 }
 
 impl HostLink {
@@ -35,6 +36,7 @@ impl HostLink {
         Ok(Self {
             transport: Transport::new(stream)?,
             scrollback: Default::default(),
+            socket: socket.to_owned(),
         })
     }
 
@@ -56,6 +58,27 @@ impl HostLink {
     }
     pub fn connected(&self) -> bool {
         self.transport.connected()
+    }
+    pub fn endpoint(&self) -> PathBuf {
+        self.socket.clone()
+    }
+    pub fn reconnect(socket: &Path) -> Result<(Self, Message), String> {
+        let stream = UnixStream::connect(socket).map_err(|e| format!("Cannot reconnect: {e}"))?;
+        let link = Self {
+            transport: Transport::new(stream)?,
+            scrollback: Default::default(),
+            socket: socket.to_owned(),
+        };
+        match handshake(&link) {
+            Ok(hello) => Ok((link, hello)),
+            Err(error) => {
+                link.close();
+                Err(error)
+            }
+        }
+    }
+    pub fn close(&self) {
+        self.transport.close();
     }
 }
 

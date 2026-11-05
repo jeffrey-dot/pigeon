@@ -236,3 +236,19 @@ fn harp_row_keeps_title_age_status_and_hidden_details_separate() {
     assert!(rows[1].tooltip.contains("/code/launch"));
     assert!(!rows[1].name.contains("#4"));
 }
+
+#[test]
+fn same_instance_replay_keeps_seen_but_invalidates_the_old_inspection() {
+    let mut model = SidebarModel::default();
+    model.begin_connection("host", Some("one"), true);
+    model.apply(&report(1, 4, vec![record("a", 7, "done")]));
+    let old = model.records(&[1]).remove(0);
+    assert!(model.ack(&old, true).is_some());
+    model.begin_connection("host", Some("one"), true);
+    model.apply(&report(1, 4, vec![record("a", 7, "done")]));
+    assert!(!model.current(&old));
+    assert_eq!(model.summary(&[1]).unread, 0);
+    model.begin_connection("host", Some("two"), true);
+    model.apply(&report(1, 4, vec![record("a", 7, "done")]));
+    assert_eq!(model.summary(&[1]).unread, 1);
+}

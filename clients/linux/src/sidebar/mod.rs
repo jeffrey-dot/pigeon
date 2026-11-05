@@ -43,12 +43,15 @@ pub struct SidebarModel {
 
 impl SidebarModel {
     pub fn begin_connection(&mut self, host: &str, instance: Option<&str>, complete: bool) {
+        let same = self.host == host && instance.is_some() && self.instance.as_deref() == instance;
         self.generation = self.generation.wrapping_add(1);
         self.host = host.into();
         self.instance = instance.map(str::to_owned);
         self.complete = complete;
         self.reports.clear();
-        self.seen.clear();
+        if !same {
+            self.seen.clear();
+        }
     }
 
     pub fn apply(&mut self, message: &Message) {

@@ -26,6 +26,7 @@ mod input;
 mod links;
 mod pointer;
 mod protocol;
+mod recovery;
 mod scroll;
 mod search;
 
@@ -55,6 +56,10 @@ pub struct Workspace {
     pub search: Option<crate::search::Search>,
     pub search_supported: bool,
     pub disconnected_reason: String,
+    pub connection_generation: u64,
+    pub host_instance: Option<String>,
+    pub host_identity: String,
+    pub recovery_notice: String,
 }
 
 impl Workspace {
@@ -137,6 +142,16 @@ impl Workspace {
             link_press: Default::default(),
             search: None,
             disconnected_reason: String::new(),
+            connection_generation: 1,
+            host_instance: match hello {
+                Message::HelloAck { instance, .. } => instance.clone(),
+                _ => None,
+            },
+            host_identity: match hello {
+                Message::HelloAck { host_id, .. } => host_id.clone(),
+                _ => String::new(),
+            },
+            recovery_notice: String::new(),
             search_supported: pigeon_core::api::offers_feature(hello, "text_query")
                 .unwrap_or(false)
                 && pigeon_core::api::offers_feature(hello, "text_viewport").unwrap_or(false),
