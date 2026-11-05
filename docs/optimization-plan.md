@@ -120,17 +120,17 @@ Windows、内置模型服务、嵌入浏览器、插件市场、云协作不进�
 
 - [ ] 宿主侧搜索屏幕和历史：普通文本、大小写选项、正则、上下一个命中；返回稳定行位置与可见高亮。
   正则有计算预算，搜索可取消，不把全部历史反复传给客户端。
-  核心/宿主 literal、ASCII 大小写选项与 generation 绑定的分页范围查询已实现；regex、稳定锚点和两端 UI 待接，见 [文本查询](text-query.md)。
+  核心/宿主 literal、ASCII 大小写选项与 generation 绑定的分页范围查询已实现；macOS 搜索条/取消/定位高亮已接，AppKit/GUI 待验；regex、稳定锚点和 Linux UI 待接，见 [文本查询](text-query.md)。
 - [ ] 拖选跨历史、自动滚动选择、矩形选择、键盘选择；明确 Select All 的范围；用稳定锚点处理新输出、resize 和淘汰。
   选区语义通过核心接口提供，客户端只映射输入并绘制。
 - [ ] OSC 8 完整保留链接表，支持明确的打开动作；链接当纯文本显示，URI 不交给 shell 拼接。
-  核心/宿主/双外形接口和 macOS hover/Cmd+click 已实现；Linux 点击与 macOS GUI 验收仍待补，见 [OSC 8](osc8.md)。
+  核心/宿主/双外形接口和 macOS hover/Cmd+click 已实现；Linux Ctrl+click/hover 已接并通过隔离 GIO 验收，macOS GUI 验收仍待补，见 [OSC 8](osc8.md)。
 - [ ] OSC 52 写剪贴板，默认不允许读取；多客户端明确接收目标、事件去重和用户设置，重连不重放旧剪贴板副作用。
   未连接客户端时不伪造“已复制成功”。
 
 ### 输入、协议和配置
 
-- [ ] Kitty keyboard protocol 两端对齐与验收：macOS/核心实现已从远端合入，Linux 编码待接；legacy 继续回归。
+- [ ] Kitty keyboard protocol 两端对齐与验收：macOS/核心实现已从远端合入，Linux 编码和 GTK 事件已接并通过 Xvfb/PTY（含 IME），真实硬件/非美式/Wayland/应用验收待补；legacy 继续回归。
   覆盖 Shift+Enter、Ctrl 组合键、非美式键盘、IME 与应用抢占；不要无条件发送扩展编码。
 - [x] 合并远端 DEC 2026 与 1s 超时实现，核心用例覆盖同步输出开始/结束和超时；两端 GUI 呈现还需专项验收。
 - [ ] 补齐彩色/不同样式下划线、模式查询、OSC 颜色行为和光标等高频现代 TUI 需求；逐项能力探测，不宣称未实现协议。
@@ -166,7 +166,7 @@ Windows、内置模型服务、嵌入浏览器、插件市场、云协作不进�
 
 按以下切片推进，每片都包含 GTK 事件、核心接口、用户交互和验收：
 
-1. GtkIMContext、当前屏幕复制、异步粘贴/宿主括号包装已接，并通过 Xvfb/fcitx5 实测；宿主回看已接，继续补选择、鼠标/焦点上报与 Wayland/其它 IME 验收。
+1. GtkIMContext、当前屏幕复制、异步粘贴/宿主括号包装已接，并通过 Xvfb/fcitx5 实测；宿主回看已接，鼠标/焦点上报已接；继续补选择与 Wayland/其它 IME 验收。
 2. 会话选择、原生侧栏、组/未读/needs-you、pane 定位和尺寸来源已接；拖动分隔线与偏好持久化待补。
 3. delta 与 15s ping 保活已接；继续补续传、pong 超时、自动重连、SSH 多主机与安装流程。
 4. 跟进 S2/S3 的字素、搜索、链接、键盘、配置、通知与可访问性。

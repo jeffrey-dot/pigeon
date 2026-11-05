@@ -1,6 +1,6 @@
 # OSC 8 超链接
 
-2026-11-05 实现核对。核心、宿主帧、Rust/C 客户端接口与 macOS 交互已接入；Linux 客户端尚未接点击。
+2026-11-05 实现核对。核心、宿主帧、Rust/C 客户端接口与 macOS 交互已接入；Linux 已接 Ctrl+click 与纯文本 hover，见 [现代输入](linux-modern-input.md)。
 本次 Linux 验证覆盖核心与 Swift Foundation/ABI 逻辑，AppKit 完整构建/测试已在 `03b1a41` CI 通过；hover 外观和真实 Cmd+click 仍需 GUI 验收。
 
 ## 输入与身份
@@ -71,7 +71,7 @@ wire 复用协议 1.0 已有的 `cell[4]` 和 `links: [{id, uri}]`。表只描�
 - `TerminalLinksTests` / `TerminalLinksWireTests`：URL 白名单/恶意 URI、格子替换与实际 C ABI 字符串复制生命周期；
   可在 Linux 用 `tools/checks/swift-logic.sh` 与 `tools/checks/swift-status-wire.sh` 运行。
 - 本地执行默认/无默认 feature 测试及 clippy、VT 8 条 golden、生成头文件一致性和 release 体积检查。
-  完整结果随提交交付；macOS `swift build && swift test`、真实 hover/Cmd+click、Linux 客户端点击均未在这里验收。
+  完整结果随提交交付；macOS `swift build && swift test`、真实 hover/Cmd+click、Linux 客户端点击由独立 [现代输入验收](linux-modern-input.md) 验证。
 
 2026-11-05 本 worktree 实测（Linux x86_64，Rust stable / Swift 6.1.2 临时工具链）：
 

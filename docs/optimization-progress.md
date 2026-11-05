@@ -10,8 +10,8 @@
 | Linux GL | unsafe 编译期限定在 gl.rs；拥有型纹理/pipeline 自动释放、检查上传范围、恢复上下文；隔离 Xvfb driver 资源测试 |
 | 基线/CI | GTK 构建、clippy、逻辑测试；独立 HOME/配置的宿主测试；环境记录、FFI import 与生成头文件检查 |
 | 宿主性能工具 | 隔离 release 宿主与 API 客户端，保留协议回显、快照重连、多 pane 短时输出原始样本及二进制 hash；无 GUI 显示延迟承诺 |
-| OSC 8 | 核心、宿主、Rust/C 接口保留拥有型 URI；macOS hover/Cmd+click 已接，http/https 白名单；链接取消和点击期间变化有回归，Linux 点击待接 |
-| 文本查询 | 核心/宿主 literal 搜索、ASCII 大小写选项、有界分页和文本范围提取；独立 generation 拒绝陈旧坐标；两端 UI 与 regex 待接 |
+| OSC 8 | 核心、宿主、Rust/C 接口保留拥有型 URI；macOS hover/Cmd+click 已接，http/https 白名单；链接取消和点击期间变化有回归，Linux Ctrl+click/hover 已接 |
+| 文本查询 | 核心/宿主 literal 搜索、ASCII 大小写选项、有界分页和文本范围提取；独立 generation 拒绝陈旧坐标；macOS 搜索条/取消/上下命中/原子定位高亮已接，Linux UI 与 regex 待接 |
 | 宿主 TERM | pane 固定 xterm-256color/truecolor；linux/dumb/xterm-kitty/未设置四种外部环境回归 |
 | 客户端接口 | `api::delta_of` 与 C ABI 共用校验，FFI 只经 api；Linux 消费连续 delta，缺序/非法行重新 attach |
 | 文本 | 附加码点跨快照/delta/历史/接口保留，软换行复制；历史按预算先预检再转换，FFI 校验后转移所有权；Linux 有界整形缓存、字体随所有者释放 |
@@ -77,3 +77,9 @@ Session env 本机验证：默认 core 320 passed / 2 ignored，无默认 featur
 架构检查：core 直接依赖评审清单、host optional feature、客户端禁止打开内部 feature、核心 host-runtime/OS 分支和 Swift UI/CoreText import 接入 CI。4 组违规夹具与当前树检查通过；脚本是源码/manifest 检查，不替代编译器、传递依赖/许可证审计。
 
 OSC 7501 上报工具：pigeon-report/pigeon-run 与接入指南已整合。规范轴发现选项样式字段和 dry-run 写失败码，行为轴另发现终态预算与 builtin 改写 trap；四组复现先失败后修复，21 组真实 CLI/API/PTY 测试通过，新增双平台 CI。共享能力表已同步，第三方 agent/远端/桌面通知仍未验。
+
+搜索与 Linux 现代输入整合：核心 327 passed / 2 ignored，无默认 220 passed / 1 ignored、Swift 搜索模型/真实 ABI 7 项通过。搜索复审三项行为/类型问题已修复；Linux 复审五项事件转换问题已修复并补真实 PTY/GTK 回归。新增输入/链接契约见 linux-modern-input.md；整合 CI 待验。
+
+主线程完整回看验收复现隐藏位置条引发同步 pointer-enter 重入 Workspace 的 panic；指针进入/离开在借用冲突时延后至当前 GTK 更新之后处理，保留事件而不在回调边界 unwind。已有 Return to live→再次翻页脚本作为回归。
+
+本轮最终本地结果：GTK 77 passed / 2 ignored；modern-input、input、sidebar 桌面脚本通过，修复重入后 scroll 与 modern-input 再次通过。上报工具 06757e8 CI 的 Ubuntu、Swift、GTK/header/docs 通过，macOS Rust 作业的工具测试因夹具硬编码 /bin/true 失败；已改为 /bin/sh -c exit，等待新的平台运行。

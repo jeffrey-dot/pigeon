@@ -10,7 +10,7 @@
 
 - 宿主提供 `delta`、`scrollback`、`osc7501`、`status_all`、`status_snapshot`、`text_query`、`session_env`；macOS 请求 `delta`、`scrollback`、`status_all`、`status_snapshot`，Linux 请求 `delta`、`scrollback`、`status_all`、`status_snapshot`，首帧快照之后应用连续增量，回看由宿主 `scroll` 切片。
 - `zstd` 是预留能力，宿主不提供，当前 payload 为裸 CBOR，无压缩 tag。
-- `snapshot`/`delta` 已下发 OSC 8 链接，含历史、回看与续传；每帧独立解析为格子拥有的 URI，macOS 可 Cmd+click，Linux 点击待接。设计/限制见 [OSC 8](osc8.md)。基础 cell 仍为单码点，附加码点通过 `text` 稀疏表传递。
+- `snapshot`/`delta` 已下发 OSC 8 链接，含历史、回看与续传；每帧独立解析为格子拥有的 URI，macOS 可 Cmd+click，Linux 可 Ctrl+click。设计/限制见 [OSC 8](osc8.md)。基础 cell 仍为单码点，附加码点通过 `text` 稀疏表传递。
 - `new_session.env` 已应用到该会话及后续分屏，独立于宿主/其它会话；终端能力变量保留、输入上限及失败行为见 §3.2。结构化 `mouse` 仍返回 `unsupported`。
   macOS 将鼠标按当前 VT 模式编码成 `keys.bytes`，不是发送 `mouse`。
 - `status_snapshot` 已实现完整未确认记录集合与独立修订号；macOS 已请求该能力，并通过 C ABI 读取；Linux 已通过安全 API 接入本地侧栏和逐条显式确认。
@@ -145,7 +145,7 @@
 | 方向 | 消息 | 必选字段 | 可选字段 | 说明 |
 |---|---|---|---|---|
 | c→s | `appearance` | — | `fg: u32`, `bg: u32`, `ansi: [u32]`（16 个 `0xRRGGBB`） | 客户端当前主题，供宿主回答程序发出的 `OSC 4/10/11` 颜色查询。**缺省值**：客户端还没发过时，宿主用内置的深色板（底 `#0E0F11` / 字 `#E6E6E6` + harp 的 `DARK_MODE_*` 十六色）作答；`fg`/`bg` 缺失或 `ansi` 不是 16 个时，保留上一次的答复（不 panic、不猜） |
-| c→s | `keys` | `pane_id: u32`, `bytes: bstr` | — | 已编码好的终端字节（macOS 支持 legacy/Kitty keyboard protocol，按 modes 协商编码；Linux 暂为 legacy） |
+| c→s | `keys` | `pane_id: u32`, `bytes: bstr` | — | 已编码好的终端字节（macOS 支持 legacy/Kitty keyboard protocol，按 modes 协商编码；Linux 同样支持 legacy/Kitty keyboard protocol） |
 | c→s | `mouse` | `pane_id: u32`, `kind: "down"\|"up"\|"move"\|"wheel"`, `x: u16`, `y: u16`, `button: u8`, `mods: u8` | — | `mods` 位：`1` shift、`2` alt、`4` ctrl |
 | c→s | `paste` | `pane_id: u32`, `text: str` | — | 宿主负责括号粘贴包装：程序开了 `?2004` 才包 `ESC[200~ … ESC[201~`，并去掉正文里的起止标记（防止剪贴板内容提前结束粘贴、把后面当命令执行）；`\n`/`\r\n` 换成 `\r` |
 | s→c | `status` | `pane_id: u32`, `state: "idle"\|"working"\|"blocked"\|"done"\|"error"`, `seq: u32` | `kind: "permission"\|"question"\|"auth"`, `msg: str`, `app: str`, `id: str`, `age_ms: u64` | 来自 OSC 7501；`msg`/`app` 只当纯文本；`app` 是上报的 agent 名（`app=`），`id` 是记录 id；`age_ms` = 进入当前 `state` 已多少毫秒（宿主时钟上的时长，不是时间戳，两端时钟不必一致；同一状态重复上报不重置） |

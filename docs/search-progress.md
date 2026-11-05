@@ -49,3 +49,5 @@ regex、完整 Unicode case folding、稳定锚点、宿主反向扫描、跨历
 - 文档相对链接与 `git diff --check` 通过。新增 AppKit `SearchBarTests` 覆盖导航/Escape 路由与布局不抢搜索焦点，尚未在本机运行；语法解析不代表 AppKit 类型检查。
 
 需父线程在 macOS CI 跑 `swift build && swift test`，并手工验收上述操作。Ubuntu/macOS 核心复验、Apple Silicon、SSH 弱网、长时间负载与真实搜索延迟仍未验收。
+
+主线程复审修复：SearchBarView 使用 NSSearchFieldDelegate；Stop 在分页结束但定位未返回时仍可用；关闭搜索保留旧画面的鼠标/状态确认冻结，直到实时 snapshot 实际应用才解除。搜索模型/真实 ABI 7 项通过；核心整合默认 327 passed / 2 ignored，无默认 220 passed / 1 ignored，VT 8/8；AppKit 新整合 CI 与 GUI 待验。定位结果校验存在重复整屏转换的优化建议，尚未量化延迟，后续需保持直接 API 的非法输入校验。
