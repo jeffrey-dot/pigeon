@@ -23,3 +23,5 @@
 | `checks/quit-on-last-session-check.sh` | 最后一个会话退出后宿主结束、应用退出 |
 | `checks/helpers/` | 上面脚本用的 Swift 小工具：按 pid 点窗口、取窗口号 |
 | `vt-parity/run.sh` | VT 对账：同一段字节喂内核与参考终端，逐行比较（见 [README](vt-parity/README.md)） |
+
+`checks/osc8-abi.sh` 在 `cargo build --lib` 后用 C 编译器验证生成头文件、旧 PgCell 步长和 OSC 8 URI 所有权；设计与验收见 [OSC 8](../docs/osc8.md)。

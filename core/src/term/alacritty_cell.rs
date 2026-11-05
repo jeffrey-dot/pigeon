@@ -54,7 +54,8 @@ impl<'a> ExportedText<'a> {
     }
 }
 
-pub(super) fn convert(cell: &VtCell, colors: &Colors) -> Cell {
+pub(super) fn convert(cell: &VtCell, colors: &Colors, links: &mut super::super::hyperlink::LinkExport) -> Cell {
+    let (link, hyperlink) = links.cell(cell);
     let (attrs, width) = attributes(cell.flags);
     let text = ExportedText::new(cell);
     Cell {
@@ -62,8 +63,8 @@ pub(super) fn convert(cell: &VtCell, colors: &Colors) -> Cell {
         fg: color_to_u32(cell.fg, colors),
         bg: color_to_u32(cell.bg, colors),
         attrs,
-        // OSC 8 needs a URI table the protocol does not yet carry.
-        link: 0,
+        link,
+        hyperlink,
         width,
         extra_text: text.extra_text(),
     }

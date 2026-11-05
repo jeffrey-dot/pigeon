@@ -266,6 +266,18 @@ typedef struct PgCellText {
     struct PgStr text;
 } PgCellText;
 
+typedef struct PgLink {
+    uint32_t size;
+    /**
+     * Resolve only against the table owned by this snapshot/delta.
+     */
+    uint32_t id;
+    /**
+     * Borrowed UTF-8 until the owning snapshot/delta is freed; never rich text.
+     */
+    struct PgStr uri;
+} PgLink;
+
 typedef struct PgSnapshot {
     uint32_t size;
     uint32_t version;
@@ -289,6 +301,11 @@ typedef struct PgSnapshot {
      */
     uint32_t text_count;
     const struct PgCellText *text;
+    /**
+     * Complete URI table for this snapshot’s cells; owned until pg_snapshot_free.
+     */
+    uint32_t link_count;
+    const struct PgLink *links;
 } PgSnapshot;
 
 typedef struct PgRect {
@@ -391,6 +408,11 @@ typedef struct PgDelta {
     uint8_t alt_screen;
     uint32_t text_count;
     const struct PgCellText *text;
+    /**
+     * Complete URI table for the replaced rows; owned until pg_delta_free.
+     */
+    uint32_t link_count;
+    const struct PgLink *links;
 } PgDelta;
 
 /**

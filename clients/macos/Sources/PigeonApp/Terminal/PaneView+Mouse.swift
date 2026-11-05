@@ -7,6 +7,7 @@ extension PaneView {
     /// starts a selection of its own.
     override func mouseDown(with event: NSEvent) {
         nextResponder?.mouseDown(with: event)
+        if beginLinkClick(event) { return }
         if reportsMouse(event) {
             clearSelection()
             report(.left, .press, event)
@@ -16,6 +17,7 @@ extension PaneView {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        if linkGesture { pressedLink = nil; return }
         if reportsMouse(event) {
             report(.left, .drag, event)
             return
@@ -25,6 +27,7 @@ extension PaneView {
 
     override func mouseUp(with event: NSEvent) {
         nextResponder?.mouseUp(with: event)
+        if finishLinkClick(event) { return }
         if reportsMouse(event) { report(.left, .release, event) }
     }
 

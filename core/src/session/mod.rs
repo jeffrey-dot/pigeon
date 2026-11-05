@@ -6,6 +6,7 @@
 
 mod backlog;
 mod cell_text;
+pub(crate) mod links;
 mod delta_rows;
 mod pane_meta;
 mod session_state;
@@ -235,6 +236,7 @@ impl PaneState {
         }
         let (changed, snapshot) = self.term.screen_rows(&dirty);
         let text = cell_text::collect(changed.iter().map(|(y, cells)| (i32::from(*y), cells.as_slice())));
+        let links = links::collect(changed.iter().flat_map(|(_, cells)| cells));
         let rows: Vec<Row> = changed
             .into_iter()
             .map(|(y, cells)| Row {
@@ -253,7 +255,7 @@ impl PaneState {
             rows,
             cursor: Some(cursor_of(&snapshot)),
             scroll: Some(scroll_of(&snapshot)),
-            links: None,
+            links,
             alt: Some(snapshot.alt),
             modes: Some(self.term.modes()),
         };
@@ -308,7 +310,7 @@ fn message_from_snapshot(
                 .map(|row| row.iter().map(to_proto_cell).collect())
                 .collect()
         }),
-        links: None,
+        links: links::collect(snapshot.screen.iter().chain(history.iter()).flatten()),
         // Only a `scroll` answer reports a view position; plain snapshots leave them out.
         history_len: None,
         offset: None,
@@ -367,6 +369,7 @@ pub fn snapshot_from_message(message: &Message) -> Option<Snapshot> {
         screen,
         history,
         text,
+        links,
         ..
     } = message
     else {
@@ -395,6 +398,7 @@ pub fn snapshot_from_message(message: &Message) -> Option<Snapshot> {
         },
     };
     cell_text::snapshot(&mut picture, text)?;
+    links::apply(picture.screen.iter_mut().chain(picture.history.iter_mut()).flatten(), links.as_deref())?;
     Some(picture)
 }
 
@@ -432,6 +436,7 @@ fn cells_from_proto(row: &[ProtoCell]) -> Vec<crate::term::Cell> {
             link: cell.link.unwrap_or(0),
             width,
             extra_text: None,
+            hyperlink: None,
         });
     }
     cells
@@ -446,6 +451,7 @@ pub fn delta_from_message(message: &Message) -> Option<DeltaRows> {
         alt,
         modes,
         text,
+        links,
         ..
     } = message
     else {
@@ -476,6 +482,7 @@ pub fn delta_from_message(message: &Message) -> Option<DeltaRows> {
         }),
     };
     cell_text::delta(&mut picture.rows, text)?;
+    links::apply(picture.rows.iter_mut().flat_map(|(_, cells)| cells), links.as_deref())?;
     Some(picture)
 }
 

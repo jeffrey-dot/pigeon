@@ -38,6 +38,9 @@ pub struct PgDelta {
     pub alt_screen: u8,
     pub text_count: u32,
     pub text: *const super::PgCellText,
+    /// Complete URI table for the replaced rows; owned until pg_delta_free.
+    pub link_count: u32,
+    pub links: *const super::PgLink,
 }
 
 /// Builds an owned delta from a `delta` message; NULL for any other message type.
@@ -54,6 +57,7 @@ pub extern "C" fn pg_msg_delta(msg: *const super::msg::PgMsg) -> *mut PgDelta {
                 .iter()
                 .map(|(y, cells)| (i32::from(*y), cells.as_slice())),
         )?;
+        let links = super::links::OwnedLinks::new(delta.rows.iter().flat_map(|(_, cells)| cells));
         let row_count = u32::try_from(delta.rows.len()).map_err(|_| PgError::InvalidArg)?;
         let cells: Vec<Box<[PgCell]>> = delta
             .rows
@@ -96,9 +100,12 @@ pub extern "C" fn pg_msg_delta(msg: *const super::msg::PgMsg) -> *mut PgDelta {
             alt_screen: delta.alt.map_or(2, u8::from),
             text_count: 0,
             text: ptr::null(),
+            link_count: 0,
+            links: ptr::null(),
         });
         // No fallible work remains once ownership crosses the C boundary.
         (result.text_count, result.text) = text.into_raw();
+        (result.link_count, result.links) = links.into_raw();
         for row in cells {
             let _ = Box::into_raw(row);
         }
@@ -118,6 +125,7 @@ pub extern "C" fn pg_delta_free(delta: *mut PgDelta) {
         // SAFETY: sparse text is exclusively owned by this delta.
         unsafe {
             super::cell_text::free(delta.text_count, delta.text);
+            super::links::free(delta.link_count, delta.links);
         }
         let count = delta.row_count as usize;
         if count == 0 || delta.rows.is_null() {

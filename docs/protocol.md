@@ -10,7 +10,7 @@
 
 - 宿主提供 `delta`、`scrollback`、`osc7501`、`status_all`、`status_snapshot`；macOS 请求 `delta`、`scrollback`、`status_all`、`status_snapshot`，Linux 请求 `delta`、`scrollback`，首帧快照之后应用连续增量，回看由宿主 `scroll` 切片。
 - `zstd` 是预留能力，宿主不提供，当前 payload 为裸 CBOR，无压缩 tag。
-- `snapshot`/`delta` 的 `links` 已有类型，但 VT 转换未保留 OSC 8，实际不下发链接；基础 cell 仍为单码点，附加码点通过下面的 `text` 稀疏表传递。
+- `snapshot`/`delta` 已下发 OSC 8 链接，含历史、回看与续传；每帧独立解析为格子拥有的 URI，macOS 可 Cmd+click，Linux 点击待接。设计/限制见 [OSC 8](osc8.md)。基础 cell 仍为单码点，附加码点通过 `text` 稀疏表传递。
 - `new_session.env` 能编解码，但宿主尚未应用；结构化 `mouse` 能编解码但宿主返回 `unsupported`。
   macOS 将鼠标按当前 VT 模式编码成 `keys.bytes`，不是发送 `mouse`。
 - `status_snapshot` 已实现完整未确认记录集合与独立修订号；macOS 已请求该能力，并通过 C ABI 读取；Linux 侧栏尚未接入。
@@ -114,7 +114,12 @@
   - 宽字符由 `codepoint` 的 `wcwidth` 推导；宽字符占两格，第二格是空 continuation，客户端按宽度跳过绘制。
   - `attrs` 位：`1` 粗体、`2` 斜体、`4` 下划线、`8` 反色、`16` 删除线、`32` 暗色、`64` 软换行（行末格后接下一行，不插入文本换行）。一旦发布只加位、不改语义。
   - 颜色：`0x01000000 | idx` 表示调色板索引；否则按 `0xRRGGBB`。
-  - `link` 缺省 = 无超链接；非 0 时指向同一帧 `links` 表里的 `id`（`links` 随该帧的 `snapshot`/`delta` 下发）。
+  - `link` 缺省/0 = 无超链接；非 0 时只指向同一帧 `links` 表里的 `id`。接收时解析为 cell 自有 URI；
+    delta 的未替换行保留自有 URI，不能借用后来帧的表。缺失表/未知编号降级为普通文字。
+    新宿主编号在 pane 内单调分配、不复用；snapshot/scroll 带所显示 cells 的表，delta 带替换行的完整表。
+    表最多 1024 项、URI 合计 256 KiB；URI 最多 2048 UTF-8 字节、13 个未转义分号，拒绝控制/空白/方向控制字符。
+    编号 0、重复编号、非法 URI 或超限表拒绝；宿主导出超限时只省略链接、继续显示格子。
+    原始 OSC 8 校验、所有权、预算与 http/https 打开策略见 [OSC 8](osc8.md)。
 - `snapshot` / `delta` 可带 `text: [{row:i32, col:u16, text:str}]`：完整单元格文本（主码点 + 零宽附加码点），空表省略。
   `row >= 0` 表示屏幕；快照 `row < 0` 从历史末尾倒数（-1 最新），delta 的 row 必须是本帧被替换的行。
   未列出的格子仅有主码点；快照/行替换同时清除旧附加文本，不能把旧表保留到新行上。
@@ -243,7 +248,7 @@
 | `PgSnapshot.scroll_region` | `snapshot.scroll` |
 | `PgSnapshot.history` + `history_count` | `snapshot.history` |
 | `PgCell.codepoint/attrs/fg/bg` | `cell[0..3]`（必定存在） |
-| `PgCell.hyperlink_id` | `cell[4]`（可选；缺省 = 无链接） |
+| `PgCell.hyperlink_id` + `PgSnapshot/PgDelta.links` | `cell[4]` + 同帧 `links`；表由快照/delta 持有，PgCell 步长不变 |
 | `PgCell.width` | 由 `codepoint` 推导，不上线 |
 | `PgStatus.state/kind/msg/seq` | `status.state/kind/msg/seq`（旧 focused-pane 接口包含已确认存储记录） |
 | `pg_status_snapshot_new` / `pg_msg_status_snapshot` + `pg_status_snapshot_info/at/free` | `status_snapshot` 的完整未确认集合；Rust 为 `Core::status_snapshot` / `api::status_snapshot_of`，独立所有权、读取不消费 |

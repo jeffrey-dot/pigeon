@@ -16,6 +16,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::error::{PgError, PgResult};
 
+mod links;
 mod message;
 pub use message::Message;
 mod status_snapshot;
@@ -185,6 +186,7 @@ impl Node {
 /// Serializes one message into its CBOR payload (no length prefix).
 pub fn encode(message: &Message) -> PgResult<Vec<u8>> {
     status_snapshot::validate(message)?;
+    links::validate(message)?;
     let mut payload = Vec::new();
     ciborium::into_writer(message, &mut payload).map_err(|_| PgError::InvalidArg)?;
     Ok(payload)
@@ -212,6 +214,7 @@ pub fn decode(payload: &[u8]) -> PgResult<Message> {
         .deserialized::<Message>()
         .map_err(|_| PgError::InvalidArg)?;
     status_snapshot::validate(&message)?;
+    links::validate(&message)?;
     Ok(message)
 }
 

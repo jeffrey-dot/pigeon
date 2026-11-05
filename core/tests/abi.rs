@@ -612,3 +612,6 @@ fn sessions_and_zoom_are_read_through_the_api_helpers() {
 
 #[path = "abi/status_sync.rs"]
 mod status_sync;
+
+#[path = "abi/osc8.rs"]
+mod osc8;

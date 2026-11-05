@@ -62,6 +62,10 @@ final class PaneView: NSView {
     /// The drag in progress or last made; `selectionActive` once it covers any text.
     var selection: TerminalSelection?
     var selectionActive = false
+    var linkTracking: NSTrackingArea?
+    var linkGesture = false
+    var pressedLink: URL?
+    var pressedLinkPoint: TerminalSelection.Point?
     /// What the input method is composing, drawn at the cursor until it commits.
     var preedit: Preedit?
     /// The row the composing overlay was drawn on in the last posted frame.
@@ -245,6 +249,7 @@ final class PaneView: NSView {
 
     func apply(snapshot: UnsafePointer<PgSnapshot>) {
         let view = snapshot.pointee
+        let links = TerminalLinks.read(view.links, count: view.link_count)
         cols = Int(view.cols)
         rows = Int(view.rows)
         cells = []
@@ -255,15 +260,7 @@ final class PaneView: NSView {
                 if let cellsPointer {
                     for column in 0..<cols {
                         let cell = cellsPointer[column]
-                        cells.append(
-                            Cell(
-                                codepoint: cell.codepoint,
-                                attrs: UInt8(truncatingIfNeeded: cell.attrs),
-                                fg: cell.fg,
-                                bg: cell.bg,
-                                width: cell.width
-                            )
-                        )
+                        cells.append(Cell(cell, links: links))
                     }
                 } else {
                     cells.append(contentsOf: Array(repeating: Cell(
@@ -304,6 +301,7 @@ final class PaneView: NSView {
             )
         }
         dirty = .everything
+        refreshLinkHover()
         screenChanged()
     }
 
@@ -312,6 +310,7 @@ final class PaneView: NSView {
     /// snapshot instead of drawing a torn screen.
     func apply(delta: UnsafePointer<PgDelta>) -> Bool {
         let frame = delta.pointee
+        let links = TerminalLinks.read(frame.links, count: frame.link_count)
         guard cols > 0, cells.count == cols * rows else { return false }
         if let changed = frame.rows {
             for index in 0..<Int(frame.row_count) {
@@ -321,13 +320,7 @@ final class PaneView: NSView {
                 dirty.mark(y)
                 for column in 0..<cols {
                     let cell = source[column]
-                    cells[y * cols + column] = Cell(
-                        codepoint: cell.codepoint,
-                        attrs: UInt8(truncatingIfNeeded: cell.attrs),
-                        fg: cell.fg,
-                        bg: cell.bg,
-                        width: cell.width
-                    )
+                    cells[y * cols + column] = Cell(cell, links: links)
                 }
             }
         }
@@ -343,6 +336,7 @@ final class PaneView: NSView {
             alt = frame.alt_screen != 0
         }
         applyText(frame.text, count: frame.text_count)
+        refreshLinkHover()
         screenChanged()
         return true
     }

@@ -3084,3 +3084,6 @@ fn an_unterminated_synchronized_update_shows_after_the_timeout() {
 
 #[path = "host/status_sync.rs"]
 mod status_sync;
+
+#[path = "host/osc8.rs"]
+mod osc8;

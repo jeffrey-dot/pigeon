@@ -6,6 +6,7 @@ struct TerminalCell: Equatable, Sendable {
     var bg: UInt32
     var width: UInt8
     var extraText: String? = nil
+    var hyperlink: String? = nil
 
     var text: String {
         if width == 0 { return "" }

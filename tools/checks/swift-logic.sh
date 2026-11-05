@@ -11,11 +11,11 @@ for file in AgentInfo Grouping GitRoot SessionRef SessionRow SessionReducer Sess
 done
 cp "$root/clients/macos/Sources/PigeonApp/Net/Host/HostConnection.swift" "$work/Sources/PigeonApp/"
 cp "$root/clients/macos/Sources/PigeonApp/Net/Connection/Heartbeat.swift" "$work/Sources/PigeonApp/"
-for file in TerminalCell TerminalSelection; do
+for file in TerminalCell TerminalSelection TerminalLinks; do
     cp "$root/clients/macos/Sources/PigeonApp/Terminal/$file.swift" "$work/Sources/PigeonApp/"
 done
 cp "$root/clients/macos/Sources/PigeonApp/Terminal/Render/CellAttrs.swift" "$work/Sources/PigeonApp/"
-for file in SessionReducerTests SessionRefTests AgentRowTests HostConnectionTests SelectionTests SidebarTests StatusPersistenceTests StatusVisibilityTests StatusSnapshotTests; do
+for file in SessionReducerTests SessionRefTests AgentRowTests HostConnectionTests SelectionTests SidebarTests StatusPersistenceTests StatusVisibilityTests StatusSnapshotTests TerminalLinksTests; do
     cp "$root/clients/macos/Tests/PigeonAppTests/$file.swift" "$work/Tests/PigeonAppTests/"
 done
 cat > "$work/Package.swift" <<'SWIFT'

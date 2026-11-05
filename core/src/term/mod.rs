@@ -8,6 +8,8 @@ pub mod alacritty;
 pub mod frozen;
 pub(crate) mod history_budget;
 pub mod sync_timeout;
+pub(crate) mod hyperlink;
+mod osc8_filter;
 
 /// Attribute bits, mirrored by `PG_ATTR_*` in the C ABI and by the protocol's
 /// `cell[1]`.
@@ -28,12 +30,15 @@ pub struct Cell {
     pub fg: u32,
     pub bg: u32,
     pub attrs: u32,
+    /// Pane-local identity; never resolve it against a different frame’s table.
     /// 0 = no hyperlink.
     pub link: u32,
     /// 0 = wide-char continuation, 1 = normal, 2 = owns the next cell.
     pub width: u8,
     /// Complete UTF-8 text when this cell has attached zero-width codepoints.
     pub extra_text: Option<std::sync::Arc<str>>,
+    /// Owned URI, independent of later frames and the terminal lifetime.
+    pub hyperlink: Option<std::sync::Arc<str>>,
 }
 
 impl Cell {
@@ -45,6 +50,7 @@ impl Cell {
         link: 0,
         width: 1,
         extra_text: None,
+        hyperlink: None,
     };
 
     /// Text preserved by this cell, excluding a wide character's continuation.

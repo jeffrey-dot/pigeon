@@ -14,6 +14,8 @@ use alacritty_terminal::term::color::Colors;
 use alacritty_terminal::term::{Config, Term as VtTerm, TermDamage, TermMode};
 use alacritty_terminal::vte::ansi::{CursorShape, Processor, Rgb};
 
+use super::hyperlink::LinkExport;
+use super::osc8_filter::Osc8Filter;
 use super::sync_timeout::SyncTimeout;
 use super::{Cell, Cursor, Snapshot, Term};
 
@@ -116,6 +118,7 @@ impl EventListener for ReplySink {
 pub struct AlacrittyTerm {
     term: VtTerm<ReplySink>,
     parser: Processor<SyncTimeout>,
+    links: Osc8Filter,
     replies: Arc<Mutex<Vec<u8>>>,
     size: Arc<Mutex<GridSize>>,
     title: Arc<Mutex<Option<String>>>,
@@ -148,6 +151,7 @@ impl AlacrittyTerm {
         Self {
             term: VtTerm::new(config, &size, sink),
             parser: Processor::<SyncTimeout>::new(),
+            links: Osc8Filter::default(),
             replies,
             size: size_cell,
             title,
@@ -157,7 +161,7 @@ impl AlacrittyTerm {
 
     /// `cols` comes from the caller, which reads the size once per picture rather than
     /// locking it for every row.
-    fn convert_row(&self, line: Line, colors: &Colors, cols: u16) -> Vec<Cell> {
+    fn convert_row(&self, line: Line, colors: &Colors, cols: u16, links: &mut LinkExport) -> Vec<Cell> {
         #[cfg(test)]
         if line.0 < 0 {
             CONVERTED_HISTORY_ROWS.set(CONVERTED_HISTORY_ROWS.get() + 1);
@@ -166,7 +170,7 @@ impl AlacrittyTerm {
         (0..usize::from(cols))
             .map(|col| {
                 let cell = &grid[Point::new(line, Column(col))];
-                cell::convert(cell, colors)
+                cell::convert(cell, colors, links)
             })
             .collect()
     }
@@ -184,8 +188,9 @@ impl AlacrittyTerm {
     fn picture(&self, max_history: usize) -> Snapshot {
         let size = self.size();
         let colors = self.term.colors();
+        let mut links = LinkExport::default();
         let screen = (0..size.rows)
-            .map(|row| self.convert_row(Line(i32::from(row)), colors, size.cols))
+            .map(|row| self.convert_row(Line(i32::from(row)), colors, size.cols, &mut links))
             .collect();
         let history = if size.history == 0 || max_history == 0 {
             Vec::new()
@@ -196,7 +201,7 @@ impl AlacrittyTerm {
             let skip = available.saturating_sub(max_history);
             let start = topmost.saturating_add(i32::try_from(skip).unwrap_or(i32::MAX));
             (start..0)
-                .map(|line| self.convert_row(Line(line), colors, size.cols))
+                .map(|line| self.convert_row(Line(line), colors, size.cols, &mut links))
                 .collect()
         };
         let mut snapshot = self.frame(size);
@@ -224,7 +229,7 @@ impl AlacrittyTerm {
 
 impl Term for AlacrittyTerm {
     fn feed(&mut self, bytes: &[u8]) {
-        self.parser.advance(&mut self.term, bytes);
+        self.parser.advance(&mut self.term, &self.links.filter(bytes));
     }
 
     fn sync_deadline(&self) -> Option<std::time::Instant> {
@@ -263,8 +268,10 @@ impl Term for AlacrittyTerm {
         let cols = self.size().cols;
         let mut budget = super::history_budget::HistoryBudget::new(bytes);
         let keep = (grid.topmost_line().0..0).rev().take_while(|line| {
-            budget.take_row(cols, (0..usize::from(cols)).filter_map(|col| {
-                cell::ExportedText::new(&grid[Point::new(Line(*line), Column(col))]).extra_len()
+            budget.take_row(cols, (0..usize::from(cols)).flat_map(|col| {
+                let cell = &grid[Point::new(Line(*line), Column(col))];
+                [cell::ExportedText::new(cell).extra_len(), cell.hyperlink().map(|link| link.uri().len())]
+                    .into_iter().flatten()
             }))
         }).count();
         self.picture(keep)
@@ -273,10 +280,11 @@ impl Term for AlacrittyTerm {
     fn screen_rows(&self, rows: &[u16]) -> (Vec<(u16, Vec<Cell>)>, Snapshot) {
         let size = self.size();
         let colors = self.term.colors();
+        let mut links = LinkExport::default();
         let picked = rows
             .iter()
             .filter(|y| **y < size.rows)
-            .map(|y| (*y, self.convert_row(Line(i32::from(*y)), colors, size.cols)))
+            .map(|y| (*y, self.convert_row(Line(i32::from(*y)), colors, size.cols, &mut links)))
             .collect();
         (picked, self.frame(size))
     }
@@ -289,10 +297,11 @@ impl Term for AlacrittyTerm {
             return (view, total);
         }
         let colors = self.term.colors();
+        let mut links = LinkExport::default();
         // Screen line 0 is `Line(0)`; history runs to `Line(-total)`. Shifting the window up
         // by `offset` reads exactly `rows` lines, so a step costs one screen, not 10k lines.
         view.screen = (0..i32::from(view.rows))
-            .map(|row| self.convert_row(Line(row - offset as i32), colors, view.cols))
+            .map(|row| self.convert_row(Line(row - offset as i32), colors, view.cols, &mut links))
             .collect();
         // The cursor belongs to the live screen; drawing it over history would lie.
         view.cursor.visible = false;

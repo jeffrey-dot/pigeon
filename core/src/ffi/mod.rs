@@ -16,6 +16,8 @@ use std::ptr;
 use crate::api::{self, Axis, Core, PgError, PgResult, StatusKind, StatusState};
 
 mod cell_text;
+mod links;
+pub use links::PgLink;
 mod status;
 mod status_snapshot;
 pub use status::*;
@@ -380,6 +382,9 @@ pub struct PgSnapshot {
     /// Sparse complete text; omitted cells contain only their codepoint.
     pub text_count: u32,
     pub text: *const PgCellText,
+    /// Complete URI table for this snapshot’s cells; owned until pg_snapshot_free.
+    pub link_count: u32,
+    pub links: *const PgLink,
 }
 
 /// Owned by the caller; free with [`pg_snapshot_free`]. Immutable, thread-safe.
@@ -433,6 +438,7 @@ pub extern "C" fn pg_snapshot_free(snap: *mut PgSnapshot) {
         // exactly these lengths (rows × cols, history_count × cols) and are reclaimed once here.
         unsafe {
             cell_text::free(snap.text_count, snap.text);
+            links::free(snap.link_count, snap.links);
             if rows > 0 && !snap.screen.is_null() {
                 reclaim((*snap.screen).cells.cast_mut(), rows * cols);
             }
@@ -519,6 +525,8 @@ pub(crate) fn build_snapshot(
         history_count,
         text_count: 0,
         text: ptr::null(),
+        link_count: 0,
+        links: ptr::null(),
     });
 
     // The rows borrow the cell grids, so all three allocations leak together and
@@ -765,6 +773,7 @@ fn snapshot_to_ffi(
                     .map(|(y, row)| (y as i32 - text_history.len() as i32, row.as_slice())),
             ),
     )?;
+    let links = links::OwnedLinks::new(snapshot.screen.iter().chain(text_history.iter()).flatten());
     let result = build_snapshot(
         pane_id,
         snapshot.cols,
@@ -790,6 +799,7 @@ fn snapshot_to_ffi(
     unsafe {
         (*result).text_count = count;
         (*result).text = text;
+        ((*result).link_count, (*result).links) = links.into_raw();
     }
     Ok(result)
 }

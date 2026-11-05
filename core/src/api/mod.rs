@@ -15,6 +15,8 @@
 //! ```
 
 mod core;
+mod links;
+pub use links::cell_links;
 mod msg;
 mod outbox;
 mod status;

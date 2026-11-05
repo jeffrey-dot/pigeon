@@ -17,7 +17,8 @@
 ## 已知限制
 
 引擎不暴露 `scroll_region`，DECSTBM 滚动区恒等于整屏。
-OSC 8 的 `hyperlink_id` 恒为 0，`cell[4]` 不上线。两条都记在 [plan.md §11](../plan.md)，不是 bug。
+OSC 8 经 Term 保留 URI、协议和双外形接口传递，macOS 已接 Cmd+click；Linux 点击与 macOS GUI 验收待补。
+链接上限与安全策略见 [OSC 8](../osc8.md)；DECSTBM 限制见 [plan.md §11](../plan.md)。
 
 ## 何时重开
 

@@ -43,7 +43,7 @@ impl HistoryBudget {
                 self.take_row(
                     cols,
                     row.iter()
-                        .filter_map(|cell| cell.extra_text.as_ref().map(|text| text.len())),
+                        .flat_map(|cell| [cell.extra_text.as_ref(), cell.hyperlink.as_ref()].into_iter().flatten().map(|text| text.len())),
                 )
             })
             .count();

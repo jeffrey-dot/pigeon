@@ -91,7 +91,8 @@ PgSnapshot {            // 字段以 include/pigeon_core.h 为准，此处只写
 - **滚动缓冲**：嵌入接口 `PgConfig.scrollback_lines = 0` 取默认 10,000 行，上限 100,000；宿主当前固定 10,000 行，未暴露配置。macOS attach 使用 `history:false`，回看由宿主按 `scroll` 请求切出一屏。
 - 软换行由 `ATTR_WRAP` / `PG_ATTR_WRAP`（64）标在行末格，快照/增量/历史保留；macOS 复制自动折行时不插入换行。
 - **文本扩展**：Rust `Cell.text()` 返回主码点及附加文本；C ABI 在 PgSnapshot/PgDelta 尾部追加 PgCellText 表，表和字符串由快照持有并随其释放，PgCell 数组步长不变。
-- **当前数据限制**：已保留引擎 cell 中的附加码点，但跨多个宽 cell 的完整字素宽度/整簇重排仍未实现；OSC 8 链接未下发，DECSTBM 的导出范围为整屏。详见 [plan.md §11](plan.md#11-当前能力与已知缺口)。
+- **当前数据限制**：已保留引擎 cell 中的附加码点，但跨多个宽 cell 的完整字素宽度/整簇重排仍未实现；OSC 8 已保留 URI 并随快照/delta/历史下发，macOS 可点击、Linux 点击待接（[限制与验收](osc8.md)）；DECSTBM 的导出范围为整屏。详见 [plan.md §11](plan.md#11-当前能力与已知缺口)。
+- **链接所有权**：Cell 拥有 URI，C ABI 在 PgSnapshot/PgDelta 尾部提供拥有的 PgLink 表、PgCell 步长不变；每帧独立解析，未知编号无链接。输入/导出上限与客户端策略见 [OSC 8](osc8.md)。
 - **文本所有权与预算**：FFI 先保留文本/行缓冲的 Rust 所有权，完成所有可失败校验后再转交 C。历史与 backlog 计费包含文本；历史先借用预检计费，再转换能完整容纳的最新连续后缀。密集整屏仍可能超过单帧上限，限制与回归见 [text-followup.md](text-followup.md)。
 
 ## 6. 语言选型

@@ -15,6 +15,10 @@ for file in Wire StatusSnapshot+Wire; do
     cp "$root/clients/macos/Sources/PigeonApp/Net/Connection/$file.swift" "$work/Sources/PigeonApp/"
 done
 cp "$root/clients/macos/Tests/PigeonAppTests/StatusSnapshotWireTests.swift" "$work/Tests/PigeonAppTests/"
+for file in TerminalCell TerminalLinks TerminalLinks+Wire; do
+    cp "$root/clients/macos/Sources/PigeonApp/Terminal/$file.swift" "$work/Sources/PigeonApp/"
+done
+cp "$root/clients/macos/Tests/PigeonAppTests/TerminalLinksWireTests.swift" "$work/Tests/PigeonAppTests/"
 cat > "$work/Package.swift" <<'SWIFT'
 // swift-tools-version:6.0
 import PackageDescription
