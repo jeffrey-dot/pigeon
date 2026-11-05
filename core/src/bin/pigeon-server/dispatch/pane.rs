@@ -49,17 +49,24 @@ pub async fn new_session(
     id: u32,
     cwd: Option<String>,
     requested: Option<String>,
+    environment: std::collections::BTreeMap<String, String>,
 ) -> Message {
+    if pigeon_core::api::validate_session_environment(&environment).is_err() {
+        return Message::Error { code: "invalid_arg".into(),
+            detail: "invalid or oversized session environment; terminal capability variables are reserved".into(), id: Some(id) };
+    }
     let shell = requested.unwrap_or_else(|| host.shell.clone());
     let launch_cwd = cwd.clone().unwrap_or_default();
-    let Some((pane_id, sender)) = spawn_pane(host, &shell, cwd, DEFAULT_COLS, DEFAULT_ROWS) else {
+    let Some((pane_id, sender)) =
+        spawn_pane(host, &shell, cwd, &environment, DEFAULT_COLS, DEFAULT_ROWS)
+    else {
         return Message::Error {
             code: "internal".into(),
             detail: "cannot spawn the shell".into(),
             id: Some(id),
         };
     };
-    let session = Session::new(
+    let mut session = Session::new(
         pane_id,
         sender,
         &shell,
@@ -67,6 +74,7 @@ pub async fn new_session(
         DEFAULT_COLS,
         DEFAULT_ROWS,
     );
+    session.environment = environment;
     host.sessions.lock().await.insert(pane_id, session);
     // The pane may have announced its title (a shell that sets it on start) before the
     // session was in the table, and that list went out without the session; this one has it.

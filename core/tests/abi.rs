@@ -617,3 +617,6 @@ mod status_sync;
 mod osc8;
 #[path = "abi/text_query.rs"]
 mod text_query;
+
+#[path = "abi/session_environment.rs"]
+mod session_environment;

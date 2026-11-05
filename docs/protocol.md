@@ -8,10 +8,10 @@
 
 本文保留字段契约；定义了字段不等于所有路径已实现。当前差异如下：
 
-- 宿主提供 `delta`、`scrollback`、`osc7501`、`status_all`、`status_snapshot`、`text_query`；macOS 请求 `delta`、`scrollback`、`status_all`、`status_snapshot`，Linux 请求 `delta`、`scrollback`、`status_all`、`status_snapshot`，首帧快照之后应用连续增量，回看由宿主 `scroll` 切片。
+- 宿主提供 `delta`、`scrollback`、`osc7501`、`status_all`、`status_snapshot`、`text_query`、`session_env`；macOS 请求 `delta`、`scrollback`、`status_all`、`status_snapshot`，Linux 请求 `delta`、`scrollback`、`status_all`、`status_snapshot`，首帧快照之后应用连续增量，回看由宿主 `scroll` 切片。
 - `zstd` 是预留能力，宿主不提供，当前 payload 为裸 CBOR，无压缩 tag。
 - `snapshot`/`delta` 已下发 OSC 8 链接，含历史、回看与续传；每帧独立解析为格子拥有的 URI，macOS 可 Cmd+click，Linux 点击待接。设计/限制见 [OSC 8](osc8.md)。基础 cell 仍为单码点，附加码点通过 `text` 稀疏表传递。
-- `new_session.env` 能编解码，但宿主尚未应用；结构化 `mouse` 能编解码但宿主返回 `unsupported`。
+- `new_session.env` 已应用到该会话及后续分屏，独立于宿主/其它会话；终端能力变量保留、输入上限及失败行为见 §3.2。结构化 `mouse` 仍返回 `unsupported`。
   macOS 将鼠标按当前 VT 模式编码成 `keys.bytes`，不是发送 `mouse`。
 - `status_snapshot` 已实现完整未确认记录集合与独立修订号；macOS 已请求该能力，并通过 C ABI 读取；Linux 已通过安全 API 接入本地侧栏和逐条显式确认。
 - `status_all` 通过独立 `status` 帧补发状态，协商 `status_snapshot` 后改用完整集合；`sessions` 本身不包含状态记录。未协商 `status_all` 的连接仍接收已 attach pane 的状态，不能靠未请求 `osc7501` 推断不会收到 `status`。
@@ -69,7 +69,7 @@
 | 方向 | 消息 | 必选字段 | 可选字段 | 说明 |
 |---|---|---|---|---|
 | s→c | `sessions` | `items: [{session_id: u32, title: str, cwd: str, panes: [u32]}]`（c→s 的请求里可以省略，视为空数组） | `active_pane: u32`, `active_title: str`（每个 item 内的可选字段） | 连接建立后的首次全量列表；标题/cwd 变化时宿主会重新下发整张列表；`active_pane` 是 layout 里的焦点，`active_title` 来自 OSC 0/2 |
-| c→s | `new_session` | `id: u32` | `cwd: str`, `shell: str`, `env: {str: str}` | `env` 与宿主环境合并，同名覆盖 |
+| c→s | `new_session` | `id: u32` | `cwd: str`, `shell: str`, `env: {str: str}` | `env` 与宿主环境合并，同名覆盖；上限及保留变量见下文 |
 | s→c | `created` | `id: u32`, `session_id: u32`, `pane_id: u32` | — | `id` 回显请求的 `id` |
 | c→s | `close_pane` | `id: u32`, `pane_id: u32` | — | 关闭 pane 及其进程组（SIGHUP → SIGKILL） |
 | c→s | `split_pane` | `id: u32`, `pane_id: u32`, `axis: "v"\|"h"`, `ratio: f32` | — | `v` = 左右并排，`h` = 上下堆叠；`ratio` ∈ (0,1)，被夹到最小尺寸内 |
@@ -82,7 +82,15 @@
 | s→c | `size_state` | `pane_id: u32`, `cols: u16`, `rows: u16`, `source: str`, `clients: u8` | — | `source` ∈ `latest`/`smallest`/`locked`；客户端据此在侧栏标注当前尺寸来源 |
 | s→c | `pane_exited` | `pane_id: u32`, `code: i32` | — | 进程退出；pane 记录保留到 `close_pane`。`attach` 一个已经退出的 pane 时，快照后紧跟一条 |
 
-### 3.3 屏幕
+#`new_session.env` 为该会话启动环境覆盖，后续 split 继承相同覆盖，不读取另一个 pane 运行中的进程环境。
+省略或空 map 仅继承宿主环境；值为空字符串确实覆盖为空，不表示删除。宿主环境与其它会话不变。
+名称为 `[A-Za-z_][A-Za-z0-9_]*`、最多 255 UTF-8 字节；值最多 32 KiB、不得包含 NUL；
+最多 128 项，按 `Σ(name bytes + value bytes + 2)` 合计最多 64 KiB。宿主固定的 `TERM`、`COLORTERM`、
+`PI_PROGRAM_STATUS` 不允许请求覆盖；任意非法项在创建 PTY 前整份拒绝，返回 `error{code:"invalid_arg",id}`，不回显变量值。
+宿主继承环境和操作系统自身的 exec 大小限制仍可能导致创建失败。`session_env` 能力用于客户端探测旧宿主是否真的应用 env；
+已定义的 env 字段不要求新能力才可发送，新客户端如依赖覆盖效果应先确认协商成功。当前 GUI 尚无环境编辑入口。
+
+## 3.3 屏幕
 
 | 方向 | 消息 | 必选字段 | 可选字段 | 说明 |
 |---|---|---|---|---|
@@ -231,6 +239,7 @@ literal 允许 LF、拒绝其它控制字符，长度 1–256 UTF-8 字节；大
 
 | 名称 | 方向 | 语义 | 未协商时的行为 |
 |---|---|---|---|
+| `session_env` | c→s | 宿主应用会话 env 覆盖并由后续分屏继承；限制与保留变量见 §3.2 | 旧宿主可能忽略 env，依赖覆盖效果时应禁用入口 |
 | `text_query` | 双向 | 有界 literal 搜索和范围提取；独立 generation、请求 id、分页 | 新客户端禁用入口；新宿主拒绝未协商请求 |
 | `delta` | s→c | 快照之后发 `delta` | 只发 `snapshot`；客户端按需重新 `attach` |
 | `scrollback` | s→c | `snapshot.history` 与 `scroll` 可用 | 不下发历史，客户端隐藏滚动条 |
@@ -286,6 +295,7 @@ literal 允许 LF、拒绝其它控制字符，长度 1–256 UTF-8 字节；大
 | `PgCell.hyperlink_id` + `PgSnapshot/PgDelta.links` | `cell[4]` + 同帧 `links`；表由快照/delta 持有，PgCell 步长不变 |
 | `PgCell.width` | 由 `codepoint` 推导，不上线 |
 | `PgStatus.state/kind/msg/seq` | `status.state/kind/msg/seq`（旧 focused-pane 接口包含已确认存储记录） |
+| `pg_msg_set_session_env` | 与 Rust `api::set_session_env` 共用有界校验、失败不修改消息；先设置 new_session.id，再逐项设置 env |
 | `pg_text_query` / `pg_msg_text_query` / `pg_msg_text_result` + `pg_text_result_info/hit/text/free` | 同一 TextQuery 语义用于嵌入 Core 与宿主请求；结果 handle 独立拥有文本，Rust 为 `Core::text_query` / `text_query_message` / `text_result_of` |
 | `pg_status_snapshot_new` / `pg_msg_status_snapshot` + `pg_status_snapshot_info/at/free` | `status_snapshot` 的完整未确认集合；Rust 为 `Core::status_snapshot` / `api::status_snapshot_of`，独立所有权、读取不消费 |
 | `PgRect` | `layout.tree` 的展开结果，不上线 |

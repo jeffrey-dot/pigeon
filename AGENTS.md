@@ -5,7 +5,7 @@
 macOS 已有分屏、回看、zoom、agent 侧栏、SSH 三档对接、Metal 渲染、增量更新、选择复制粘贴、鼠标上报与
 `NSTextInputClient` 输入法、Kitty keyboard protocol、编程连字；Linux 已有 GTK4/OpenGL 网格、本地宿主连接、分屏与 zoom、增量更新、IME、滚动回看、复制当前屏幕与异步粘贴，尚未功能对齐。
 2026-11-05 核对：宿主已实现同 pane 完整状态快照与独立修订号；macOS 与 Linux 均已协商并提供 Status Records 逐条查看/确认，Linux 已接本地多会话侧栏；跨重启持久化仅 macOS 已接，见 `docs/status-sync.md`、`docs/status-client.md`、`docs/linux-sidebar-progress.md`。
-2026-11-05 核对：OSC 8 已经核心、宿主帧与双外形接口传递；macOS 已接 hover/Cmd+click（仅 http/https，AppKit/GUI 待验），Linux 点击待接，见 `docs/osc8.md`。
+2026-11-05 核对：OSC 8 已经核心、宿主帧与双外形接口传递；macOS 已接 hover/Cmd+click（仅 http/https，AppKit CI 通过，真实 GUI 待验），Linux 点击待接，见 `docs/osc8.md`。
 2026-11-05：核心/宿主提供 generation 绑定的 literal 搜索与范围分页；两端搜索 UI、regex 和稳定锚点待做，见 `docs/text-query.md`。
 当前缺口以 `docs/plan.md` §11 为准；`docs/m*-checklist.md` 是各阶段的历史验收证据，不代表当前全功能已验收。
 
@@ -40,7 +40,7 @@ tools/vt-parity/run.sh          # 8 条 VT 语料与已提交的 tmux golden 对
 ```
 
 新增功能须先确定模块归属，不要为了跑通而把逻辑塞进 `main.rs` 或 `PigeonApp.swift`。
-宿主为新 pane 固定声明 `TERM=xterm-256color` 与 `COLORTERM=truecolor`；真实 PTY 测试使用独立 HOME/配置目录，不继承用户 rc。`tools/checks/swift-logic.sh` 可在有 Swift 的 Linux/macOS 上复跑侧栏和选择纯逻辑，但不替代 macOS AppKit 验收。
+宿主为新 pane 固定声明 `TERM=xterm-256color` 与 `COLORTERM=truecolor`；`new_session.env` 覆盖普通环境变量并由分屏继承，不允许覆盖这两个能力变量或 `PI_PROGRAM_STATUS`，见 `docs/protocol.md`；真实 PTY 测试使用独立 HOME/配置目录，不继承用户 rc。`tools/checks/swift-logic.sh` 可在有 Swift 的 Linux/macOS 上复跑侧栏和选择纯逻辑，但不替代 macOS AppKit 验收。
 `tools/bench/host-bench.py --out /tmp/pigeon-bench-result` 记录隔离 release 宿主的协议回显、快照重连和短时输出样本，不代表 GUI 显示延迟；见 `docs/host-benchmark.md`。
 `swift test` 需要完整 Xcode（`xcode-select` 指向 CommandLineTools 时用 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`）。
 

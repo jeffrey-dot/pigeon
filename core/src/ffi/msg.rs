@@ -21,8 +21,10 @@ use super::{ffi_call, PgAxis, PgRect, PgSnapshot, PgSplit, PgStr};
 use crate::api::{self, Axis, Message, PgError, PgResult, MAX_FRAME};
 
 mod msg_type;
+mod session_environment;
 pub use msg_type::PgMsgType;
 use msg_type::{name_of, type_of};
+pub use session_environment::pg_msg_set_session_env;
 
 /// Opaque message handle. Holds either a decoded message or a message being
 /// built field by field.

@@ -3089,3 +3089,6 @@ mod status_sync;
 mod osc8;
 #[path = "host/text_query.rs"]
 mod text_query;
+
+#[path = "host/session_environment.rs"]
+mod session_environment;

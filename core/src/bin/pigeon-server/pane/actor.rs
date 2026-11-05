@@ -41,6 +41,7 @@ pub fn spawn_pane(
     host: &HostState,
     shell: &str,
     cwd: Option<String>,
+    environment: &std::collections::BTreeMap<String, String>,
     cols: u16,
     rows: u16,
 ) -> Option<(u32, mpsc::Sender<Cmd>)> {
@@ -52,6 +53,9 @@ pub fn spawn_pane(
     };
     let pair = native_pty_system().openpty(size).ok()?;
     let mut command = CommandBuilder::new(shell);
+    for (name, value) in environment {
+        command.env(name, value);
+    }
     command.env("PI_PROGRAM_STATUS", "1");
     // The starter may be a Linux console or another emulator. Its terminfo would
     // advertise capabilities unrelated to the VT state owned by this host.

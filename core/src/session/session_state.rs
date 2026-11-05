@@ -12,6 +12,8 @@ use crate::layout::{Axis, Layout, LayoutNode, Rect};
 use crate::proto::{Message, Node, SessionInfo, SplitAxis, SplitNode};
 
 pub struct SessionState<P> {
+    /// Explicit launch overrides inherited by later split panes, never host-global.
+    pub environment: std::collections::BTreeMap<String, String>,
     pub layout: Layout,
     pub panes: HashMap<u32, P>,
     pub vote: SizeVote,
@@ -30,6 +32,7 @@ impl<P> SessionState<P> {
         let mut panes = HashMap::new();
         panes.insert(pane_id, pane);
         Self {
+            environment: Default::default(),
             layout: Layout::new(pane_id),
             panes,
             vote: SizeVote::default(),

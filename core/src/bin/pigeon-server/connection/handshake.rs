@@ -10,6 +10,7 @@ use crate::host::state::HostState;
 
 /// Capabilities this build offers (protocol §5).
 const SERVER_FEATURES: &[&str] = &[
+    "session_env",
     "delta",
     "scrollback",
     "osc7501",

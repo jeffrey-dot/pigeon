@@ -24,14 +24,17 @@ pub async fn split(
     };
     // fork/exec takes milliseconds: done without the sessions lock, which every keystroke
     // and every other window needs. The size is read first and the tree edited after.
-    let (cols, rows) = {
+    let (cols, rows, environment) = {
         let map = host.sessions.lock().await;
         let Some(session_id) = session_of(&map, pane_id) else {
             return Some(no_such_pane(pane_id, Some(id)));
         };
-        map.get(&session_id)?.split_size(axis)
+        let session = map.get(&session_id)?;
+        let (cols, rows) = session.split_size(axis);
+        (cols, rows, session.environment.clone())
     };
-    let Some((new_pane, sender)) = spawn_pane(host, &host.shell, None, cols, rows) else {
+    let Some((new_pane, sender)) = spawn_pane(host, &host.shell, None, &environment, cols, rows)
+    else {
         return Some(Message::Error {
             code: "internal".into(),
             detail: "cannot spawn the shell".into(),

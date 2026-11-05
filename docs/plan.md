@@ -289,7 +289,7 @@ M0–M1 可以直接复用现有代码：内核的对账语料（来自 tmux 阶
 | Unicode 字素与整形 | 已保留引擎附加码点，经稀疏 text 表传到快照/delta/历史/C ABI；两端按 cell 文本整形，macOS 复制保留码点。跨宽 cell 的 ZWJ emoji 整簇宽度仍待补；单格文本边界上限 4096 字节，GUI 视觉待验。需要从内核快照、协议/接口到客户端一起补 |
 | 文本资源预算 | 稀疏表计入历史/backlog 预算，FFI 在校验成功后转移所有权；Linux 整形结果缓存最多 1024 项/1 MiB 计费。历史按预算预检后只转换完整连续后缀，字体字节随所有者回收。密集整屏 text 仍可能超 8 MiB，引擎内部零宽码点尚无完整上限；2 MiB 计费不是 RSS 上限，见 [文本预算](text-budget-progress.md) |
 | 搜索与完整文本选择 | 2026-11-05 核心/宿主已实现有界 literal 搜索与文本范围分页，独立 generation 检测过期；两端 UI、regex、Unicode 折叠和稳定锚点尚未完成，见 [文本查询](text-query.md)。macOS 选择和“Select All”只覆盖当前屏幕。已新增 `ATTR_WRAP` 并在 macOS 复制时保留逻辑换行；旧宿主无标志时仍按网格行处理 |
-| OSC 8 / OSC 52 | OSC 8 链接已经核心、snapshot/delta/history、Rust/C 接口保留；macOS 已接纯文本 hover 和 http/https Cmd+click，复审修复取消序列与点击目标变化，AppKit/GUI 待验；Linux 点击待接。OSC 52 事件仍被忽略，远端程序复制到本地剪贴板不可用。见 [osc8.md](osc8.md) |
+| OSC 8 / OSC 52 | OSC 8 链接已经核心、snapshot/delta/history、Rust/C 接口保留；macOS 已接纯文本 hover 和 http/https Cmd+click，复审修复取消序列与点击目标变化，AppKit CI 通过、真实 GUI 待验；Linux 点击待接。OSC 52 事件仍被忽略，远端程序复制到本地剪贴板不可用。见 [osc8.md](osc8.md) |
 | 现代终端协议 | macOS 已接 Kitty keyboard protocol 与应用小键盘，Linux 仍为 legacy；DEC 2026 同步输出与超时已接；图片协议、OSC 9;4 进度、完整 OSC 133 命令边界/命令输出导航未实现。不能把底层 VT 库的能力当成产品端到端能力 |
 | agent 记录同步 | 多 pane 状态聚合、来源 ack、跨应用重启事件身份持久化和重播去重已实现；按 host/instance/pane/seq/record 隔离，缓存报告/旧屏幕不作查看依据。宿主与双外形接口已提供同 pane 完整未确认集合及独立 revision，ack/clear/退出立即广播；macOS 已协商完整集合并提供 Status Records 面板逐条查看/显式确认，旧宿主仍走单条路径；Linux 本地侧栏也已接完整集合与逐条确认，尚无跨重启 seen。身份集合有界存储、多进程写入一致性和 AppKit 交互仍待验收 |
 | agent 接入与通知 | 目前注入 `PI_PROGRAM_STATUS=1`，其它程序必须自行上报 OSC 7501；没有通用的上报工具/接入指南、完整适配矩阵或桌面通知投递。不能把“能运行 agent”写成“能自动显示其状态” |
@@ -298,7 +298,7 @@ M0–M1 可以直接复用现有代码：内核的对账语料（来自 tmux 阶
 | C 档远端尺寸 | 退化模式本地 VT 会 resize，尚无本地 PTY 向 ssh 转发 `TIOCSWINSZ`，远端尺寸不能随窗口可靠更新 |
 | 配置与易用性 | 字体配置仅启动时读取；未提供完整自定义键位、主题配置与热重载、命令面板。宿主回看固定 10,000 行；嵌入接口的 100,000 行上限并非宿主可配置项 |
 | 多客户端尺寸设置 | 三种策略已有测试，但实现的 `SizeVote` 存在会话级，与协议的 pane 级契约有差异；macOS 默认 latest，缺策略选择 UI，Linux 未展示尺寸来源 |
-| 协议保留项与接口一致性 | `zstd` 尚未协商/实现；`new_session.env` 被宿主忽略，结构化 `mouse` 消息返回 unsupported（macOS 用 `keys` 发送编码后的鼠标字节）。`api::delta_of` 与 FFI 已统一，新增静态 import 检查 |
+| 协议保留项与接口一致性 | `zstd` 尚未协商/实现；`new_session.env` 已按会话隔离并由分屏继承，GUI 编辑入口未接；结构化 `mouse` 消息返回 unsupported（macOS 用 `keys` 发送编码后的鼠标字节）。`api::delta_of` 与 FFI 已统一，新增静态 import 检查 |
 | 安装控制与分发 | 远端安装层有 `allowInstall` 参数，但首次安装确认、`--no-remote-install` / `--remote-dir` 未接用户入口；macOS 缺 Developer ID 签名/公证，Linux GUI 无发布包。见 [update.md](update.md) |
 | 验收深度 | 已有 [宿主协议基线](host-benchmark.md) 的回显、快照重连和最多 16 pane 短时输出原始样本；完整 `vttest`/属性对账、fuzz、GUI/IME/无障碍、持续输出、弱网时延和功耗仍待补。8 条文本 golden 只覆盖基础场景；core unsafe/生产 panic 有编译 lint；Linux unsafe 限定在 gl.rs，Xvfb 资源回收 CI 通过；平台依赖静态检查仍待补 |
 | TERM/terminfo 后续 | 已修复继承外部 TERM：新 pane 固定 xterm-256color/truecolor，四种外部环境回归通过；专用 terminfo 随现代能力完善 |
@@ -307,4 +307,4 @@ M0–M1 可以直接复用现有代码：内核的对账语料（来自 tmux 阶
 **优化前核对证据**：8 条已提交 VT golden 通过。用 `vt-dump` 输入 `e\u0301` 得到 `e`，输入 `👩\u200d💻` 得到 `👩💻`，确认组合码点在快照转换时丢失；预组字符 `é` 保留。
 Linux 默认环境 `TERM=linux` 下，`cargo test --manifest-path core/Cargo.toml --offline` 的 `vim_alternate_screen_survives_a_reconnect` 超时。
 改用 `TERM=xterm-256color cargo test --manifest-path core/Cargo.toml --offline --quiet` 后全量通过：194 passed，2 ignored（含文档测试）。
-上述 TERM 问题已在本轮修复；后续实现与验证见 [优化执行记录](optimization-progress.md)。`73813d5` 的 Rust 双平台、GTK/GL 资源、宿主基线 smoke 和 macOS 15 Intel Swift 完整构建/测试已由 CI 通过；OSC 8 整合 CI、Apple Silicon 最终版本与真实 GUI 仍待验。
+上述 TERM 问题已在本轮修复；后续实现与验证见 [优化执行记录](optimization-progress.md)。`03b1a41` 的 Rust 双平台、GTK/GL 资源、宿主基线 smoke 和 macOS 15 Intel Swift 完整构建/测试已由 CI 全部通过；session env 新切片、Apple Silicon 最终版本与真实 GUI 仍待验。

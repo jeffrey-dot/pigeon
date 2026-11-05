@@ -837,6 +837,12 @@ bool pg_msg_session_at(const PgMsg *msg, size_t index, struct PgSessionInfo *out
  */
 size_t pg_msg_session_panes(const PgMsg *msg, size_t index, uint32_t *out, size_t cap);
 
+/**
+ * Adds/replaces one new_session environment entry. Set the request id first.
+ * Reserved capability variables, invalid strings and budgets fail without mutation.
+ */
+bool pg_msg_set_session_env(PgMsg *msg, struct PgStr name, struct PgStr value);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

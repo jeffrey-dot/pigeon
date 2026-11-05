@@ -33,8 +33,9 @@
 | `8ccaeb3` | [41888692090](https://github.com/jeffrey-dot/pigeon/actions/runs/41888692090) | 全部通过：Rust Ubuntu/macOS 15 Intel、GTK、Swift、header、docs，含状态完整集合客户端与复审修复 |
 | `662644e` | [41944011109](https://github.com/jeffrey-dot/pigeon/actions/runs/41944011109) | 全部通过，含 Linux GL 所有权、编译边界和独立 Xvfb driver 资源测试 |
 | `73813d5` | [41946816404](https://github.com/jeffrey-dot/pigeon/actions/runs/41946816404) | 全部通过，含 Ubuntu/macOS 宿主基线 smoke 与原始样本 artifact |
+| `03b1a41` | [41951970329](https://github.com/jeffrey-dot/pigeon/actions/runs/41951970329) | 全部通过，含 OSC 8 复审、文本查询、Linux 侧栏/订阅隔离与 Swift ABI 夹具修复 |
 
-已通过的平台 CI 对应 `73813d5`，含宿主基线工具的 Ubuntu/macOS smoke；OSC 8 整合 CI 待核对。`8ccaeb3` 的 macOS 15 Intel `swift build` 与 `swift test` 通过：执行 352 项、跳过 7 项、0 failures；独立 Foundation 测试 98 项通过。
+已通过的平台 CI 对应 `03b1a41`，含 OSC 8、文本查询、Linux 侧栏和宿主基线 smoke；新 session env 切片 CI 待核对。`8ccaeb3` 的 macOS 15 Intel `swift build` 与 `swift test` 通过：执行 352 项、跳过 7 项、0 failures；独立 Foundation 测试 98 项通过。
 Apple Silicon 的最终提交尚未完成验收；不能用 Intel 结果代替。CI 构建和测试也不等于真实状态面板/SSH/GPU 呈现验收。
 
 ## 主线程本地验证
@@ -52,7 +53,7 @@ Apple Silicon 的最终提交尚未完成验收；不能用 Intel 结果代替�
 - 窗口按系统可点击内容边界安置侧栏按钮，原生标题栏命中测试通过；历史转换计数使用稳定线程局部接口，macOS Rust clippy/test 通过。
 - Linux GL 边界：编译 deny 先报告 atlas/renderer 的 8 处越界 unsafe，统一封装后 fmt/clippy 通过；GTK 常规 42 passed / 2 ignored，独立 driver 测试通过，输入/延迟回看桌面脚本全通过。详见 [资源验证](linux-gl-resources.md)，对应 `662644e` CI 已全部通过。
 - 宿主基线工具：release 单 pane 与 16 pane 各 1 MiB 短时输出、100 次回显和完整快照重连校验通过；纯工具 fmt/clippy 通过。测量边界、产物与复跑见 [host-benchmark.md](host-benchmark.md)。
-- OSC 8 整合复审：规范轴发现 CAN/SUB 前缀取消没有关闭旧链接及校验重复；行为轴另发现重复 `flagsChanged` 声明和点击期间目标恢复后仍可打开。父线程修复并共用表校验；Rust 默认 293 passed / 2 ignored、无默认 195 passed / 1 ignored，Foundation 102 tests、两种配置 clippy、VT 8/8 通过。完整 AppKit/GUI 和整合提交 CI 待验，见 [OSC 8](osc8.md)。
+- OSC 8 整合复审：规范轴发现 CAN/SUB 前缀取消没有关闭旧链接及校验重复；行为轴另发现重复 `flagsChanged` 声明和点击期间目标恢复后仍可打开。父线程修复并共用表校验；Rust 默认 293 passed / 2 ignored、无默认 195 passed / 1 ignored，Foundation 102 tests、两种配置 clippy、VT 8/8 通过。完整 AppKit 构建/测试已在 `03b1a41` CI 通过，真实 GUI 待验，见 [OSC 8](osc8.md)。
 - 文本查询整合：两轴均复现行尾 TAB 未归一化导致额外空格和跨行漏匹配，先失败后修复；PTY 阻塞读写装配拆至 `pty_io.rs`，actor 保持串行状态所有权且降至 361 行。默认 core 314 passed / 2 ignored，无默认 211 passed / 1 ignored，GTK 42 passed / 2 ignored；查询专题 15/15。专题契约与边界见 [文本查询](text-query.md)。
 - 验证脚本在 `tools/checks/`；本机测试不修改用户 shell/tmux 配置或操作用户已有终端。
 
@@ -64,6 +65,10 @@ Apple Silicon 的最终提交尚未完成验收；不能用 Intel 结果代替�
 4. Linux 拖选/SSH 管理与渲染脏行；真实 Wayland、IBus、日文 IME、非美式键盘和混合 DPI 验收。
 5. 性能、弱网、功耗、长时间负载、完整 VT 属性/fuzz 覆盖及签名发布。
 
-Linux 侧栏整合复审：两轴发现后台未发现 pane 状态误清、legacy 身份替换/容量、纯派生归属及会话/呈现时序缺口。父线程修复后 GTK 64 passed / 2 ignored；多会话、输入法和延迟回看独立桌面脚本通过。宿主控制消息顺序测试要求保持全部中间布局，内部订阅截止序号同时保留该保证。核心完整 315 passed / 2 ignored，GTK 64 passed / 2 ignored，GL 资源独立检查通过；整合 CI 待验。
+Linux 侧栏整合复审：两轴发现后台未发现 pane 状态误清、legacy 身份替换/容量、纯派生归属及会话/呈现时序缺口。父线程修复后 GTK 64 passed / 2 ignored；多会话、输入法和延迟回看独立桌面脚本通过。宿主控制消息顺序测试要求保持全部中间布局，内部订阅截止序号同时保留该保证。核心完整 315 passed / 2 ignored，GTK 64 passed / 2 ignored，GL 资源独立检查通过；`03b1a41` 整合 CI 全部通过。
 
-`607759e`、`b1e4925` 的 Rust 双平台、GTK、header、docs 已通过；Swift 应用构建通过，但测试夹具缺少新 ABI 的 link_count/links 导致 swift test 编译失败，已补齐，等待新 CI。
+`607759e`、`b1e4925` 的 Rust 双平台、GTK、header、docs 已通过；Swift 应用构建通过，但测试夹具缺少新 ABI 的 link_count/links 导致 swift test 编译失败，已补齐，并由 `03b1a41` 的 Swift CI 验证通过。
+
+2026-11-05 session env：宿主真实 PTY 复现忽略覆盖与非法请求创建成功，再修复；验证 Unicode/空值/继承/分屏/会话隔离及拒绝 NUL/非法名称/保留变量。新增安全 API 与 C setter 原子构建，session_env 能力可探测。无 GUI 配置入口，未做运行中环境修改。
+
+Session env 本机验证：默认 core 320 passed / 2 ignored，无默认 feature 214 passed / 1 ignored；API 2 项、C ABI 1 项、真实宿主 2 项专题通过。默认/无默认 clippy、无默认库构建、FFI import 与 cbindgen 通过；GNU release 1,993,536 bytes。之后追加能力探测与 128 项/32 KiB 精确上限断言，专题复跑通过；最终平台 CI 待验。

@@ -41,8 +41,8 @@ pub async fn dispatch(
             id,
             cwd,
             shell: requested,
-            ..
-        } => Some(pane::new_session(host, id, cwd, requested).await),
+            env,
+        } => Some(pane::new_session(host, id, cwd, requested, env.unwrap_or_default()).await),
         Message::Attach {
             id,
             pane_id,

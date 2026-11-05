@@ -1,7 +1,7 @@
 # OSC 8 超链接
 
 2026-11-05 实现核对。核心、宿主帧、Rust/C 客户端接口与 macOS 交互已接入；Linux 客户端尚未接点击。
-本次 Linux 验证覆盖核心与 Swift Foundation/ABI 逻辑，AppKit 构建、hover 外观和真实 Cmd+click 仍须 macOS CI/GUI 验收。
+本次 Linux 验证覆盖核心与 Swift Foundation/ABI 逻辑，AppKit 完整构建/测试已在 `03b1a41` CI 通过；hover 外观和真实 Cmd+click 仍需 GUI 验收。
 
 ## 输入与身份
 
@@ -94,4 +94,4 @@ AppKit 文件完成语法解析；此环境没有 macOS SDK，不能代替 AppKi
 modifier hover 更新并入既有 Kitty `flagsChanged`，避免重复 override。点击状态在每次应用画面时校验，
 目标变更后即便恢复原 URL 仍保持取消；拖动、格子消失同样取消。链接表的 wire 与直接 API 路径共用校验。
 整合后默认 core 293 passed / 2 ignored，无默认 195 passed / 1 ignored，Foundation 102 tests，
-两种配置 clippy 与 VT 8/8 通过。AppKit 类型检查和真实交互等待整合提交的 macOS 验收。
+两种配置 clippy 与 VT 8/8 通过。AppKit 类型检查、完整构建和测试已由 `03b1a41` CI 通过，真实交互仍未验。
