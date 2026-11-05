@@ -289,7 +289,7 @@ M0–M1 可以直接复用现有代码：内核的对账语料（来自 tmux 阶
 | Unicode 字素与整形 | 已保留引擎附加码点，经稀疏 text 表传到快照/delta/历史/C ABI；两端按 cell 文本整形，macOS 复制保留码点。跨宽 cell 的 ZWJ emoji 整簇宽度仍待补；单格文本边界上限 4096 字节，GUI 视觉待验。需要从内核快照、协议/接口到客户端一起补 |
 | 文本资源预算 | 稀疏表计入历史/backlog 预算，FFI 在校验成功后转移所有权；Linux 整形结果缓存最多 1024 项/1 MiB 计费。历史按预算预检后只转换完整连续后缀，字体字节随所有者回收。密集整屏 text 仍可能超 8 MiB，引擎内部零宽码点尚无完整上限；2 MiB 计费不是 RSS 上限，见 [文本预算](text-budget-progress.md) |
 | 搜索与完整文本选择 | 未实现终端搜索；macOS 选择和“Select All”只覆盖当前屏幕。已新增 `ATTR_WRAP` 并在 macOS 复制时保留逻辑换行；旧宿主无标志时仍按网格行处理 |
-| OSC 8 / OSC 52 | `convert_row` 的 `link` 恒为 0，`links` 不下发；OSC 52 事件被忽略。点击超链接、远端程序复制到本地剪贴板尚不可用；本地菜单复制粘贴已实现 |
+| OSC 8 / OSC 52 | OSC 8 链接已经核心、snapshot/delta/history、Rust/C 接口保留；macOS 已接纯文本 hover 和 http/https Cmd+click，复审修复取消序列与点击目标变化，AppKit/GUI 待验；Linux 点击待接。OSC 52 事件仍被忽略，远端程序复制到本地剪贴板不可用。见 [osc8.md](osc8.md) |
 | 现代终端协议 | macOS 已接 Kitty keyboard protocol 与应用小键盘，Linux 仍为 legacy；DEC 2026 同步输出与超时已接；图片协议、OSC 9;4 进度、完整 OSC 133 命令边界/命令输出导航未实现。不能把底层 VT 库的能力当成产品端到端能力 |
 | agent 记录同步 | 多 pane 状态聚合、来源 ack、跨应用重启事件身份持久化和重播去重已实现；按 host/instance/pane/seq/record 隔离，缓存报告/旧屏幕不作查看依据。宿主与双外形接口已提供同 pane 完整未确认集合及独立 revision，ack/clear/退出立即广播；macOS 已协商完整集合并提供 Status Records 面板逐条查看/显式确认，旧宿主仍走单条路径；Linux UI 待接入。身份集合有界存储、多进程写入一致性和 AppKit 交互仍待验收 |
 | agent 接入与通知 | 目前注入 `PI_PROGRAM_STATUS=1`，其它程序必须自行上报 OSC 7501；没有通用的上报工具/接入指南、完整适配矩阵或桌面通知投递。不能把“能运行 agent”写成“能自动显示其状态” |
@@ -307,4 +307,4 @@ M0–M1 可以直接复用现有代码：内核的对账语料（来自 tmux 阶
 **优化前核对证据**：8 条已提交 VT golden 通过。用 `vt-dump` 输入 `e\u0301` 得到 `e`，输入 `👩\u200d💻` 得到 `👩💻`，确认组合码点在快照转换时丢失；预组字符 `é` 保留。
 Linux 默认环境 `TERM=linux` 下，`cargo test --manifest-path core/Cargo.toml --offline` 的 `vim_alternate_screen_survives_a_reconnect` 超时。
 改用 `TERM=xterm-256color cargo test --manifest-path core/Cargo.toml --offline --quiet` 后全量通过：194 passed，2 ignored（含文档测试）。
-上述 TERM 问题已在本轮修复；后续实现与验证见 [优化执行记录](optimization-progress.md)。`662644e` 的 Rust 双平台、GTK/GL 资源和 macOS 15 Intel Swift 完整构建/测试已由 CI 通过；新增基线工具 CI、Apple Silicon 最终版本与真实 GUI 仍待验。
+上述 TERM 问题已在本轮修复；后续实现与验证见 [优化执行记录](optimization-progress.md)。`73813d5` 的 Rust 双平台、GTK/GL 资源、宿主基线 smoke 和 macOS 15 Intel Swift 完整构建/测试已由 CI 通过；OSC 8 整合 CI、Apple Silicon 最终版本与真实 GUI 仍待验。

@@ -52,6 +52,12 @@ impl Osc8Filter {
                     } else if byte == b';' {
                         self.body.clear();
                         self.state = State::Link;
+                    } else if byte == 0x18 || byte == 0x1a {
+                        self.body.clear();
+                        self.invalid = true;
+                        self.finish(&mut out);
+                        out.push(byte);
+                        self.state = State::Ground;
                     } else if byte == 0x07 || byte == 0x1b {
                         self.body.clear();
                         self.invalid = true;

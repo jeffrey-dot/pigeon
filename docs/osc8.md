@@ -89,3 +89,9 @@ wire 复用协议 1.0 已有的 `cell[4]` 和 `links: [{id, uri}]`。表只描�
 | 文档相对链接 / `git diff --check` | 均通过 |
 
 AppKit 文件完成语法解析；此环境没有 macOS SDK，不能代替 AppKit 类型检查、完整 Swift 构建或 GUI 实测。
+
+2026-11-05 主线程整合复审：CAN/SUB 在 `ESC ] 8` 前缀处取消的回归先失败，修复后分块与整段均通过；
+modifier hover 更新并入既有 Kitty `flagsChanged`，避免重复 override。点击状态在每次应用画面时校验，
+目标变更后即便恢复原 URL 仍保持取消；拖动、格子消失同样取消。链接表的 wire 与直接 API 路径共用校验。
+整合后默认 core 293 passed / 2 ignored，无默认 195 passed / 1 ignored，Foundation 102 tests，
+两种配置 clippy 与 VT 8/8 通过。AppKit 类型检查和真实交互等待整合提交的 macOS 验收。

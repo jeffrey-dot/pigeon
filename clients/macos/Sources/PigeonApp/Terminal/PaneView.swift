@@ -64,8 +64,7 @@ final class PaneView: NSView {
     var selectionActive = false
     var linkTracking: NSTrackingArea?
     var linkGesture = false
-    var pressedLink: URL?
-    var pressedLinkPoint: TerminalSelection.Point?
+    var pressedLink: TerminalLinkPress?
     /// What the input method is composing, drawn at the cursor until it commits.
     var preedit: Preedit?
     /// The row the composing overlay was drawn on in the last posted frame.
@@ -301,6 +300,7 @@ final class PaneView: NSView {
             )
         }
         dirty = .everything
+        pressedLink?.validate(cells: cells, columns: cols, rows: rows)
         refreshLinkHover()
         screenChanged()
     }
@@ -336,6 +336,7 @@ final class PaneView: NSView {
             alt = frame.alt_screen != 0
         }
         applyText(frame.text, count: frame.text_count)
+        pressedLink?.validate(cells: cells, columns: cols, rows: rows)
         refreshLinkHover()
         screenChanged()
         return true

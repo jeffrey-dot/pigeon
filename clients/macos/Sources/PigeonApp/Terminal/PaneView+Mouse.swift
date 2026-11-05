@@ -17,7 +17,7 @@ extension PaneView {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        if linkGesture { pressedLink = nil; return }
+        if linkGesture { pressedLink?.cancel(); return }
         if reportsMouse(event) {
             report(.left, .drag, event)
             return

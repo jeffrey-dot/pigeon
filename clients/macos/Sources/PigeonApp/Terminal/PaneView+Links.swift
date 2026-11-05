@@ -22,11 +22,6 @@ extension PaneView {
         NSCursor.iBeam.set()
     }
 
-    override func flagsChanged(with event: NSEvent) {
-        refreshLinkHover()
-        super.flagsChanged(with: event)
-    }
-
     func refreshLinkHover() {
         guard let window else { return }
         updateLinkHover(at: window.mouseLocationOutsideOfEventStream,
@@ -57,17 +52,16 @@ extension PaneView {
         guard event.modifierFlags.contains(.command), let (url, point) = link(at: event.locationInWindow)
         else { return false }
         linkGesture = true
-        pressedLink = url
-        pressedLinkPoint = point
+        pressedLink = TerminalLinkPress(url: url, point: point)
         return true
     }
 
     func finishLinkClick(_ event: NSEvent) -> Bool {
         guard linkGesture else { return false }
-        defer { linkGesture = false; pressedLink = nil; pressedLinkPoint = nil }
+        defer { linkGesture = false; pressedLink = nil }
         guard event.modifierFlags.contains(.command), let pressedLink,
               let (url, point) = link(at: event.locationInWindow),
-              url == pressedLink, point == pressedLinkPoint
+              url == pressedLink.url, point == pressedLink.point
         else { return true }
         NSWorkspace.shared.open(url)
         return true

@@ -102,6 +102,24 @@ fn links_survive_wide_cells_wrap_resize_alt_and_history() {
 }
 
 #[test]
+fn cancelled_osc8_prefix_closes_the_previous_link() {
+    for cancel in [0x18, 0x1a] {
+        for chunk_size in [1, 2, 64] {
+            let mut core = Core::new(Config::default());
+            let pane = core.new_pane(12, 3).unwrap();
+            core.feed(pane, b"\x1b]8;;https://old.test\x07").unwrap();
+            let bytes = [0x1b, b']', b'8', cancel, b'X'];
+            for chunk in bytes.chunks(chunk_size) {
+                core.feed(pane, chunk).unwrap();
+            }
+            let snapshot = core.snapshot(pane).unwrap();
+            assert_eq!(snapshot.screen[0][0].codepoint, u32::from('X'));
+            assert!(snapshot.screen[0][0].hyperlink.is_none());
+        }
+    }
+}
+
+#[test]
 fn nested_osc_and_cancellation_cannot_bypass_raw_validation() {
     for bytes in [
         b"\x1b]8;;https://first.test\x1b]8;id=pigeon-1;https://ex\x01ample.test\x07X".as_slice(),

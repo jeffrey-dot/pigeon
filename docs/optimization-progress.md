@@ -10,6 +10,7 @@
 | Linux GL | unsafe 编译期限定在 gl.rs；拥有型纹理/pipeline 自动释放、检查上传范围、恢复上下文；隔离 Xvfb driver 资源测试 |
 | 基线/CI | GTK 构建、clippy、逻辑测试；独立 HOME/配置的宿主测试；环境记录、FFI import 与生成头文件检查 |
 | 宿主性能工具 | 隔离 release 宿主与 API 客户端，保留协议回显、快照重连、多 pane 短时输出原始样本及二进制 hash；无 GUI 显示延迟承诺 |
+| OSC 8 | 核心、宿主、Rust/C 接口保留拥有型 URI；macOS hover/Cmd+click 已接，http/https 白名单；链接取消和点击期间变化有回归，Linux 点击待接 |
 | 宿主 TERM | pane 固定 xterm-256color/truecolor；linux/dumb/xterm-kitty/未设置四种外部环境回归 |
 | 客户端接口 | `api::delta_of` 与 C ABI 共用校验，FFI 只经 api；Linux 消费连续 delta，缺序/非法行重新 attach |
 | 文本 | 附加码点跨快照/delta/历史/接口保留，软换行复制；历史按预算先预检再转换，FFI 校验后转移所有权；Linux 有界整形缓存、字体随所有者释放 |
@@ -30,8 +31,9 @@
 | `7a4a71e` | [41845716261](https://github.com/jeffrey-dot/pigeon/actions/runs/41845716261) | 全部通过，含 Linux 输入整合 |
 | `8ccaeb3` | [41888692090](https://github.com/jeffrey-dot/pigeon/actions/runs/41888692090) | 全部通过：Rust Ubuntu/macOS 15 Intel、GTK、Swift、header、docs，含状态完整集合客户端与复审修复 |
 | `662644e` | [41944011109](https://github.com/jeffrey-dot/pigeon/actions/runs/41944011109) | 全部通过，含 Linux GL 所有权、编译边界和独立 Xvfb driver 资源测试 |
+| `73813d5` | [41946816404](https://github.com/jeffrey-dot/pigeon/actions/runs/41946816404) | 全部通过，含 Ubuntu/macOS 宿主基线 smoke 与原始样本 artifact |
 
-已通过的平台 CI 对应 `662644e`；宿主基线工具的新增 CI smoke 待核对。`8ccaeb3` 的 macOS 15 Intel `swift build` 与 `swift test` 通过：执行 352 项、跳过 7 项、0 failures；独立 Foundation 测试 98 项通过。
+已通过的平台 CI 对应 `73813d5`，含宿主基线工具的 Ubuntu/macOS smoke；OSC 8 整合 CI 待核对。`8ccaeb3` 的 macOS 15 Intel `swift build` 与 `swift test` 通过：执行 352 项、跳过 7 项、0 failures；独立 Foundation 测试 98 项通过。
 Apple Silicon 的最终提交尚未完成验收；不能用 Intel 结果代替。CI 构建和测试也不等于真实状态面板/SSH/GPU 呈现验收。
 
 ## 主线程本地验证
@@ -49,6 +51,7 @@ Apple Silicon 的最终提交尚未完成验收；不能用 Intel 结果代替�
 - 窗口按系统可点击内容边界安置侧栏按钮，原生标题栏命中测试通过；历史转换计数使用稳定线程局部接口，macOS Rust clippy/test 通过。
 - Linux GL 边界：编译 deny 先报告 atlas/renderer 的 8 处越界 unsafe，统一封装后 fmt/clippy 通过；GTK 常规 42 passed / 2 ignored，独立 driver 测试通过，输入/延迟回看桌面脚本全通过。详见 [资源验证](linux-gl-resources.md)，对应 `662644e` CI 已全部通过。
 - 宿主基线工具：release 单 pane 与 16 pane 各 1 MiB 短时输出、100 次回显和完整快照重连校验通过；纯工具 fmt/clippy 通过。测量边界、产物与复跑见 [host-benchmark.md](host-benchmark.md)。
+- OSC 8 整合复审：规范轴发现 CAN/SUB 前缀取消没有关闭旧链接及校验重复；行为轴另发现重复 `flagsChanged` 声明和点击期间目标恢复后仍可打开。父线程修复并共用表校验；Rust 默认 293 passed / 2 ignored、无默认 195 passed / 1 ignored，Foundation 102 tests、两种配置 clippy、VT 8/8 通过。完整 AppKit/GUI 和整合提交 CI 待验，见 [OSC 8](osc8.md)。
 - 验证脚本在 `tools/checks/`；本机测试不修改用户 shell/tmux 配置或操作用户已有终端。
 
 ## 尚未完成的验收与能力

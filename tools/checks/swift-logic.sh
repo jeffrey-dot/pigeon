@@ -11,7 +11,7 @@ for file in AgentInfo Grouping GitRoot SessionRef SessionRow SessionReducer Sess
 done
 cp "$root/clients/macos/Sources/PigeonApp/Net/Host/HostConnection.swift" "$work/Sources/PigeonApp/"
 cp "$root/clients/macos/Sources/PigeonApp/Net/Connection/Heartbeat.swift" "$work/Sources/PigeonApp/"
-for file in TerminalCell TerminalSelection TerminalLinks; do
+for file in TerminalCell TerminalSelection TerminalLinks TerminalLinkPress; do
     cp "$root/clients/macos/Sources/PigeonApp/Terminal/$file.swift" "$work/Sources/PigeonApp/"
 done
 cp "$root/clients/macos/Sources/PigeonApp/Terminal/Render/CellAttrs.swift" "$work/Sources/PigeonApp/"

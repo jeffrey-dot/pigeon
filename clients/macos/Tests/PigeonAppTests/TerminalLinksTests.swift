@@ -27,4 +27,31 @@ final class TerminalLinksTests: XCTestCase {
         cells[1] = .blank
         XCTAssertNil(cells[1].hyperlink)
     }
+
+    func testLinkPressRemainsCancelledAfterTargetChangesBack() throws {
+        let url = try XCTUnwrap(TerminalLinks.openingURL("https://old.example"))
+        var press = TerminalLinkPress(url: url, point: .init(row: 0, column: 0))
+        var cell = TerminalCell.blank
+        cell.hyperlink = "https://old.example"
+        press.validate(cells: [cell], columns: 1, rows: 1)
+        XCTAssertEqual(press.url, url)
+        cell.hyperlink = "https://new.example"
+        press.validate(cells: [cell], columns: 1, rows: 1)
+        cell.hyperlink = "https://old.example"
+        press.validate(cells: [cell], columns: 1, rows: 1)
+        XCTAssertNil(press.url)
+    }
+
+    func testLinkPressCancelsWhenCellDisappearsOrDragBegins() throws {
+        let url = try XCTUnwrap(TerminalLinks.openingURL("https://old.example"))
+        var press = TerminalLinkPress(url: url, point: .init(row: 0, column: 1))
+        press.validate(cells: [.blank], columns: 1, rows: 1)
+        XCTAssertNil(press.url)
+        press = TerminalLinkPress(url: url, point: .init(row: 0, column: 0))
+        press.cancel()
+        var cell = TerminalCell.blank
+        cell.hyperlink = "https://old.example"
+        press.validate(cells: [cell], columns: 1, rows: 1)
+        XCTAssertNil(press.url)
+    }
 }

@@ -16,7 +16,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::error::{PgError, PgResult};
 
-mod links;
+pub(crate) mod links;
 mod message;
 pub use message::Message;
 mod status_snapshot;

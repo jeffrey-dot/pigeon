@@ -120,6 +120,7 @@ extension PaneView: NSTextInputClient {
 
     /// A modifier key alone: reported only under kitty's "all keys as escape codes" (flag 8).
     override func flagsChanged(with event: NSEvent) {
+        refreshLinkHover()
         guard KittyKeyEncoder.Flags(modes: modes).contains(.allKeys), !hasMarkedText(),
               let stroke = KeyStroke(modifierEvent: event),
               let bytes = KeyEncoder.encode(stroke, modes: modes)

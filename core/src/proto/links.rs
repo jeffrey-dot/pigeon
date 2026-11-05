@@ -1,5 +1,5 @@
 //! Bounds and validation for the optional, frame-local OSC 8 URI table.
-use super::Message;
+use super::{Link, Message};
 use crate::{
     error::{PgError, PgResult},
     term::hyperlink::{valid_uri, MAX_LINKS, MAX_LINK_BYTES},
@@ -12,6 +12,10 @@ pub(super) fn validate(message: &Message) -> PgResult<()> {
         _ => return Ok(()),
     };
     let Some(links) = links else { return Ok(()) };
+    validate_table(links)
+}
+
+pub(crate) fn validate_table(links: &[Link]) -> PgResult<()> {
     if links.len() > MAX_LINKS {
         return Err(PgError::InvalidArg);
     }
