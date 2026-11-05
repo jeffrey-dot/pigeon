@@ -288,12 +288,12 @@ M0–M1 可以直接复用现有代码：内核的对账语料（来自 tmux 阶
 |---|---|
 | Unicode 字素与整形 | 已保留引擎附加码点，经稀疏 text 表传到快照/delta/历史/C ABI；两端按 cell 文本整形，macOS 复制保留码点。跨宽 cell 的 ZWJ emoji 整簇宽度仍待补；单格文本边界上限 4096 字节，GUI 视觉待验。需要从内核快照、协议/接口到客户端一起补 |
 | 文本资源预算 | 稀疏表计入历史/backlog 预算，FFI 在校验成功后转移所有权；Linux 整形结果缓存最多 1024 项/1 MiB 计费。历史按预算预检后只转换完整连续后缀，字体字节随所有者回收。密集整屏 text 仍可能超 8 MiB，引擎内部零宽码点尚无完整上限；2 MiB 计费不是 RSS 上限，见 [文本预算](text-budget-progress.md) |
-| 搜索与完整文本选择 | 2026-11-05 核心/宿主已实现有界 literal 搜索与文本范围分页，独立 generation 检测过期；macOS 搜索条/取消/上下命中/同代次原子定位高亮已接，AppKit/GUI 待验；Linux UI、regex、Unicode 折叠和稳定锚点尚未完成，见 [文本查询](text-query.md)。macOS 选择和“Select All”只覆盖当前屏幕。已新增 `ATTR_WRAP` 并在 macOS 复制时保留逻辑换行；旧宿主无标志时仍按网格行处理 |
+| 搜索与完整文本选择 | 2026-11-05 核心/宿主已实现有界 literal 搜索与文本范围分页，独立 generation 检测过期；macOS 搜索条/取消/上下命中/同代次原子定位高亮已接，AppKit CI 已通过、真实 GUI 待验；Linux UI、regex、Unicode 折叠和稳定锚点尚未完成，见 [文本查询](text-query.md)。macOS 选择和“Select All”只覆盖当前屏幕。已新增 `ATTR_WRAP` 并在 macOS 复制时保留逻辑换行；旧宿主无标志时仍按网格行处理 |
 | OSC 8 / OSC 52 | OSC 8 链接已经核心、snapshot/delta/history、Rust/C 接口保留；macOS 已接纯文本 hover 和 http/https Cmd+click，复审修复取消序列与点击目标变化，AppKit CI 通过、真实 GUI 待验；Linux Ctrl+click/纯文本 hover 已接，独立 GIO mock 验收通过。OSC 52 事件仍被忽略，远端程序复制到本地剪贴板不可用。见 [osc8.md](osc8.md) |
 | 现代终端协议 | 两端已接 Kitty keyboard protocol 与应用小键盘；Linux 鼠标/焦点上报已接，真实 Wayland/非美式布局与 TUI 验收待补；DEC 2026 同步输出与超时已接；图片协议、OSC 9;4 进度、完整 OSC 133 命令边界/命令输出导航未实现。不能把底层 VT 库的能力当成产品端到端能力 |
 | agent 记录同步 | 多 pane 状态聚合、来源 ack、跨应用重启事件身份持久化和重播去重已实现；按 host/instance/pane/seq/record 隔离，缓存报告/旧屏幕不作查看依据。宿主与双外形接口已提供同 pane 完整未确认集合及独立 revision，ack/clear/退出立即广播；macOS 已协商完整集合并提供 Status Records 面板逐条查看/显式确认，旧宿主仍走单条路径；Linux 本地侧栏也已接完整集合与逐条确认，尚无跨重启 seen。身份集合有界存储、多进程写入一致性和 AppKit 交互仍待验收 |
 | agent 接入与通知 | 注入 `PI_PROGRAM_STATUS=1`，已有通用 `pigeon-report`、`pigeon-run` 与 [主动接入指南](agent-integration.md)，程序仍须主动上报 OSC 7501。第三方程序版本适配矩阵和桌面通知未验/未实现；不能把“能运行 agent”写成“能自动显示其状态” |
-| Linux 功能对齐 | 本地侧栏/会话选择、未读/needs-you、逐条确认与尺寸来源已接；缺 SSH 连接管理、选择复制、拖动分隔线、渲染脏行复用与自动断线恢复；delta、IME、复制当前屏幕、宿主括号粘贴、滚动回看与 15s ping 保活已接。Xvfb/fcitx5 输入与延迟回看验收通过，Wayland/IBus/日文/混合 DPI 未验；GTK CI 已运行，GUI 发布产物未做 |
+| Linux 功能对齐 | Harp 单行侧栏、浅深色终端卡片、本地会话选择、未读/needs-you、逐条确认与尺寸来源已接；缺 SSH 连接管理、选择复制、拖动分隔线、渲染脏行复用与自动断线恢复；delta、IME、复制当前屏幕、宿主括号粘贴、滚动回看与 15s ping 保活已接。Xvfb/fcitx5 输入与延迟回看验收通过，Wayland/IBus/日文/混合 DPI 未验；GTK CI 已运行，GUI 发布产物未做 |
 | DECSTBM 元数据 | VT 引擎处理滚动区，但 `Snapshot.scroll` 导出为整屏；不是 VT 不支持滚动区。真正边界未暴露给客户端 |
 | C 档远端尺寸 | 退化模式本地 VT 会 resize，尚无本地 PTY 向 ssh 转发 `TIOCSWINSZ`，远端尺寸不能随窗口可靠更新 |
 | 配置与易用性 | 字体配置仅启动时读取；未提供完整自定义键位、主题配置与热重载、命令面板。宿主回看固定 10,000 行；嵌入接口的 100,000 行上限并非宿主可配置项 |

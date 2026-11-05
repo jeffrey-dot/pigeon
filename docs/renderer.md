@@ -150,6 +150,8 @@ GL context`），shader 版本头在运行期按 `glGetString(GL_VERSION)` 选�
 
 ### 5.2 形状
 
+2026-11-05 Linux 增加 [Harp 主界面](linux-harp.md)：`shell.rs`/`theme.rs` 与 CSS 管理原生外壳和浅深色；Renderer 使用与 macOS 对应的 ANSI 色表。GL RGB 与 alpha 分开混合，普通文字覆盖不再降低不透明 framebuffer 的 alpha；单格字形不按位图宽度额外居中。界面截图及 input/pointer 回归与核心语义测试分别验收。
+
 ```
 clients/linux/src/
 ├── main.rs        装配：GtkApplication → 窗口 → 消息泵

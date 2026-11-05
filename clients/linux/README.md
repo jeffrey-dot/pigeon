@@ -20,7 +20,7 @@ cargo test -p pigeon-linux                   # 纯逻辑单测（会话路由 / 
 环境变量：`PIGEON_SERVER` 指定 `pigeon-server` 路径；`PIGEON_FONT` 指定字体族；
 `PIGEON_FRAME_STATS=1` 打开帧统计；`PIGEON_FONT_DEBUG=1` 打印选中的字体。
 
-会话操作：顶部 **New Session** 在选中会话目录新建，**Close Session…** 确认后关闭该会话的全部 panes；
+会话操作：顶部 `+`（**New Session**）在选中会话目录新建，悬停会话行右侧 `×`（**Close Session…**）确认后关闭该会话的全部 panes；
 点击侧栏会话恢复终端焦点。`Ctrl+Shift+T` 新建，`Ctrl+Shift+[` / `]` 循环切换，
 `Ctrl+Shift+B` 隐藏/显示侧栏，`Ctrl+Shift+J` 循环选择 needs-you 会话并打开记录查看器。
 首次空宿主自动建会话；关闭最后一个会话后保留空窗口，可用 New Session 再建。关闭窗口不关闭宿主/PTY。
@@ -64,5 +64,7 @@ GTK 客户端已有 Ubuntu CI 作业（构建/clippy/逻辑测试），尚无 GU
 
 依赖 GTK ≥4.8 开发库与 Rust ≥1.92（gtk4-rs 的最低工具链）；Ubuntu 可安装 `libgtk-4-dev pkg-config`。
 详见 [docs/renderer.md](../../docs/renderer.md) §5.4。
+
+**主界面**：Harp 风格单行侧栏、状态图标、白色/近黑终端卡片与会话顶部栏；记录详情通过顶部小图标按需打开。`PIGEON_APPEARANCE=light|dark` 固定外观，否则跟随 GTK 深色偏好。默认优先 DejaVu Sans Mono，`PIGEON_FONT` 可覆盖。复跑截图与平台限制见 [Linux Harp 主界面](../../docs/linux-harp.md)。
 
 **现代输入与链接**：Kitty 五个 flag、事件配对、应用小键盘、鼠标/焦点报告已接；OSC 8 纯文本 hover 与完整同格 Ctrl+左键打开 http/https，拖动/滚动/失焦/画面变化取消。规范、回归和硬件限制见 [现代输入与链接](../../docs/linux-modern-input.md)。

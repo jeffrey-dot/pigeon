@@ -83,3 +83,7 @@ OSC 7501 上报工具：pigeon-report/pigeon-run 与接入指南已整合。规�
 主线程完整回看验收复现隐藏位置条引发同步 pointer-enter 重入 Workspace 的 panic；指针进入/离开在借用冲突时延后至当前 GTK 更新之后处理，保留事件而不在回调边界 unwind。已有 Return to live→再次翻页脚本作为回归。
 
 本轮最终本地结果：GTK 77 passed / 2 ignored；modern-input、input、sidebar 桌面脚本通过，修复重入后 scroll 与 modern-input 再次通过。上报工具 06757e8 CI 的 Ubuntu、Swift、GTK/header/docs 通过，macOS Rust 作业的工具测试因夹具硬编码 /bin/true 失败；已改为 /bin/sh -c exit，等待新的平台运行。
+
+2026-11-05 按用户 Harp 参考图补 Linux 界面：浅灰窄侧栏、单行名称/时间/状态槽、悬停关闭、选中白色圆角、终端卡片与顶部栏、按需记录浮层、浅深色。真实 GTK 截图已检查；GTK 79 passed / 2 ignored，clippy/fmt 与 GL driver 检查通过；input/scroll/modern-input/sidebar 桌面脚本通过。浅色暴露的 framebuffer alpha 与单格字形定位已修；标题栏 surface 偏移纳入鼠标坐标。见 [Linux Harp](linux-harp.md)。
+
+6489ca6 的 Swift 完整构建/测试、Ubuntu Rust、GTK、header/docs 已通过；macOS Rust 的真实文本查询测试在 READY 后收到交互 shell 启动序列而正确返回 stale_text。测试夹具改为 READY 后安静读取的非交互进程，专题本机通过，待新 CI。
