@@ -240,12 +240,12 @@ panic = "deny"
         self.assertEqual(self.records(output)[0][1], "error")
 
     def test_wrapper_preserves_option_like_fields(self):
-        code, output = self.terminal([str(WRAPPER), "-run", "--help", "--", "/bin/true"])
+        code, output = self.terminal([str(WRAPPER), "-run", "--help", "--", "/bin/sh", "-c", "exit 0"])
         self.assertEqual(code, 0, output)
         self.assertEqual(self.records(output)[0][:4], ("-run", "done", "", "--help"))
 
     def test_wrapper_builtins_cannot_replace_or_untrap_the_wrapper(self):
-        for command in [["exec", "/bin/true"], ["trap", "", "EXIT"]]:
+        for command in [["exec", "/bin/sh", "-c", "exit 0"], ["trap", "", "EXIT"]]:
             code, output = self.terminal([str(WRAPPER), "run", "Tests", "--", *command])
             self.assertEqual(code, 0, output)
             self.assertEqual(self.records(output)[0][1], "done")
