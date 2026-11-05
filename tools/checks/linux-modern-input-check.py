@@ -192,15 +192,17 @@ with (Path(os.environ['TEST_ROOT']) / 'opened').open('a') as out:
         print("PASS Kitty + fcitx5 preedit zero bytes / one text commit / no orphan release", flush=True)
 
         command("\x1b[?1000h\x1b[?1006h")
-        run("xdotool", "mousemove", "--window", window, "20", "20")
+        run("xdotool", "mousemove", "--window", window, "52", "126")
         expect(lambda: run("xdotool", "click", "1"), b"\x1b[<0;3;2M\x1b[<0;3;2m")
         expect(lambda: run("xdotool", "click", "4"), b"\x1b[<64;3;2M" * 3)
         command("\x1b[?1002h")
         def drag():
-            run("xdotool", "mousedown", "1", "mousemove", "--window", window, "28", "20", "mouseup", "1")
+            run("xdotool", "mousedown", "1", "mousemove", "--sync", "--window", window, "60", "126")
+            settle(.1)
+            run("xdotool", "mouseup", "1")
         expect(drag, b"\x1b[<0;3;2M\x1b[<32;4;2M\x1b[<0;4;2m")
         command("\x1b[?1003h")
-        expect(lambda: run("xdotool", "mousemove", "--window", window, "36", "20"), b"\x1b[<35;5;2M")
+        expect(lambda: run("xdotool", "mousemove", "--window", window, "68", "126"), b"\x1b[<35;5;2M")
         command("\x1b[?1003l\x1b[?1002l\x1b[?1000l\x1b[?1004h")
         focus_start = pane.read_bytes()
         target = Gtk.Window(title="Modern input focus target")
@@ -243,7 +245,7 @@ with (Path(os.environ['TEST_ROOT']) / 'opened').open('a') as out:
             path = root / "opened"
             return path.read_text().splitlines() if path.exists() else []
         link("https://example.com/test")
-        run("xdotool", "mousemove", "--window", window, "12", "8")
+        run("xdotool", "mousemove", "--window", window, "41", "111")
         click()
         pump(lambda: len(opened()) == 1)
         assert opened() == ["['https://example.com/test']"], opened()
@@ -255,7 +257,7 @@ with (Path(os.environ['TEST_ROOT']) / 'opened').open('a') as out:
         settle()
         assert len(opened()) == 2, opened()
         run("xdotool", "click", "1")
-        run("xdotool", "keydown", "ctrl", "mousedown", "1", "mousemove", "--window", window, "13", "8", "mouseup", "1", "keyup", "ctrl")
+        run("xdotool", "keydown", "ctrl", "mousedown", "1", "mousemove", "--window", window, "42", "111", "mouseup", "1", "keyup", "ctrl")
         run("xdotool", "keydown", "ctrl", "mousedown", "1")
         link("https://example.org/changed")
         link("https://example.com/test")

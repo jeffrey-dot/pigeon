@@ -17,7 +17,9 @@ mod screen;
 mod scroll;
 mod scroll_input;
 mod session_model;
+mod shell;
 mod sidebar;
+mod theme;
 mod view;
 
 use gtk::prelude::*;
@@ -35,6 +37,7 @@ fn main() -> gtk::glib::ExitCode {
 }
 
 fn start(application: &gtk::Application) {
+    theme::install();
     let host = match host::HostLink::connect() {
         Ok(host) => host,
         Err(error) => {
@@ -53,29 +56,14 @@ fn start(application: &gtk::Application) {
     };
 
     let scale = primary_scale();
-    let metrics = view::measure(scale);
-    let width = 80;
-    let height = 24;
     let workspace = Workspace::new(&hello, host.clone(), scale);
+    workspace.borrow_mut().set_appearance(theme::dark());
 
     let sidebar = sidebar::view::SidebarView::new(&workspace);
-    let content = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    content.append(&sidebar.root);
-    content.append(&workspace.borrow().root);
-    let window = gtk::ApplicationWindow::builder()
-        .application(application)
-        .title("pigeon")
-        .child(&content)
-        .build();
+    let window = shell::window(application, &workspace, &sidebar);
     // The application holds the window: without this the local goes out of scope when
     // `start` returns and GTK destroys the just-presented window.
     application.add_window(&window);
-    // Match a new host pane initially; existing sessions resize after their first layout.
-    if let Some(metrics) = metrics {
-        let w = (width as f32 * metrics.cell_w / scale).round().max(80.0);
-        let h = (height as f32 * metrics.cell_h / scale).round().max(60.0);
-        window.set_default_size(w as i32 + sidebar::view::WIDTH + 16, h as i32);
-    }
     sidebar.install_keys(&window);
     let sidebar_for_timer = sidebar.clone();
     gtk::glib::timeout_add_local(std::time::Duration::from_millis(200), move || {

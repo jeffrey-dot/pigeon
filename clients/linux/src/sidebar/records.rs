@@ -19,6 +19,12 @@ pub struct RecordsView {
 impl RecordsView {
     pub fn new(workspace: &Rc<RefCell<Workspace>>) -> Rc<Self> {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        root.add_css_class("pigeon-records");
+        root.set_size_request(340, 320);
+        root.set_halign(gtk::Align::Start);
+        root.set_valign(gtk::Align::Start);
+        root.set_margin_start(12);
+        root.set_margin_top(12);
         root.set_hexpand(false);
         root.set_visible(false);
         let heading = gtk::Box::new(gtk::Orientation::Horizontal, 4);

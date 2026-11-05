@@ -207,7 +207,7 @@ while True:
         clipboard.set("must-not-paste-into-a-different-pane")
         run("xdotool", "key", "--clearmodifiers", "ctrl+shift+v")
         time.sleep(0.15)
-        run("xdotool", "mousemove", "--window", window, "40", "80", "click", "1")
+        run("xdotool", "mousemove", "--window", window, "60", "160", "click", "1")
         until = time.monotonic() + 0.3
         pump_until(lambda: time.monotonic() >= until)
         run("fcitx5-remote", "-c")
@@ -217,7 +217,7 @@ while True:
         assert other.read_bytes() == b"x\x02", other.read_bytes()
         print("PASS pane switch cancels preedit and pending async paste", flush=True)
         geometry = dict(line.split("=", 1) for line in run("xdotool", "getwindowgeometry", "--shell", window).splitlines())
-        run("xdotool", "mousemove", "--window", window, str(int(geometry["WIDTH"]) - 40), "80", "click", "1")
+        run("xdotool", "mousemove", "--window", window, str(int(geometry["WIDTH"]) - 40), "160", "click", "1")
         key("ctrl+shift+w")
         key("y")
         expected += b"y"

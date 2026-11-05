@@ -1,5 +1,5 @@
 //! GTK native local session list. Project discovery is client-side filesystem I/O.
-use super::{grouping, records::RecordsView, rows};
+use super::{grouping, records::RecordsView, rows, widgets};
 use crate::view::Workspace;
 use gtk4::{self as gtk, prelude::*};
 use std::cell::RefCell;
@@ -21,25 +21,21 @@ pub struct SidebarView {
 
 impl SidebarView {
     pub fn new(workspace: &Rc<RefCell<Workspace>>) -> Rc<Self> {
-        let root = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        root.add_css_class("pigeon-sidebar");
         root.set_size_request(WIDTH, -1);
         root.set_hexpand(false);
-        root.set_halign(gtk::Align::Start);
-        root.set_margin_start(8);
-        root.set_margin_end(8);
-        root.set_margin_top(8);
-        root.set_margin_bottom(8);
-        let connection = gtk::Label::new(Some("Local sessions"));
-        connection.set_xalign(0.0);
-        root.append(&connection);
-        let actions = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-        let new = gtk::Button::with_label("New Session");
-        new.set_tooltip_text(Some(
-            "Ctrl+Shift+T · Create in the selected session's directory",
-        ));
+        let actions = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+        actions.add_css_class("pigeon-sidebar-top");
+        let connection = widgets::label("", "pigeon-quiet");
+        connection.set_hexpand(true);
+        actions.append(&connection);
+        let show = widgets::icon_button("view-list-symbolic", "Status Records…");
+        let collapse = widgets::icon_button("sidebar-show-symbolic", "Toggle Sidebar");
+        let new = widgets::icon_button("list-add-symbolic", "New Session");
+        actions.append(&show);
+        actions.append(&collapse);
         actions.append(&new);
-        let close = gtk::Button::with_label("Close Session…");
-        actions.append(&close);
         root.append(&actions);
         let list = gtk::ListBox::new();
         list.set_selection_mode(gtk::SelectionMode::None);
@@ -50,9 +46,7 @@ impl SidebarView {
             .build();
         root.append(&scroll);
         let records = RecordsView::new(workspace);
-        let show = gtk::Button::with_label("Status Records…");
-        root.append(&show);
-        root.append(&records.root);
+        workspace.borrow().root.add_overlay(&records.root);
         let view = Rc::new(Self {
             root,
             list,
@@ -79,22 +73,22 @@ impl SidebarView {
             }
         });
         let weak = Rc::downgrade(&view);
-        close.connect_clicked(move |_| {
+        collapse.connect_clicked(move |_| {
             if let Some(view) = weak.upgrade() {
-                view.confirm_close();
+                view.root.set_visible(false);
             }
         });
         view
     }
 
-    fn confirm_close(&self) {
-        let Some(work) = self.work.upgrade() else {
+    fn close_dialog(root: &gtk::Box, weak: &Weak<RefCell<Workspace>>) {
+        let Some(work) = weak.upgrade() else {
             return;
         };
         let Some(session) = work.borrow().model.selected else {
             return;
         };
-        let Some(window) = self.root.root().and_downcast::<gtk::Window>() else {
+        let Some(window) = root.root().and_downcast::<gtk::Window>() else {
             return;
         };
         let dialog = gtk::MessageDialog::builder()
@@ -106,7 +100,7 @@ impl SidebarView {
         dialog.add_button("Cancel", gtk::ResponseType::Cancel);
         dialog.add_button("Close Session", gtk::ResponseType::Accept);
         dialog.set_default_response(gtk::ResponseType::Cancel);
-        let work = self.work.clone();
+        let work = weak.clone();
         dialog.connect_response(move |dialog, response| {
             if response == gtk::ResponseType::Accept {
                 if let Some(work) = work.upgrade() {
@@ -129,7 +123,7 @@ impl SidebarView {
         let work = work.borrow();
         self.records.refresh(&work);
         self.connection.set_text(if work.model.connected {
-            "Local sessions"
+            ""
         } else {
             "Disconnected · restart to connect"
         });
@@ -159,23 +153,30 @@ impl SidebarView {
         while let Some(child) = self.list.first_child() {
             self.list.remove(&child);
         }
-        for rows::SidebarRow {
-            session,
-            text,
-            tooltip,
-        } in rows
-        {
-            if let Some(session) = session {
-                let button = gtk::Button::new();
-                let label = gtk::Label::new(Some(&text));
-                label.set_xalign(0.0);
-                label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-                label.set_max_width_chars(32);
-                button.set_child(Some(&label));
-                button.set_tooltip_text(Some(&tooltip));
+        let mut first = true;
+        for row in rows {
+            if let Some(session) = row.session {
+                let line = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+                line.add_css_class("pigeon-session");
                 if work.model.selected == Some(session) {
-                    button.add_css_class("suggested-action");
+                    line.add_css_class("selected");
                 }
+                let button = widgets::named_button(&row.text);
+                button.set_hexpand(true);
+                button.add_css_class("pigeon-session-button");
+                let inner = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+                let title = widgets::label(&row.name, "pigeon-session-title");
+                title.set_hexpand(true);
+                title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+                title.set_max_width_chars(24);
+                if row.unread {
+                    title.add_css_class("unread");
+                }
+                let age = widgets::label(&row.age, "pigeon-age");
+                inner.append(&title);
+                inner.append(&age);
+                button.set_child(Some(&inner));
+                button.set_tooltip_text(Some(&row.tooltip));
                 let weak = self.work.clone();
                 button.connect_clicked(move |_| {
                     if let Some(work) = weak.upgrade() {
@@ -184,15 +185,56 @@ impl SidebarView {
                         area.grab_focus();
                     }
                 });
-                self.list.append(&button);
+                line.append(&button);
+                let slot = gtk::Stack::new();
+                slot.set_size_request(24, 24);
+                slot.set_margin_end(5);
+                let status = widgets::status(row.state, row.unread);
+                slot.add_named(&status, Some("status"));
+                let close = widgets::named_button("Close Session…");
+                close.set_icon_name("window-close-symbolic");
+                close.add_css_class("pigeon-close");
+                close.set_tooltip_text(Some("Close Session…"));
+                close.set_widget_name(&format!("close-session-{session}"));
+                slot.add_named(&close, Some("close"));
+                let weak = self.work.clone();
+                let parent = self.root.downgrade();
+                close.connect_clicked(move |_| {
+                    if let (Some(work), Some(parent)) = (weak.upgrade(), parent.upgrade()) {
+                        work.borrow_mut().select(session);
+                        Self::close_dialog(&parent, &weak);
+                    }
+                });
+                let motion = gtk::EventControllerMotion::new();
+                let stack = slot.clone();
+                motion.connect_enter(move |_, _, _| stack.set_visible_child_name("close"));
+                let stack = slot.clone();
+                motion.connect_leave(move |_| stack.set_visible_child_name("status"));
+                line.add_controller(motion);
+                line.append(&slot);
+                self.list.append(&line);
             } else {
-                let label = gtk::Label::new(Some(&text));
-                label.set_xalign(0.0);
-                label.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
-                label.set_tooltip_text(Some(&tooltip));
-                label.set_margin_top(10);
-                label.set_margin_bottom(4);
-                self.list.append(&label);
+                let group = gtk::Box::new(gtk::Orientation::Horizontal, 5);
+                group.add_css_class("pigeon-project");
+                if first {
+                    group.add_css_class("first");
+                    first = false;
+                }
+                let name = widgets::label(&row.name, "pigeon-section-name");
+                name.set_ellipsize(gtk::pango::EllipsizeMode::End);
+                group.append(&name);
+                group.append(&widgets::label(&row.count.to_string(), "pigeon-count"));
+                let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+                spacer.set_hexpand(true);
+                group.append(&spacer);
+                if row.needs > 0 {
+                    group.append(&widgets::label(
+                        &format!("{} needs you", row.needs),
+                        "pigeon-needs",
+                    ));
+                }
+                group.set_tooltip_text(Some(&row.tooltip));
+                self.list.append(&group);
             }
         }
     }

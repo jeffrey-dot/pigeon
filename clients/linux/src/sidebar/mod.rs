@@ -11,6 +11,7 @@ pub mod rows;
 #[cfg(test)]
 mod tests;
 pub mod view;
+mod widgets;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RecordRow {

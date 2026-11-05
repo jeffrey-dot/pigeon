@@ -107,6 +107,10 @@ impl Renderer {
         self.gl.owns_current_context()
     }
 
+    pub fn set_palette(&mut self, palette: Palette) {
+        self.palette = palette;
+    }
+
     pub fn metrics(&self) -> GridMetrics {
         self.font.metrics
     }

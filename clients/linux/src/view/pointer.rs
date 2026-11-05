@@ -276,7 +276,12 @@ fn dispatch_pointer(work: &Rc<RefCell<Workspace>>, action: impl FnOnce(&mut Work
 }
 fn local_position(area: &gtk::GLArea, event: &gtk::gdk::Event) -> Option<(f64, f64)> {
     let (x, y) = event.position()?;
-    let native = area.native()?.dynamic_cast::<gtk::Widget>().ok()?;
-    let point = native.compute_point(area, &gtk::graphene::Point::new(x as f32, y as f32))?;
+    let native = area.native()?;
+    let (dx, dy) = native.surface_transform();
+    let widget = native.dynamic_cast::<gtk::Widget>().ok()?;
+    let point = widget.compute_point(
+        area,
+        &gtk::graphene::Point::new((x - dx) as f32, (y - dy) as f32),
+    )?;
     Some((f64::from(point.x()), f64::from(point.y())))
 }

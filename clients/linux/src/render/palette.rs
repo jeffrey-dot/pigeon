@@ -1,10 +1,8 @@
 //! Cell colours: the wire's `0x01000000 | idx` sentinel, xterm's 256-colour cube, and the
-//! dark theme (protocol §3.3, `docs/renderer.md` §5).
+//! light/dark themes (protocol §3.3, `docs/renderer.md` §5).
 //!
 //! The values are the same ones the macOS client resolves from harp's theme files
-//! (`TerminalPalette`), so a session looks the same on both platforms. Only the dark
-//! appearance exists here for now; light mode needs a theme source the Linux side does not
-//! have yet (GTK's `prefer-dark` tells us which one to ask for later).
+//! (`TerminalPalette`); light and dark appearances share those tokens.
 
 use pigeon_core::api::{ATTR_REVERSE, ATTR_STRIKETHROUGH, ATTR_UNDERLINE};
 
@@ -14,8 +12,8 @@ const ANSI: [u32; 16] = [
     0xFFC4BD, 0xD6FCB9, 0xFEFDD5, 0xC1E3FE, 0xFFB1FE, 0xE5E6FE, 0xFEFFFF,
 ];
 
-const FOREGROUND: u32 = 0xE6E6E6;
-const BACKGROUND: u32 = 0x0E0F11;
+const FOREGROUND: u32 = 0xFFFFFF;
+const BACKGROUND: u32 = 0x050505;
 
 /// One frame's colours as `0xRRGGBB`.
 #[derive(Clone, Copy)]
@@ -26,6 +24,17 @@ pub struct Palette {
 }
 
 impl Palette {
+    pub fn light() -> Self {
+        Self {
+            foreground: 0x111111,
+            background: 0xffffff,
+            ansi: [
+                0x212121, 0xc30771, 0x10a778, 0x8a7f00, 0x008ec4, 0x523c79, 0x15828f, 0xe0e0e0,
+                0x212121, 0xfb007a, 0x1e9e77, 0x9a8c00, 0x1a8fc4, 0x6855de, 0x1f8a9a, 0xf1f1f1,
+            ],
+        }
+    }
+
     pub fn dark() -> Self {
         Self {
             foreground: FOREGROUND,
@@ -36,7 +45,7 @@ impl Palette {
 
     /// A cell's `(fg, bg)` with reverse video applied; `0` means "theme default".
     pub fn colors(&self, fg: u32, bg: u32, attrs: u32) -> (u32, u32) {
-        let mut front = if fg == 0 {
+        let mut front = if fg == 0 || (fg == 0xe5e5e5 && self.background == 0xffffff) {
             self.foreground
         } else {
             self.rgb(fg)
@@ -48,6 +57,16 @@ impl Palette {
         };
         if attrs & ATTR_REVERSE != 0 {
             std::mem::swap(&mut front, &mut back);
+        }
+        if self.background == 0xffffff && back == self.background {
+            // Named default foreground is exported as grey RGB by the core. Keep it and
+            // light neutral ANSI text readable on a white surface, as on macOS.
+            let r = (front >> 16) & 255;
+            let g = (front >> 8) & 255;
+            let b = front & 255;
+            if r.max(g).max(b) - r.min(g).min(b) < 31 && r + g + b > 420 {
+                front = 0x66666b;
+            }
         }
         (front, back)
     }
@@ -123,5 +142,14 @@ mod tests {
         let palette = Palette::dark();
         let (fg, bg) = palette.colors(0, 0, ATTR_REVERSE);
         assert_eq!((fg, bg), (palette.background, palette.foreground));
+    }
+
+    #[test]
+    fn light_defaults_and_neutral_ansi_stay_readable_on_white() {
+        let palette = Palette::light();
+        assert_eq!(palette.colors(0, 0, 0), (0x111111, 0xffffff));
+        assert_eq!(palette.colors(0xe5e5e5, 0, 0), (0x111111, 0xffffff));
+        assert_eq!(palette.colors(0x01000007, 0, 0).0, 0x66666b);
+        assert_eq!(palette.colors(0x123456, 0x987654, 0), (0x123456, 0x987654));
     }
 }

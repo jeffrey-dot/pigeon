@@ -1,0 +1,52 @@
+.pigeon-window { background: #f2f2f3; color: #1d1d1f; font-family: "Inter", "Noto Sans", sans-serif; font-size: 13px; }
+.pigeon-window headerbar { min-height: 32px; background: #f2f2f3; box-shadow: none; border: none; }
+.pigeon-window.dark { background: #232326; color: #f5f5f7; }
+.pigeon-window.dark headerbar { background: #232326; }
+.pigeon-sidebar { padding: 0 10px 14px; }
+.pigeon-sidebar list, .pigeon-sidebar row { background: transparent; border: none; padding: 0; }
+.pigeon-sidebar row { margin: 1px 0; }
+.pigeon-sidebar-top { min-height: 40px; padding: 0 2px 8px; }
+.pigeon-quiet { color: #6e6e73; font-size: 11px; }
+.pigeon-icon { padding: 0; min-width: 28px; min-height: 28px; border: none; box-shadow: none; background: transparent; color: #6e6e73; border-radius: 7px; }
+.pigeon-icon:hover { background: alpha(black, .055); }
+.pigeon-icon:focus-visible { outline: 2px solid #a5a5ad; outline-offset: -2px; }
+.pigeon-project { min-height: 28px; margin: 13px 12px 3px; font-size: 11px; font-weight: 600; color: #7c7c82; }
+.pigeon-project.first { margin-top: 0; }
+.pigeon-count { color: #a1a1a6; font-weight: 400; }
+.pigeon-needs { color: #9a5700; font-size: 10px; font-weight: 400; }
+.pigeon-session { min-height: 30px; border: 1px solid transparent; border-radius: 8px; }
+.pigeon-session:hover { background: alpha(black, .035); }
+.pigeon-session.selected { background: #fff; border-color: alpha(black, .07); box-shadow: 0 1px 2px alpha(black, .055); }
+.pigeon-window:backdrop .pigeon-session.selected { background: #f8f8f9; }
+.pigeon-session-button { padding: 0 0 0 11px; min-height: 28px; border: none; box-shadow: none; background: transparent; border-radius: 8px; color: inherit; }
+.pigeon-session-button:focus-visible { outline: 1px solid #9a9aa2; outline-offset: -2px; }
+.pigeon-session-title { font-size: 13px; font-weight: 400; }
+.pigeon-window.dark .pigeon-session-title { color: #f5f5f7; }
+.pigeon-window.dark headerbar button { color: #a1a1a6; }
+.pigeon-session-title.unread { font-weight: 600; }
+.pigeon-age { font-size: 10px; color: #6e6e73; font-feature-settings: "tnum"; }
+.pigeon-status { color: #3a3a3c; }
+.pigeon-status.quiet { color: #a1a1a6; }
+.pigeon-status.blocked { color: #c98314; }
+.pigeon-status.error { color: #c74646; }
+.pigeon-close { min-width: 18px; min-height: 18px; padding: 0; background: transparent; box-shadow: none; border: none; color: #6e6e73; border-radius: 4px; }
+.pigeon-close:hover { background: alpha(black, .08); }
+.pigeon-card { background: #fff; border: 1px solid #dedee1; border-radius: 10px; box-shadow: 0 2px 8px alpha(black, .045); }
+.pigeon-terminal-header { min-height: 40px; padding: 0 20px 0 20px; border-bottom: 1px solid #ececef; }
+.pigeon-header-title { font-size: 12px; font-weight: 600; }
+.pigeon-header-path, .pigeon-header-state { font-size: 11px; color: #6e6e73; }
+.pigeon-terminal { padding: 18px 20px 14px 28px; }
+.pigeon-records { padding: 14px; background: #fff; border: 1px solid #dedee1; border-radius: 10px; box-shadow: 0 5px 20px alpha(black,.15); }
+.pigeon-records textview, .pigeon-records textview text { background: #fff; color: #1d1d1f; }
+.pigeon-window.dark .pigeon-card, .pigeon-window.dark .pigeon-records { background: #050505; border-color: #3a3a3c; }
+.pigeon-window.dark .pigeon-terminal-header { border-color: #3a3a3c; }
+.pigeon-window.dark .pigeon-session.selected { background: #3a3a3d; border-color: alpha(white,.10); }
+.pigeon-window.dark .pigeon-session:hover { background: alpha(white,.055); }
+.pigeon-window.dark .pigeon-quiet, .pigeon-window.dark .pigeon-age, .pigeon-window.dark .pigeon-header-path, .pigeon-window.dark .pigeon-header-state, .pigeon-window.dark .pigeon-icon { color: #a1a1a6; }
+.pigeon-window.dark .pigeon-project { color: #9e9ea4; }
+.pigeon-window.dark .pigeon-needs { color: #f0b35c; }
+.pigeon-window.dark .pigeon-status { color: #e5e5ea; }
+.pigeon-window.dark .pigeon-status.quiet { color: #8e8e93; }
+.pigeon-window.dark .pigeon-status.blocked { color: #e8a33d; }
+.pigeon-window.dark .pigeon-status.error { color: #ff8272; }
+.pigeon-window.dark .pigeon-records textview, .pigeon-window.dark .pigeon-records textview text { background: #050505; color: #f5f5f7; }

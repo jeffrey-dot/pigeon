@@ -213,3 +213,26 @@ fn row_derivation_sorts_needs_you_and_keeps_distinct_project_paths() {
     assert_eq!(rows::adjacent(&sessions, Some(1), true), Some(3));
     assert_eq!(model.next_needed(&[], None), None);
 }
+
+#[test]
+fn harp_row_keeps_title_age_status_and_hidden_details_separate() {
+    let session = pigeon_core::api::SessionInfo {
+        session_id: 4,
+        title: "session 4".into(),
+        cwd: "/code/launch".into(),
+        panes: vec![4],
+        active_pane: Some(4),
+        active_title: Some("landing-hero <literal>".into()),
+        active_program: Some("agent".into()),
+    };
+    let mut model = SidebarModel::default();
+    model.begin_connection("host", Some("one"), true);
+    model.apply(&report(4, 1, vec![record("a", 1, "done")]));
+    let rows = model.rows(&[session], &HashMap::new(), &HashMap::new());
+    assert_eq!(rows[1].name, "landing-hero <literal>");
+    assert_eq!(rows[1].age, "now");
+    assert!(rows[1].unread);
+    assert_eq!(rows[1].state, Some(State::Done));
+    assert!(rows[1].tooltip.contains("/code/launch"));
+    assert!(!rows[1].name.contains("#4"));
+}

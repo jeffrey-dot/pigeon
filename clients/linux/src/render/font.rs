@@ -127,13 +127,13 @@ pub fn measure(size: f32) -> Option<GridMetrics> {
 /// generic family resolves to Nimbus Mono on a bare Arch install, which is a Courier clone
 /// with 0.6 em ascent and no programming ligatures. `PIGEON_FONT` overrides the list.
 const PREFERRED: &[&str] = &[
+    "DejaVu Sans Mono",
     "JetBrains Mono",
     "JetBrainsMono Nerd Font Mono",
     "Fira Code",
     "Cascadia Code",
     "Source Code Pro",
     "Hack",
-    "DejaVu Sans Mono",
     "Liberation Mono",
     "Noto Sans Mono",
 ];

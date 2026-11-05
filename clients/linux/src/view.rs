@@ -39,6 +39,7 @@ pub struct Workspace {
     presented: HashMap<PaneId, u64>,
     scale: f32,
     renderer: Option<Renderer>,
+    palette: render::Palette,
     /// The size each pane was last told, so a resize storm sends one message per change.
     sized: HashMap<PaneId, (u16, u16)>,
     reported_failure: bool,
@@ -115,6 +116,11 @@ impl Workspace {
             presented: Default::default(),
             scale,
             renderer: None,
+            palette: if crate::theme::dark() {
+                render::Palette::dark()
+            } else {
+                render::Palette::light()
+            },
             sized: HashMap::new(),
             reported_failure: false,
             wheel: Default::default(),
@@ -197,6 +203,7 @@ impl Workspace {
             return;
         }
         if let Some(renderer) = self.renderer.as_mut() {
+            renderer.set_palette(self.palette);
             renderer.set_scale(scale);
         }
         let Some(metrics) = self.renderer.as_ref().map(Renderer::metrics) else {
@@ -231,6 +238,20 @@ impl Workspace {
                 }));
         }
         self.refresh_hover(self.pointer.modifiers);
+    }
+
+    pub fn set_appearance(&mut self, dark: bool) {
+        self.palette = if dark {
+            render::Palette::dark()
+        } else {
+            render::Palette::light()
+        };
+        self.host.send(Message::Appearance {
+            fg: Some(self.palette.foreground),
+            bg: Some(self.palette.background),
+            ansi: self.palette.ansi.to_vec(),
+        });
+        self.area.queue_render();
     }
 
     /// One line per split, in device pixels: without it two panes of the same background

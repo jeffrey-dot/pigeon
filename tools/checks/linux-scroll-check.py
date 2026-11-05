@@ -170,7 +170,7 @@ while True:
         run("xdotool", "windowfocus", "--sync", window)
         settle(0.5)
         key("ctrl+shift+b")
-        run("xdotool", "windowsize", window, "640", "408")
+        run("xdotool", "windowsize", window, "714", "499")
         settle(0.3)
         assert any(line.startswith("C hello delta,scrollback") for line in messages())
         pump(lambda: any(line.startswith("C resize 1 ") for line in messages()))
@@ -178,7 +178,7 @@ while True:
         if os.environ.get("PIGEON_TEST_NO_SCROLLBACK"):
             assert any(line.startswith("S hello delta,") and "scrollback" not in line for line in messages())
             key("shift+Page_Up", "shift+End")
-            run("xdotool", "mousemove", "--window", window, "100", "100", "click", "4")
+            run("xdotool", "mousemove", "--window", window, "110", "180", "click", "4")
             settle()
             assert not any(line.startswith("C scroll") for line in messages())
             assert pane.read_bytes() == b"\x1b[5;2~\x1b[1;2F", pane.read_bytes()
@@ -235,7 +235,7 @@ while True:
         assert "DELTA-AFTER-BOTTOM" in copy()
         print("PASS rapid relative requests with delayed replies; bottom and subsequent delta resume", flush=True)
 
-        run("xdotool", "mousemove", "--window", window, "100", "100", "click", "--repeat", "4", "--delay", "5", "4")
+        run("xdotool", "mousemove", "--window", window, "110", "180", "click", "--repeat", "4", "--delay", "5", "4")
         pump(lambda: offset(12))
         shown()
         key("x")
@@ -250,7 +250,7 @@ while True:
         key("shift+Page_Up")
         pump(lambda: offset(23))
         settle()
-        run("xdotool", "mousemove", "--window", window, "570", "15", "click", "1")
+        run("xdotool", "mousemove", "--window", window, "610", "117", "click", "1")
         pump(lambda: offset(0))
         print("PASS Return to live button", flush=True)
         key("shift+Page_Up")
@@ -267,7 +267,7 @@ while True:
         print("PASS IME preedit returns live without bytes and commits 你好 once", flush=True)
 
         key("shift+Page_Up")
-        run("xdotool", "windowsize", window, "720", "450")
+        run("xdotool", "windowsize", window, "770", "556")
         pump(lambda: offset(0))
         settle(0.4)
         command("RESIZED-LIVE\r\n")
@@ -304,11 +304,11 @@ while True:
         key("shift+Page_Up")
         pump(lambda: offset(pane=2))
         other_history = copy()
-        run("xdotool", "mousemove", "--window", window, "40", "80", "click", "1")
+        run("xdotool", "mousemove", "--window", window, "60", "170", "click", "1")
         key("q")
         assert other.read_bytes() == b""
         assert pane.read_bytes().endswith(b"q")
-        run("xdotool", "mousemove", "--window", window, "680", "80", "click", "1")
+        run("xdotool", "mousemove", "--window", window, "710", "170", "click", "1")
         assert copy() == other_history
         key("ctrl+shift+z")
         pump(lambda: offset(0, pane=2))

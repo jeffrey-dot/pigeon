@@ -8,6 +8,12 @@ pub struct SidebarRow {
     pub session: Option<u32>,
     pub text: String,
     pub tooltip: String,
+    pub name: String,
+    pub age: String,
+    pub state: Option<pigeon_core::api::StatusState>,
+    pub unread: bool,
+    pub count: usize,
+    pub needs: usize,
 }
 
 impl SidebarModel {
@@ -30,6 +36,8 @@ impl SidebarModel {
                 .push(session);
         }
         let mut rows = Vec::new();
+        let mut groups: Vec<_> = groups.into_iter().collect();
+        groups.sort_by_key(|(_, (_, sessions))| sessions.iter().map(|s| s.session_id).min());
         for (path, (name, mut sessions)) in groups {
             sessions.sort_by_key(|s| {
                 (
@@ -49,6 +57,12 @@ impl SidebarModel {
                     if needs == 1 { "needs you" } else { "need you" }
                 ),
                 tooltip: path,
+                name: name.clone(),
+                age: String::new(),
+                state: None,
+                unread: false,
+                count: sessions.len(),
+                needs,
             });
             for session in sessions {
                 let summary = self.summary(&session.panes);
@@ -66,7 +80,7 @@ impl SidebarModel {
                     .map(|(source, clients)| format!(" · {clients}× {source}"))
                     .unwrap_or_default();
                 let title = session
-                    .active_program
+                    .active_title
                     .as_deref()
                     .filter(|s| !s.is_empty())
                     .unwrap_or(&session.title);
@@ -77,6 +91,12 @@ impl SidebarModel {
                         session.session_id
                     ),
                     tooltip: format!("{}\n{state}{unread}{size}", session.cwd),
+                    name: title.to_owned(),
+                    age,
+                    state: summary.state,
+                    unread: summary.unread > 0,
+                    count: 0,
+                    needs: 0,
                 });
             }
         }
@@ -111,7 +131,7 @@ pub fn adjacent(sessions: &[SessionInfo], selected: Option<u32>, previous: bool)
     Some(sessions[next].session_id)
 }
 
-fn age(ms: u64) -> String {
+pub fn age(ms: u64) -> String {
     let minutes = ms / 60_000;
     match minutes {
         0 => "now".into(),
