@@ -171,7 +171,7 @@ extension AppDelegate {
     func closeSearch(focus: Bool = true) {
         guard let model = searchModel else { return }
         clearSearchHighlight()
-        container.paneView(model.context.pane)?.searchFrozen = false
+        // Keep the old picture protected until the requested live snapshot is applied.
         searchModel = nil
         searchDebounce = UUID()
         searchBar.isHidden = true

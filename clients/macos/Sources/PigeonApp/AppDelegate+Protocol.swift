@@ -70,6 +70,7 @@ extension AppDelegate {
             // Background hosts keep their rows and status; only the visible one draws.
             guard visible else { break }
             if container.applySnapshot(snapshot) {
+                if Wire.u32(message, "offset") == 0 { container.paneView(pane)?.searchFrozen = false }
                 haveSnapshot.insert(pane)
                 connection.receivedScreen.insert(pane)
                 requested.remove(pane)
@@ -248,6 +249,7 @@ extension AppDelegate {
             guard let snapshot = pg_msg_snapshot(decoded) else { continue }
             defer { pg_snapshot_free(snapshot) }
             if container.applySnapshot(snapshot) {
+                if Wire.u32(decoded, "offset") == 0 { container.paneView(pane)?.searchFrozen = false }
                 haveSnapshot.insert(pane)
                 connection.receivedScreen.insert(pane)
                 requested.remove(pane)

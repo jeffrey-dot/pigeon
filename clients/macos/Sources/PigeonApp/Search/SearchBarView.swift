@@ -1,7 +1,7 @@
 import AppKit
 
 /// A plain text field keeps search keystrokes out of the terminal's input path.
-final class SearchBarView: NSView, NSTextFieldDelegate {
+final class SearchBarView: NSView, NSSearchFieldDelegate {
     let field = NSSearchField()
     private let caseOption = NSButton(checkboxWithTitle: "Match ASCII Case", target: nil, action: nil)
     private let status = NSTextField(labelWithString: "")
@@ -61,7 +61,7 @@ final class SearchBarView: NSView, NSTextFieldDelegate {
         status.toolTip = model.summary
         previous.isEnabled = !model.hits.isEmpty
         next.isEnabled = !model.hits.isEmpty
-        stop.isEnabled = model.scanning
+        stop.isEnabled = model.canCancel
     }
     func unavailable() {
         status.stringValue = "This host does not support search with location"

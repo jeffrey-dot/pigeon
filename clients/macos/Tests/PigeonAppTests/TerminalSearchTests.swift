@@ -38,6 +38,20 @@ final class TerminalSearchTests: XCTestCase {
         XCTAssertFalse(model.scanning)
     }
 
+    func testStopRemainsAvailableForLocationAfterLastPage() {
+        var model = TerminalSearch(context: context)
+        model.begin(pattern: "hello", caseSensitive: true)
+        model.requestPage(id: 1)
+        XCTAssertTrue(model.receivePage(id: 1, context: context, generation: 4, hits: [hit], next: nil))
+        XCTAssertFalse(model.canCancel)
+        XCTAssertEqual(model.select(step: 1), hit)
+        model.requestLocation(id: 2)
+        XCTAssertTrue(model.canCancel)
+        model.cancel()
+        XCTAssertFalse(model.canCancel)
+        XCTAssertFalse(model.receiveLocation(id: 2, context: context, generation: 4, range: hit))
+    }
+
     func testStalePagesDiscardCoordinatesAndErrorsIgnoreOldRequests() {
         var model = TerminalSearch(context: context)
         model.begin(pattern: "hello", caseSensitive: true)

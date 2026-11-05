@@ -54,4 +54,14 @@ final class PaneMouseTests: XCTestCase {
         XCTAssertFalse(view.wheelOnAlternateScreen(wheel(), lines: 3))
         XCTAssertTrue(sent().isEmpty)
     }
+
+    func testFrozenSearchPictureCannotReportMouseWhileLiveReplyIsPending() {
+        let (view, sent) = altPane(modes: TerminalModes.mouseClick | TerminalModes.mouseSGR)
+        view.searchFrozen = true
+        XCTAssertFalse(view.reportsMouse(wheel()))
+        view.rightMouseDown(with: wheel())
+        XCTAssertTrue(sent().isEmpty)
+        view.searchFrozen = false
+        XCTAssertTrue(view.reportsMouse(wheel()))
+    }
 }

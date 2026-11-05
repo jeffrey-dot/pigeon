@@ -53,6 +53,7 @@ struct TerminalSearch {
     private(set) var locationRequest: UInt32?
     private(set) var frozen = false
     static let maxHits = 10_000
+    var canCancel: Bool { scanning || pageRequest != nil || locationRequest != nil }
 
     mutating func begin(pattern: String, caseSensitive: Bool) {
         self.pattern = pattern
