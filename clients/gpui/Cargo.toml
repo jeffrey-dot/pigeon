@@ -1,0 +1,51 @@
+# pigeon for GPUI: a single cross-platform client (macOS + Linux + Windows) built on Zed's
+# GPU-accelerated UI framework. Workspace member, but NOT in the root `default-members`:
+# `cargo build`/`cargo test` at the root stay core-only (AGENTS.md §2). Build with
+# `-p pigeon-gpui`.
+#
+# LICENSE NOTE (AGENTS.md §9): this crate is GPL-3.0-or-later like the rest of pigeon.
+# GPUI itself is Apache-2.0. Apache-2.0 -> GPLv3 is a one-way-compatible combination
+# (FSF-recognised): Apache-2.0 code may be linked into a GPLv3 work distributed under GPLv3.
+# We rely only on that direction. See docs/adr/0012-gpui-client.md.
+[package]
+name = "pigeon-gpui"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.92"
+license = "GPL-3.0-or-later"
+description = "pigeon GPUI client: one GPU-rendered UI across macOS, Linux and Windows"
+publish = false
+
+[[bin]]
+name = "pigeon-gpui"
+path = "src/main.rs"
+
+[dependencies]
+# Clients only ever see `api`; the internal modules stay out of reach (AGENTS.md §3).
+pigeon-core = { path = "../../core", default-features = false }
+
+# Bounded socket pumps, shared verbatim with the Linux client's transport (platform-agnostic
+# std + async-channel; no UI toolkit). Keep the version in sync with clients/linux.
+async-channel = "2"
+
+# GPUI is not published to crates.io by its authors; the canonical way to consume it is a
+# git dependency on the Zed monorepo. Current GPUI is split into `gpui` (the framework) and
+# `gpui_platform` (windowing + text backends). On macOS glyph rasterisation needs `font-kit`;
+# on Linux/FreeBSD enable `wayland` + `x11`. The feature set below is the cross-platform
+# default from GPUI's README.
+#
+# Pinned to a real Zed commit SHA for a reproducible build (AGENTS.md §9: no open ranges).
+# Update the rev deliberately and re-verify. This rev contains the gpui/gpui_platform split.
+gpui = { git = "https://github.com/zed-industries/zed", rev = "654efae4", package = "gpui" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "654efae4", package = "gpui_platform", features = [
+    "font-kit",
+    "wayland",
+    "x11",
+] }
+
+[lints.rust]
+# GPUI's API is safe; no FFI lives here. Keep the crate `unsafe`-free like the Linux client.
+unsafe_code = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
