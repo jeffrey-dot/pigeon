@@ -18,7 +18,7 @@
 | Linux 输入 | GtkIMMulticontext、候选窗定位、中文 commit；异步粘贴经宿主括号包装；复制焦点 pane 当前屏幕 |
 | Linux 回看 | scrollback 协商、滚轮与快捷键回看、位置条；输入/IME/粘贴/尺寸变化回实时屏并恢复 delta；15s ping 保活 |
 | 侧栏状态 | pane 最新状态聚合；事件身份按 host/instance/pane/seq/record 持久化；重播去重，ack 核验来源；完整集合显式确认要求具体记录选中、当前连接屏幕与前台可见性；旧宿主保留单条自动确认 |
-| 宿主完整状态 | `status_snapshot` 能力与独立 revision，原子替换未确认集合；ack/clear/退出立即广播，两种客户端接口提供 owned 读取；macOS 已接入逐条查看/显式确认，Linux 侧栏待接 |
+| 宿主完整状态 | `status_snapshot` 能力与独立 revision，原子替换未确认集合；ack/clear/退出立即广播，两种客户端接口提供 owned 读取；macOS 已接入逐条查看/显式确认，Linux 本地侧栏与逐条显式确认已接 |
 | 连接恢复 | generation 隔离旧回调；重连清空 pending 快照，缓存报告/旧屏幕不能确认新记录；status seq 不充当流修订号，接受宿主合法低 seq 回退 |
 
 专题实现与测试见 [文本资源说明](text-followup.md)、[文本预算与字体回收](text-budget-progress.md)、[Linux 输入记录](linux-input-progress.md)、[状态持久化说明](status-persistence-progress.md)、[Linux 回看记录](linux-scroll-progress.md)。
@@ -59,7 +59,11 @@ Apple Silicon 的最终提交尚未完成验收；不能用 Intel 结果代替�
 ## 尚未完成的验收与能力
 
 1. 最终提交的 Apple Silicon 验证；真实 macOS 窗口激活、遮挡、回看、zoom、跨主机与 GPU 呈现/SSH 恢复验收。
-2. Linux 侧栏接入完整集合与修订号，身份集合有界存储、多进程同时写 JSON 的一致性；宿主与双外形接口已经实现。
+2. Linux 跨重启 seen/偏好持久化，身份集合有界存储、多进程同时写 JSON 的一致性；两端完整集合与逐条确认已接。
 3. 密集整屏文本的 8 MiB 上限处理、整帧编码/引擎内部附加码点预算、跨 cell ZWJ 字素宽度及宽字符折行占位。
-4. Linux 拖选/侧栏/SSH 管理与渲染脏行；真实 Wayland、IBus、日文 IME、非美式键盘和混合 DPI 验收。
+4. Linux 拖选/SSH 管理与渲染脏行；真实 Wayland、IBus、日文 IME、非美式键盘和混合 DPI 验收。
 5. 性能、弱网、功耗、长时间负载、完整 VT 属性/fuzz 覆盖及签名发布。
+
+Linux 侧栏整合复审：两轴发现后台未发现 pane 状态误清、legacy 身份替换/容量、纯派生归属及会话/呈现时序缺口。父线程修复后 GTK 64 passed / 2 ignored；多会话、输入法和延迟回看独立桌面脚本通过。宿主控制消息顺序测试要求保持全部中间布局，内部订阅截止序号同时保留该保证。核心完整 315 passed / 2 ignored，GTK 64 passed / 2 ignored，GL 资源独立检查通过；整合 CI 待验。
+
+`607759e`、`b1e4925` 的 Rust 双平台、GTK、header、docs 已通过；Swift 应用构建通过，但测试夹具缺少新 ABI 的 link_count/links 导致 swift test 编译失败，已补齐，等待新 CI。

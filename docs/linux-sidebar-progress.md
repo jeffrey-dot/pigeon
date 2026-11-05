@@ -1,8 +1,8 @@
 # Linux 本地多会话与状态侧栏
 
 核对日期：2026-11-05。基线 `99f420c9ed82c9519bd4e64a4dcee2ae6b63cd67`。
-本片仅修改 Linux 客户端、独立验收脚本及本专题/平台 README；不修改核心协议、macOS 或字体/GL 实现。
-集中能力清单由父线程整合到 [plan.md](plan.md)；本片不表示 [优化计划](optimization-plan.md) S5 已全部完成。
+当前实现包括 Linux 客户端、独立验收脚本以及宿主内部布局事件订阅代次；wire 字段不变。
+集中能力清单见 [plan.md](plan.md)；本片不表示 [优化计划](optimization-plan.md) S5 已全部完成。
 
 ## 当前行为
 
@@ -23,8 +23,10 @@
 选中 pane 的 snapshot 即使先于 layout 到达也缓存；布局尚未建立时不绘制或接受输入。
 
 宿主只跟一份 session.layout；因此每次切换（包括切回已有缓存）重新 attach 所选会话，再 attach 它的布局叶子。
-当前连接每次选择带独立 generation，并在 attach 前发送有序 ping 屏障：旧选择屏幕/布局不会重新启用输入。
-切换重置旧 scroll 请求计数并请求 live，避免被屏障丢掉的旧答复让回看永久 pending。
+每次选择带独立 generation，清除目标会话缓存画面与 scroll 计数，重新请求 live。
+ping 只隔离此前已排队的连接答复，不是宿主广播事件屏障。宿主内部布局/尺寸事件带单调序号，
+切换布局订阅时在 sessions 锁内记下截止序号；旧事件即使延迟到达也被忽略，当前订阅的控制事件仍逐条有序发送。
+只有实际替换屏幕的 snapshot 才建立本次选择的 received 凭据；忽略的回看答复不能认证旧画面。
 后台 delta 缺序不触发 attach，避免夺回宿主布局订阅；下次选中时用新 snapshot 恢复。
 
 后台状态观察仅用 `status_all`。协议没有 detach，已访问 pane 仍保留订阅/尺寸票直到连接结束；只向当前布局 resize。
@@ -37,11 +39,11 @@ hello 请求 `status_all` 和 `status_snapshot`；只有确认完整集合能力
 完整记录通过安全 `status_snapshot_of` 读取，不复制 OSC/VT/CBOR 实现。每 pane 用 revision 比较完整集合，
 同连接旧/重复 revision 忽略，新连接清除基准，host/instance 由连接上下文绑定；record seq 仅作为 ack 身份。
 删除、空集合、同 id 更新撤下旧记录，不生成 ack 或已读证明。seen 仅保存仍在当前集合的显式确认身份，
-没有跨重启磁盘持久化。旧宿主不能提供完整删除语义；最多保留每 pane 256 条收到的终态/当前报告，不自动确认。
+没有跨重启磁盘持久化。旧宿主不能提供完整删除语义；保留收到的不同 id 未确认终态，同 id 新报告替换旧身份，已确认记录可回收；不按条数静默丢弃其它未读，不自动确认。legacy 长期累积的资源预算仍待补。
 
 Status Records 内选择具体记录显示完整 app/kind/msg 纯文本，长文本可滚动。选择只聚焦来源 pane、必要时取消 zoom；
 不会自动退出回看。按钮仅允许 still-current 的 done/error，要求当前选择、连接、布局、已绘制屏幕、非回看、
-非隐藏 pane、窗口前台且未最小化。点击时重新核验；同 id 新 seq、clear、换会话（即使 A→B→A）、断线都使旧目标失效。
+非隐藏 pane、窗口前台且未最小化。每次实际 snapshot/delta 更新递增客户端画面版本；绘制只认证该版本，返回 live 后下一次 draw 前仍不可确认。点击时重新核验；同 id 新 seq、clear、换会话（即使 A→B→A）、断线都使旧目标失效。
 已退出 pane 仍能复制/回看/关闭和确认终态，但不能输入。
 
 ## 验证方式与范围
@@ -77,5 +79,9 @@ X display、D-Bus 和真实宿主；侧栏检查另建独立 accessibility bus�
   相对时间取状态快照采样值；无新的宿主状态时不独立计时。窄行截断，tooltip 和逐条记录保留全文。
 - GTK draw 调用完成作为本连接屏幕可见证据，未取得显示器扫描输出回执；未覆盖 compositor 遮挡等真实桌面全部行为。
   Wayland、IBus/日文 IME、非美式键盘、真实触控板、混合 DPI、硬件 GL 和打包发布未验。
-- 未在本片执行 macOS Swift/AppKit、Ubuntu 托管 CI、SSH GUI 或核心全量回归；核心/VT 未改动。
+- 完整 macOS/Ubuntu 整合 CI 与 SSH GUI 验收单独记录；本机核心与 Linux 回归见 [执行记录](optimization-progress.md)。
 - 非上报程序仍为未监控；不推测前台 agent 生命周期，不解析屏幕/标题推断任务。
+
+主线程复审修复（2026-11-05）：旧布局/尺寸事件按订阅截止序号过滤；绘制凭据绑定画面版本；忽略的 scroll 答复不认证；仅清理可证明删除的 pane，保留先于 sessions 到达的后台状态；legacy 同 id 替换撤销旧确认，保留其它未读。分组、排序、计数、文案及键盘跳转派生集中到纯 `sidebar/rows.rs`，GTK 只做目录探测和绘制。
+
+整合实测：核心完整 315 passed / 2 ignored，GTK 64 passed / 2 ignored；fmt、core/GTK clippy 通过。最终宿主事件过滤版本再次通过真实多会话脚本与 GL 资源检查；本机输入与回看脚本通过，截图检查侧栏、记录区及分屏可见。CI 结果见集中执行记录，未把本机 Xvfb 当作 Wayland/硬件桌面验收。

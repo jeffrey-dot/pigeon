@@ -49,7 +49,7 @@ cargo test -p pigeon-linux                   # 纯逻辑单测（会话路由 / 
 **Status Records…** 可逐条查看 pane、id、state、app、kind、完整纯文本 msg；选择记录会聚焦来源 pane并解除隐藏它的 zoom，
 不会自动退出回看。仅 done/error 可点 **Mark This Record as Read**；确认要求当前连接屏幕已绘制、目标 pane 可见且实时、窗口前台。
 后台/隐藏/回看不确认，working/blocked/idle 不 ack。切会话、断线、记录被替换/clear 后旧确认目标失效。
-旧宿主仅显示实际发来的单条报告，保留已收到的旧终态；每 pane 最多保存 256 条，不保证发现旧宿主未发送的记录。
+旧宿主仅显示实际发来的单条报告，保留已收到的旧终态；同 id 新报告撤销旧身份，已确认记录可回收；不保证发现旧宿主未发送的记录，长期未确认集合的资源预算待补。
 无跨客户端重启 seen 持久化、无 SSH、无自动断线恢复。详见 [侧栏验证记录](../../docs/linux-sidebar-progress.md)。
 
 **未做**：SSH 连接管理、自动断线恢复、拖动分隔线改比例、拖选/选择复制、

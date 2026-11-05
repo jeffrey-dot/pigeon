@@ -4,16 +4,16 @@
 > 另一条同源的边界是 C ABI（`include/pigeon_core.h`，由 `core/src/ffi/mod.rs` 生成），
 > 用于“把内核编进客户端”的嵌入模式；两者共用同一份内核，字段语义必须一致（见 §9）。
 
-## 0. 实现覆盖（2026-11-04 核对）
+## 0. 实现覆盖（2026-11-05 核对）
 
 本文保留字段契约；定义了字段不等于所有路径已实现。当前差异如下：
 
-- 宿主提供 `delta`、`scrollback`、`osc7501`、`status_all`、`status_snapshot`、`text_query`；macOS 请求 `delta`、`scrollback`、`status_all`、`status_snapshot`，Linux 请求 `delta`、`scrollback`，首帧快照之后应用连续增量，回看由宿主 `scroll` 切片。
+- 宿主提供 `delta`、`scrollback`、`osc7501`、`status_all`、`status_snapshot`、`text_query`；macOS 请求 `delta`、`scrollback`、`status_all`、`status_snapshot`，Linux 请求 `delta`、`scrollback`、`status_all`、`status_snapshot`，首帧快照之后应用连续增量，回看由宿主 `scroll` 切片。
 - `zstd` 是预留能力，宿主不提供，当前 payload 为裸 CBOR，无压缩 tag。
 - `snapshot`/`delta` 已下发 OSC 8 链接，含历史、回看与续传；每帧独立解析为格子拥有的 URI，macOS 可 Cmd+click，Linux 点击待接。设计/限制见 [OSC 8](osc8.md)。基础 cell 仍为单码点，附加码点通过 `text` 稀疏表传递。
 - `new_session.env` 能编解码，但宿主尚未应用；结构化 `mouse` 能编解码但宿主返回 `unsupported`。
   macOS 将鼠标按当前 VT 模式编码成 `keys.bytes`，不是发送 `mouse`。
-- `status_snapshot` 已实现完整未确认记录集合与独立修订号；macOS 已请求该能力，并通过 C ABI 读取；Linux 侧栏尚未接入。
+- `status_snapshot` 已实现完整未确认记录集合与独立修订号；macOS 已请求该能力，并通过 C ABI 读取；Linux 已通过安全 API 接入本地侧栏和逐条显式确认。
 - `status_all` 通过独立 `status` 帧补发状态，协商 `status_snapshot` 后改用完整集合；`sessions` 本身不包含状态记录。未协商 `status_all` 的连接仍接收已 attach pane 的状态，不能靠未请求 `osc7501` 推断不会收到 `status`。
 - 心跳当前由 macOS 客户端实现：15s 未收到宿主消息后 ping，45s 无消息重连；宿主响应 pong。
   Linux 握手后每 15s ping 保活，尚无 pong 超时检测和自动恢复。
@@ -33,7 +33,7 @@
 | 帧 | `u32` 小端长度 `L` + 恰好 `L` 字节 payload。`L` **不含自身**；payload 为单个 CBOR map。不用换行分隔 |
 | 上限 | 单帧 ≤ 8 MiB（8388608）。超限即断开并回 `error{code:"frame_too_large"}`，payload 不进解析器 |
 | 半包 | 读端必须能处理“长度够但 payload 不足”的中间态，累积到 `L` 字节再解 |
-| 心跳 | macOS 客户端 15s 无入站帧时发 `ping`，45s 无入站帧视为断线；宿主回 `pong`；Linux 待接 |
+| 心跳 | macOS 客户端 15s 无入站帧时发 `ping`，45s 无入站帧视为断线；宿主回 `pong`；Linux 每 15s ping，超时恢复待接 |
 | 版本 | 握手期协商；**大版本不同即拒绝**，小版本向下兼容 |
 | 压缩 | 只有双方 `features` 都含 `zstd` 时启用。启用后 payload 首字节是 tag：`0x00` = 原文，`0x01` = 其后为 zstd 帧。tag 计入 `L` |
 

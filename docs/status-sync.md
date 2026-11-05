@@ -1,7 +1,7 @@
 # 同 pane 多记录状态同步
 
 实现核对日期：2026-11-05；基线 `cc51ce22aec38519ef038b6ac7f2d8791c36ccc2`。
-本片覆盖内核、宿主和双外形客户端接口；macOS 集合消费与逐条确认见 [客户端说明](status-client.md)，Linux 侧栏尚未接入。
+本片覆盖内核、宿主和双外形客户端接口；macOS 集合消费与逐条确认见 [客户端说明](status-client.md)，Linux 已接本地多会话与逐条确认，见 [Linux 侧栏](linux-sidebar-progress.md)。
 
 ## 设计
 
@@ -84,7 +84,7 @@ ack、PTY 输出和直接子进程退出都调用同一广播入口。握手、a
 
 ## 当前限制
 
-- macOS 已协商新能力并提供 Status Records 面板；每连接按 revision 替换集合，仅显式确认具体终态，保留旧宿主 fallback。Linux 侧栏尚未接入。
+- macOS 已协商新能力并提供 Status Records 面板；每连接按 revision 替换集合，仅显式确认具体终态，保留旧宿主 fallback。Linux 已接本地多会话与逐条确认，见 [Linux 侧栏](linux-sidebar-progress.md)。
   UI 验收范围见 [客户端说明](status-client.md)，集中进度见 [当前缺口](plan.md)。
 - 这是宿主内存中的当前集合，不是历史事件日志或磁盘恢复。相同 id 的新报告替换旧报告；显式 clear 删除未读也生效。
   没有删除原因字段，不能从缺失推断本地用户查看；ack 属于宿主共享集合，多个客户端共同观察其结果。

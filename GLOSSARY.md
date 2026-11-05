@@ -61,7 +61,7 @@
 | **确认** ack | 用户已看过该记录，可以被淘汰（`ack_status`）。对 `working`/`blocked` 无效 | read、clear |
 | **清除** clear | OSC 7501 的 `clear` 指令：删除一棵子树。与 ack 是两条路 | ack、reset |
 | **未监控** unmonitored | 没有任何 OSC 7501 记录时的显示：侧栏该 pane 不给状态 | unknown、idle |
-| **聚合** aggregate | 按 `blocked > error > done > working > idle` 合并各 pane 最新状态并保留来源 pane，再派生项目计数；macOS 从同 pane 完整集合按记录派生，Linux 侧栏待接 | rollup、summarize |
+| **聚合** aggregate | 按 `blocked > error > done > working > idle` 合并各 pane 最新状态并保留来源 pane，再派生项目计数；macOS 从同 pane 完整集合按记录派生，Linux 侧栏已接完整集合 | rollup、summarize |
 
 ## 4. 宿主与协议
 
